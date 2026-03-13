@@ -6,33 +6,34 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 ## Architecture
 7 modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features).
 
-## Phase 1: Project Cleanup & Foundation ✅ IN PROGRESS
+## Phase 1: Project Cleanup & Foundation ✅ DONE
 - [x] Plan created
-- [ ] Delete template Variant code and Content
-- [ ] Update .uproject, Target.cs, Build.cs files
-- [ ] Create WowUnreal game classes (GameInstance, GameMode, FlyCamera, PlayerController)
-- [ ] Create all 7 module directories with Build.cs and module registration
-- [ ] Integrate StormLib (ThirdParty) for MPQ reading
-- [ ] Implement MpqManager (archive chain, file reading)
-- [ ] Download Lua 5.1.5 source for WowUI module
-- [ ] Implement BLP parser (DXT passthrough, paletted)
-- [ ] Implement DBC parser (generic record/field access)
-- [ ] Implement coordinate conversion utilities
-- [ ] Create type headers for ADT, WDT, M2, WMO with stub parsers
+- [x] Delete template Variant code and Content
+- [x] Update .uproject, Target.cs, Build.cs files
+- [x] Create WowUnreal game classes (GameInstance, GameMode, FlyCamera, PlayerController)
+- [x] Create all 7 module directories with Build.cs and module registration
+- [x] Integrate StormLib (ThirdParty) for MPQ reading
+- [x] Implement MpqManager (archive chain, file reading)
+- [x] Download Lua 5.1.5 source for WowUI module
+- [x] Implement BLP parser (DXT passthrough, paletted)
+- [x] Implement DBC parser (generic record/field access)
+- [x] Implement coordinate conversion utilities
+- [x] Create type headers for ADT, WDT, M2, WMO with stub parsers
 
-## Phase 2: Format Parsers
-- [ ] ADT parser (MHDR, MCIN, MCNK chunks, heights, normals, layers, alpha maps, doodad/WMO refs)
-- [ ] WDT parser (tile existence grid, MPHD flags)
-- [ ] M2 parser (vertices, indices from .skin, textures, render passes, bones)
-- [ ] WMO parser (root: materials, doodad sets, portals; groups: geometry, batches)
+## Phase 2: Format Parsers ✅ DONE
+- [x] ADT parser (MHDR, MCIN, MCNK chunks, heights, normals, layers, alpha maps, doodad/WMO refs)
+- [x] WDT parser (tile existence grid, MPHD flags)
+- [x] M2 parser (vertices, indices from .skin, textures, render passes, bones)
+- [x] WMO parser (root: materials, doodad sets, portals; groups: geometry, batches)
 - [ ] DBC table loading (Map, AreaTable, Light, LightParams)
 
-## Phase 3: Terrain Rendering
-- [ ] BLP → UTexture2D factory (DXT passthrough to GPU)
+## Phase 3: Terrain Rendering ✅ DONE
+- [x] BLP → UTexture2D factory (DXT passthrough to GPU)
 - [ ] Master terrain splat material (4 layers + 3 alpha maps)
-- [ ] Terrain mesh builder (145-vertex chunks → FMeshDescription → UStaticMesh)
-- [ ] TerrainTile actor (256 chunk meshes + materials)
-- [ ] Single tile test rendering
+- [x] Terrain mesh builder (145-vertex chunks → ProceduralMesh)
+- [x] TerrainTile actor (256 chunk meshes + materials)
+- [x] World manager with WDT loading and tile streaming
+- [ ] Single tile test rendering (needs UE editor verification)
 
 ## Phase 4: World Streaming
 - [ ] Camera-based tile streaming (load/unload with hysteresis)

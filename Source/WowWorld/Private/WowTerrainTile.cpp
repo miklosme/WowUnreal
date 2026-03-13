@@ -1,7 +1,10 @@
 #include "WowTerrainTile.h"
 #include "WowTerrainMeshBuilder.h"
+#include "WowTerrainMaterial.h"
 #include "Formats/AdtTypes.h"
 #include "Coord/WowCoordinate.h"
+#include "WowDoodadManager.h"
+#include "WowWmoRenderer.h"
 
 AWowTerrainTile::AWowTerrainTile()
 {
@@ -32,7 +35,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     UE_LOG(LogTemp, Log, TEXT("Tile %d,%d: %d textures, %d doodads, %d WMOs"),
         TX, TY, Data.TexturePaths.Num(), Data.DoodadPlacements.Num(), Data.WmoPlacements.Num());
 
-    UMaterialInterface* TerrainMat = GetDefaultTerrainMaterial();
+    UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
     // Build mesh for each of the 256 chunks (16x16 grid)
     int32 ChunksBuilt = 0;
@@ -92,9 +95,17 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
             true                     // Create collision
         );
 
-        if (TerrainMat)
+        // Try to create a textured material from BLP data; fall back to default
+        UMaterialInstanceDynamic* ChunkMaterial = FWowTerrainMaterial::CreateChunkMaterial(
+            Chunk, Data, Mpq, Cache, this);
+
+        if (ChunkMaterial)
         {
-            MeshComp->SetMaterial(0, TerrainMat);
+            MeshComp->SetMaterial(0, ChunkMaterial);
+        }
+        else if (DefaultMat)
+        {
+            MeshComp->SetMaterial(0, DefaultMat);
         }
 
         MeshComp->SetCastShadow(true);
@@ -104,4 +115,33 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     }
 
     UE_LOG(LogTemp, Log, TEXT("Tile %d,%d: built %d chunk meshes"), TX, TY, ChunksBuilt);
+
+    // Spawn doodads (M2 models)
+    if (Data.DoodadPlacements.Num() > 0 && Data.DoodadPaths.Num() > 0)
+    {
+        FWowDoodadManager::SpawnDoodads(this, Data.DoodadPlacements, Data.DoodadPaths, Mpq, Cache);
+    }
+
+    // Spawn WMOs (buildings/structures)
+    int32 WmosSpawned = 0;
+    for (const FAdtWmoPlacement& WmoPlacement : Data.WmoPlacements)
+    {
+        if (WmoPlacement.NameIndex >= 0 && WmoPlacement.NameIndex < Data.WmoPaths.Num())
+        {
+            const FString& WmoPath = Data.WmoPaths[WmoPlacement.NameIndex];
+            if (!WmoPath.IsEmpty())
+            {
+                AActor* WmoActor = FWowWmoRenderer::SpawnWmo(GetWorld(), WmoPath, WmoPlacement, Mpq, Cache);
+                if (WmoActor)
+                {
+                    WmoActor->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
+                    ++WmosSpawned;
+                }
+            }
+        }
+    }
+    if (WmosSpawned > 0)
+    {
+        UE_LOG(LogTemp, Log, TEXT("Tile %d,%d: spawned %d WMOs"), TX, TY, WmosSpawned);
+    }
 }
