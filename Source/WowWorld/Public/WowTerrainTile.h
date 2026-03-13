@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "ProceduralMeshComponent.h"
 #include "WowTerrainTile.generated.h"
 
 struct FAdtData;
@@ -18,5 +19,11 @@ public:
 private:
     UPROPERTY()
     TObjectPtr<USceneComponent> RootScene;
+
+    UPROPERTY()
+    TArray<TObjectPtr<UProceduralMeshComponent>> ChunkMeshes;
+
     FIntPoint TileCoord;
+
+    UMaterialInterface* GetDefaultTerrainMaterial() const;
 };

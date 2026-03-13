@@ -5,6 +5,8 @@
 
 class FMpqManager;
 class FWowAssetCache;
+class AWowTerrainTile;
+struct FWdtData;
 
 UCLASS()
 class WOWWORLD_API AWowWorldManager : public AActor
@@ -27,7 +29,30 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 UnloadRadius = 4;
+
+    /** Initial tile to load for testing (Elwynn Forest area) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Debug")
+    int32 DebugTileX = 32;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Debug")
+    int32 DebugTileY = 48;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Debug")
+    bool bStreamingEnabled = false;
+
 private:
     TUniquePtr<FMpqManager> MpqManager;
     TUniquePtr<FWowAssetCache> AssetCache;
+    TUniquePtr<FWdtData> WdtData;
+
+    UPROPERTY()
+    TMap<int64, TObjectPtr<AWowTerrainTile>> LoadedTiles;
+
+    FIntPoint LastCameraTile = FIntPoint(-9999, -9999);
+
+    void LoadTile(int32 TX, int32 TY);
+    void UnloadTile(int32 TX, int32 TY);
+    void UpdateStreaming();
+    bool IsTileLoaded(int32 TX, int32 TY) const;
+    static int64 TileKey(int32 TX, int32 TY) { return ((int64)TX << 32) | (int64)(uint32)TY; }
 };

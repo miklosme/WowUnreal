@@ -13,6 +13,10 @@ struct WOWDATA_API FAdtChunkData
     uint32 AreaId = 0;
     uint16 Holes = 0;
     bool bHasVertexColors = false;
+    /** MCNK header world position (WoW coordinates) */
+    float WorldX = 0.0f;
+    float WorldY = 0.0f;
+    float WorldZ = 0.0f;
 };
 
 struct WOWDATA_API FAdtDoodadPlacement

@@ -345,6 +345,9 @@ namespace
         Chunk.IndexY = static_cast<int32>(Iy);
         Chunk.AreaId = AreaId;
         Chunk.Holes  = HolesLow;
+        Chunk.WorldX = XPos;
+        Chunk.WorldY = YPos;
+        Chunk.WorldZ = ZPos;
 
         const bool bDoNotFixAlpha = (Flags & MCNK_FLAG_DO_NOT_FIX_ALPHA) != 0;
 
