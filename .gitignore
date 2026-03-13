@@ -1,0 +1,63 @@
+# Unreal Engine .gitignore
+
+# Build artifacts
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+
+# Xcode workspace
+*.xcworkspace/
+
+# Visual Studio files
+*.vs/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Crashlytics
+crashlytics-build.properties
+
+# Cache files
+*.VC.db
+*.VC.opendb
+
+# Ignore IDE project files that get auto-generated
+.idea/
+.vscode/
+*.code-workspace
