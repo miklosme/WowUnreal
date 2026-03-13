@@ -1,35 +1,19 @@
 {
-	"FileVersion": 3,
-	"EngineAssociation": "5.7",
-	"Category": "",
-	"Description": "",
-	"Modules": [
-		{
-			"Name": "WowUnreal",
-			"Type": "Runtime",
-			"LoadingPhase": "Default",
-			"AdditionalDependencies": [
-				"Engine",
-				"AIModule",
-				"UMG"
-			]
-		}
-	],
-	"Plugins": [
-		{
-			"Name": "ModelingToolsEditorMode",
-			"Enabled": true,
-			"TargetAllowList": [
-				"Editor"
-			]
-		},
-		{
-			"Name": "StateTree",
-			"Enabled": true
-		},
-		{
-			"Name": "GameplayStateTree",
-			"Enabled": true
-		}
-	]
+    "FileVersion": 3,
+    "EngineAssociation": "5.7",
+    "Category": "",
+    "Description": "",
+    "Modules": [
+        { "Name": "WowUnreal", "Type": "Runtime", "LoadingPhase": "Default", "AdditionalDependencies": ["Engine"] },
+        { "Name": "WowData", "Type": "Runtime", "LoadingPhase": "Default" },
+        { "Name": "WowAssets", "Type": "Runtime", "LoadingPhase": "Default" },
+        { "Name": "WowWorld", "Type": "Runtime", "LoadingPhase": "Default" },
+        { "Name": "WowUI", "Type": "Runtime", "LoadingPhase": "Default" },
+        { "Name": "WowNetwork", "Type": "Runtime", "LoadingPhase": "Default" },
+        { "Name": "WowClient", "Type": "Runtime", "LoadingPhase": "Default" }
+    ],
+    "Plugins": [
+        { "Name": "ModelingToolsEditorMode", "Enabled": true, "TargetAllowList": ["Editor"] },
+        { "Name": "ProceduralMeshComponent", "Enabled": true }
+    ]
 }

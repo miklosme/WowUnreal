@@ -1,8 +1,7 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #include "WowUnreal.h"
 #include "Modules/ModuleManager.h"
 
-IMPLEMENT_PRIMARY_GAME_MODULE( FDefaultGameModuleImpl, WowUnreal, "WowUnreal" );
+void FWowUnrealModule::StartupModule() {}
+void FWowUnrealModule::ShutdownModule() {}
 
-DEFINE_LOG_CATEGORY(LogWowUnreal)
+IMPLEMENT_PRIMARY_GAME_MODULE(FWowUnrealModule, WowUnreal, "WowUnreal");

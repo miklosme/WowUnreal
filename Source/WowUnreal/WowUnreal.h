@@ -1,8 +1,10 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 #pragma once
-
 #include "CoreMinimal.h"
+#include "Modules/ModuleManager.h"
 
-/** Main log category used across the project */
-DECLARE_LOG_CATEGORY_EXTERN(LogWowUnreal, Log, All);
+class FWowUnrealModule : public IModuleInterface
+{
+public:
+    virtual void StartupModule() override;
+    virtual void ShutdownModule() override;
+};
