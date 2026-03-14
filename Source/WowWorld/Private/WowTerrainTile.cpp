@@ -93,17 +93,20 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
             MeshData.UVs,            // UV0 (tiling)
             LinearVertColors,        // Vertex colors
             Tangents,                // Tangents
-            true                     // Create collision
+            false                    // No collision for now (faster)
         );
 
-        // Log first chunk's first vertex for debugging
-        if (i == 0 && MeshData.Vertices.Num() > 0)
+        // Log first and last chunk bounds for debugging
+        if ((i == 0 || i == 255) && MeshData.Vertices.Num() > 0)
         {
-            UE_LOG(LogTemp, Log, TEXT("Tile %d,%d chunk 0 vertex 0: %s (local), actor at %s"),
-                TX, TY, *MeshData.Vertices[0].ToString(), *GetActorLocation().ToString());
-            UE_LOG(LogTemp, Log, TEXT("  Chunk 0: %d verts, %d indices, WowPos(%f, %f, %f)"),
-                MeshData.Vertices.Num(), MeshData.Indices.Num(),
-                Chunk.WorldX, Chunk.WorldY, Chunk.WorldZ);
+            FVector MinV(FLT_MAX), MaxV(-FLT_MAX);
+            for (const FVector& V : MeshData.Vertices)
+            {
+                MinV.X = FMath::Min(MinV.X, V.X); MinV.Y = FMath::Min(MinV.Y, V.Y); MinV.Z = FMath::Min(MinV.Z, V.Z);
+                MaxV.X = FMath::Max(MaxV.X, V.X); MaxV.Y = FMath::Max(MaxV.Y, V.Y); MaxV.Z = FMath::Max(MaxV.Z, V.Z);
+            }
+            UE_LOG(LogTemp, Log, TEXT("Tile %d,%d chunk[%d] (ix=%d,iy=%d): local bounds min=%s max=%s, %d verts"),
+                TX, TY, i, Chunk.IndexX, Chunk.IndexY, *MinV.ToString(), *MaxV.ToString(), MeshData.Vertices.Num());
         }
 
         // Try to create a textured material from BLP data; fall back to default
@@ -119,7 +122,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
             MeshComp->SetMaterial(0, DefaultMat);
         }
 
-        MeshComp->SetCastShadow(true);
+        MeshComp->SetCastShadow(false); // Disable shadows for perf during testing
 
         ChunkMeshes.Add(MeshComp);
         ++ChunksBuilt;

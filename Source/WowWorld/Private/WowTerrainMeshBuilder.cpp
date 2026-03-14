@@ -183,29 +183,29 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             int32 Center = InnerIndex(QX, QY);
 
             // 4 triangles in fan pattern around center
-            // Winding order: counter-clockwise when viewed from above (UE convention)
-            // Note: WowToUE negates Y, which flips handedness, so we use
-            // the opposite winding compared to WoW's native order.
+            // UE uses clockwise winding when viewed from above (front face)
+            // Our coordinate transform (NoggitToUE) negates the Z axis,
+            // which flips handedness, so we use reversed winding.
 
             // Triangle 1: Top edge
-            Result.Indices.Add(TopLeft);
-            Result.Indices.Add(TopRight);
             Result.Indices.Add(Center);
+            Result.Indices.Add(TopRight);
+            Result.Indices.Add(TopLeft);
 
             // Triangle 2: Right edge
-            Result.Indices.Add(TopRight);
-            Result.Indices.Add(BottomRight);
             Result.Indices.Add(Center);
+            Result.Indices.Add(BottomRight);
+            Result.Indices.Add(TopRight);
 
             // Triangle 3: Bottom edge
-            Result.Indices.Add(BottomRight);
-            Result.Indices.Add(BottomLeft);
             Result.Indices.Add(Center);
+            Result.Indices.Add(BottomLeft);
+            Result.Indices.Add(BottomRight);
 
             // Triangle 4: Left edge
-            Result.Indices.Add(BottomLeft);
-            Result.Indices.Add(TopLeft);
             Result.Indices.Add(Center);
+            Result.Indices.Add(TopLeft);
+            Result.Indices.Add(BottomLeft);
         }
     }
 

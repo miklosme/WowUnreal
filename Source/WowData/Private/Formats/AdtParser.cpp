@@ -141,7 +141,13 @@ namespace
     {
         for (int32 i = 0; i < 145; ++i)
         {
-            Chunk.Heights[i] = R.ReadF32();
+            float H = R.ReadF32();
+            // Sanity check: heights should be small deltas, typically -200 to +200
+            if (H > 10000.0f || H < -10000.0f)
+            {
+                H = 0.0f; // Clamp garbage values
+            }
+            Chunk.Heights[i] = H;
         }
     }
 
