@@ -135,7 +135,7 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
 
     CachedMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowTerrainRuntime"));
     CachedMat->SetShadingModel(MSM_DefaultLit);
-    CachedMat->TwoSided = false;
+    CachedMat->TwoSided = true;
 
     // Create a texture sample parameter named "BaseTexture"
     UMaterialExpressionTextureSampleParameter2D* TexParam =

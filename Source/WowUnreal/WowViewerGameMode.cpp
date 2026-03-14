@@ -35,10 +35,10 @@ void AWowViewerGameMode::BeginPlay()
             LightParams);
         if (Sun)
         {
-            Sun->GetLightComponent()->SetIntensity(5.0f);
+            Sun->GetLightComponent()->SetIntensity(10.0f);
             Sun->GetLightComponent()->SetLightColor(FLinearColor(1.0f, 0.95f, 0.85f));
-            // Atmosphere sun light is set automatically for directional lights
-            UE_LOG(LogTemp, Log, TEXT("Spawned directional light (sun)"));
+            Sun->GetLightComponent()->SetCastShadows(false); // Disable shadows for perf
+            UE_LOG(LogTemp, Log, TEXT("Spawned directional light (sun) intensity=10"));
         }
 
         // Sky atmosphere
@@ -61,7 +61,7 @@ void AWowViewerGameMode::BeginPlay()
             SkyLightParams);
         if (SkyLight)
         {
-            SkyLight->GetLightComponent()->SetIntensity(1.0f);
+            SkyLight->GetLightComponent()->SetIntensity(3.0f);
             SkyLight->GetLightComponent()->bRealTimeCapture = true;
             UE_LOG(LogTemp, Log, TEXT("Spawned sky light"));
         }

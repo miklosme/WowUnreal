@@ -12,6 +12,21 @@ A fully playable World of Warcraft 3.3.5a (Wrath of the Lich King) client built 
 
 **Target Server:** AzerothCore 3.3.5a (protocol version 12340)
 
+### Data Requirement
+
+This client does **not** ship any Blizzard assets. It reads directly from an existing World of Warcraft 3.3.5a installation's MPQ data files at runtime. All textures, models, terrain, audio, UI XML/Lua, and database files (DBC) are loaded from the original game data.
+
+**Data Path:** `~/World of Warcraft 3.3.5a/Data`
+
+The MPQ archive chain loaded (in priority order):
+```
+patch-3.MPQ → patch-2.MPQ → patch.MPQ → lichking.MPQ →
+expansion.MPQ → common-2.MPQ → common.MPQ → base MPQs
++ locale-specific: enUS/patch-enUS-3.MPQ → ... → enUS/locale-enUS.MPQ
+```
+
+Users must supply their own copy of the WoW 3.3.5a client data. The path is configurable via launch argument (`-wowdata="<path>"`) or project settings.
+
 ---
 
 ## Architecture
@@ -789,5 +804,5 @@ Based on the design priorities (looks good, high performance, fully playable):
 - **Target Memory:** < 4GB RAM total, < 2GB for world data
 - **UE5 Version:** 5.7
 - **Platforms:** Windows (primary), macOS (secondary)
-- **Data Source:** Original WoW 3.3.5a MPQ files (not distributed with client)
+- **Data Source:** Original WoW 3.3.5a MPQ files at `~/World of Warcraft 3.3.5a/Data` (not distributed with client — user must supply)
 - **Server:** AzerothCore 3.3.5a compatible
