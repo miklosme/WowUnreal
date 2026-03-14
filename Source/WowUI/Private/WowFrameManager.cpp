@@ -246,6 +246,126 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 	}
 }
 
+// ── Layer Content (Textures & FontStrings) ───────────────────────────────────
+
+void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent,
+	const TArray<FWowAnchor>& Anchors, float Width, float Height)
+{
+	UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Widget->Slot);
+	if (!Slot) return;
+
+	if (Anchors.IsEmpty())
+	{
+		// Default: fill parent
+		Slot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+		Slot->SetOffsets(FMargin(0));
+		return;
+	}
+
+	const FWowAnchor& Anchor = Anchors[0];
+	FVector2D UmgAnchor = AnchorPointToAlignment(Anchor.RelativePoint);
+	FVector2D Alignment = AnchorPointToAlignment(Anchor.Point);
+
+	Slot->SetAnchors(FAnchors(UmgAnchor.X, UmgAnchor.Y));
+	Slot->SetAlignment(Alignment);
+	Slot->SetPosition(FVector2D(Anchor.OffsetX, Anchor.OffsetY));
+
+	if (Width > 0.f && Height > 0.f)
+	{
+		Slot->SetSize(FVector2D(Width, Height));
+	}
+	else
+	{
+		Slot->SetAutoSize(true);
+	}
+
+	if (Anchors.Num() >= 2)
+	{
+		const FWowAnchor& A2 = Anchors[1];
+		FVector2D SecondAnchor = AnchorPointToAlignment(A2.RelativePoint);
+		Slot->SetAnchors(FAnchors(UmgAnchor.X, UmgAnchor.Y, SecondAnchor.X, SecondAnchor.Y));
+		Slot->SetOffsets(FMargin(Anchor.OffsetX, Anchor.OffsetY, -A2.OffsetX, -A2.OffsetY));
+	}
+}
+
+void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def)
+{
+	if (!Container) return;
+
+	UObject* Outer = Container->GetOuter();
+	if (!Outer) Outer = GetTransientPackage();
+
+	// Layer draw order: BACKGROUND(0), BORDER(1), ARTWORK(2), OVERLAY(3), HIGHLIGHT(4)
+	int32 LayerZBase = 0;
+
+	for (const FWowLayer& Layer : Def.Layers)
+	{
+		int32 ZOrder = static_cast<int32>(Layer.Level) * 100;
+
+		// Create UImage widgets for textures
+		for (const FWowTextureElement& Tex : Layer.Textures)
+		{
+			UImage* ImgWidget = NewObject<UImage>(Outer);
+			ImgWidget->SetColorAndOpacity(Tex.VertexColor);
+
+			UCanvasPanelSlot* Slot = Container->AddChildToCanvas(ImgWidget);
+			if (Slot)
+			{
+				Slot->SetZOrder(ZOrder++);
+			}
+
+			ApplyElementAnchors(ImgWidget, Container, Tex.Anchors, Tex.Width, Tex.Height);
+
+			// Register the texture element as a named sub-object
+			if (!Tex.Name.IsEmpty())
+			{
+				// Store texture widget for Lua access — texture names are frame-scoped
+				UE_LOG(LogWowFrame, Verbose, TEXT("  Layer texture: %s (file: %s)"), *Tex.Name, *Tex.File);
+			}
+		}
+
+		// Create UTextBlock widgets for fontstrings
+		for (const FWowFontStringElement& FS : Layer.FontStrings)
+		{
+			UTextBlock* TextWidget = NewObject<UTextBlock>(Outer);
+
+			if (!FS.Text.IsEmpty())
+			{
+				TextWidget->SetText(FText::FromString(FS.Text));
+			}
+
+			// Apply color
+			TextWidget->SetColorAndOpacity(FSlateColor(FS.Color));
+
+			// Apply font size
+			FSlateFontInfo FontInfo = TextWidget->GetFont();
+			FontInfo.Size = static_cast<int32>(FS.FontHeight);
+			TextWidget->SetFont(FontInfo);
+
+			// Apply justification
+			if (FS.JustifyH == TEXT("LEFT"))
+				TextWidget->SetJustification(ETextJustify::Left);
+			else if (FS.JustifyH == TEXT("RIGHT"))
+				TextWidget->SetJustification(ETextJustify::Right);
+			else
+				TextWidget->SetJustification(ETextJustify::Center);
+
+			UCanvasPanelSlot* Slot = Container->AddChildToCanvas(TextWidget);
+			if (Slot)
+			{
+				Slot->SetZOrder(ZOrder++);
+			}
+
+			ApplyElementAnchors(TextWidget, Container, FS.Anchors, FS.Width, FS.Height);
+
+			if (!FS.Name.IsEmpty())
+			{
+				UE_LOG(LogWowFrame, Verbose, TEXT("  Layer fontstring: %s (text: %s)"), *FS.Name, *FS.Text);
+			}
+		}
+	}
+}
+
 // ── Widget Creation ──────────────────────────────────────────────────────────
 
 UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def)
@@ -309,7 +429,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def)
 		Widget->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
-	// Add to root canvas
+	// Add to root canvas (all top-level frames go to root)
 	UCanvasPanelSlot* Slot = Canvas->AddChildToCanvas(Widget);
 
 	// Apply strata z-ordering (1000 per strata level + frame level offset)
@@ -321,6 +441,12 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def)
 
 	// Apply anchor positioning
 	ApplyAnchors(Widget, Def);
+
+	// Create layer content (textures and fontstrings) inside the frame
+	if (UCanvasPanel* Container = Cast<UCanvasPanel>(Widget))
+	{
+		CreateLayerContent(Container, Def);
+	}
 
 	return Widget;
 }
@@ -380,7 +506,7 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 		CreateFrame(ChildDef);
 	}
 
-	UE_LOG(LogWowFrame, Verbose, TEXT("Created frame [%lld] %s (type %d, %d children)"),
-		Handle, *Resolved.Name, (int32)Resolved.Type, Resolved.Children.Num());
+	UE_LOG(LogWowFrame, Verbose, TEXT("Created frame [%lld] %s (type %d, %d layers, %d children)"),
+		Handle, *Resolved.Name, (int32)Resolved.Type, Resolved.Layers.Num(), Resolved.Children.Num());
 	return Handle;
 }

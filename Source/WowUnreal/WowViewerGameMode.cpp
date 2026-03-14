@@ -24,6 +24,8 @@
 #include "WowCredentialStore.h"
 #include "WowEntity.h"
 #include "TimerManager.h"
+#include "Engine/GameViewportClient.h"
+#include "Components/CanvasPanel.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
@@ -189,13 +191,24 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
         }
     }
 
-    // Load UI
+    // Load UI with root canvas for widget rendering
     if (WorldManager && WorldManager->GetMpqManager())
     {
         if (UGameInstance* GI = GetGameInstance())
         {
             if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
             {
+                // Create a root canvas panel for the WoW UI frame system
+                if (GEngine && GEngine->GameViewport)
+                {
+                    UCanvasPanel* UIRootCanvas = NewObject<UCanvasPanel>(GetTransientPackage());
+                    UIRootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+                    GEngine->GameViewport->AddViewportWidgetContent(
+                        UIRootCanvas->TakeWidget(), 50);
+                    UIManager->SetRootCanvas(UIRootCanvas);
+                    UE_LOG(LogWowGameMode, Log, TEXT("Created root canvas for WoW UI"));
+                }
+
                 UIManager->LoadUI(WorldManager->GetMpqManager());
             }
         }

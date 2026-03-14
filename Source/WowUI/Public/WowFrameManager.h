@@ -60,6 +60,9 @@ private:
 
 	UWidget* CreateWidgetForFrame(const FWowFrameDef& Def);
 
+	/** Create layer content (textures and fontstrings) inside a frame's canvas */
+	void CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def);
+
 	/** Resolve template inheritance for a frame definition */
 	FWowFrameDef ResolveInherits(const FWowFrameDef& Def) const;
 
@@ -68,4 +71,7 @@ private:
 
 	/** Apply anchor positioning to a widget's canvas slot */
 	void ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def);
+
+	/** Apply anchor positioning to a widget within a parent canvas */
+	static void ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent, const TArray<FWowAnchor>& Anchors, float Width, float Height);
 };
