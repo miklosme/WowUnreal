@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "Engine/PostProcessVolume.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/IConsoleManager.h"
 
 AWowViewerGameMode::AWowViewerGameMode()
 {
@@ -22,11 +23,21 @@ void AWowViewerGameMode::BeginPlay()
 {
     Super::BeginPlay();
 
+    // Force fixed pre-exposure via CVar as early as possible to prevent
+    // FinalPreExposure=0.0 ensure failure on first rendered frames
+    if (IConsoleVariable* PreExpCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.PreExposureOverride")))
+    {
+        PreExpCVar->Set(1.0f);
+        UE_LOG(LogTemp, Log, TEXT("Set r.EyeAdaptation.PreExposureOverride=1.0 (fixed pre-exposure)"));
+    }
+
     UWorld* World = GetWorld();
     if (!World) return;
 
-    // Spawn an unbound PostProcessVolume with fixed exposure to prevent black screen
-    // (FinalPreExposure > 0.0f ensure from eye adaptation computing zero)
+    // Spawn an unbound PostProcessVolume with fixed manual exposure to prevent black screen.
+    // The key fix is r.EyeAdaptation.PreExposureOverride=1.0 in DefaultEngine.ini which
+    // forces FinalPreExposure=1.0 bypassing the eye adaptation computation entirely.
+    // This PPV provides belt-and-suspenders protection via manual exposure mode.
     {
         APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>();
         if (PPV)
@@ -35,8 +46,12 @@ void AWowViewerGameMode::BeginPlay()
             PPV->Settings.bOverride_AutoExposureMethod = true;
             PPV->Settings.AutoExposureMethod = AEM_Manual;
             PPV->Settings.bOverride_AutoExposureBias = true;
-            PPV->Settings.AutoExposureBias = 10.0f;
-            UE_LOG(LogTemp, Log, TEXT("Spawned global PostProcessVolume with fixed manual exposure"));
+            PPV->Settings.AutoExposureBias = 0.0f; // EV100=0 → exposure multiplier 1.0
+            PPV->Settings.bOverride_AutoExposureMinBrightness = true;
+            PPV->Settings.AutoExposureMinBrightness = 1.0f;
+            PPV->Settings.bOverride_AutoExposureMaxBrightness = true;
+            PPV->Settings.AutoExposureMaxBrightness = 1.0f;
+            UE_LOG(LogTemp, Log, TEXT("Spawned global PostProcessVolume with fixed manual exposure (EV0, PreExposureOverride=1.0)"));
         }
     }
 
