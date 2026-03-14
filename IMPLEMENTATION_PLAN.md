@@ -46,7 +46,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] WDT-driven tile existence
 - [x] Async tile loader (background thread with `TFuture`, game-thread finalization)
 - [x] Multi-tile viewer streaming works during runtime audit
-- [?] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions — updated March 14, 2026: `SpawnLod1Tile()` now assigns per-chunk terrain splat materials (`LogWowWorld: Spawned LOD 1 tile ... (256 sections, 256 textured)`), WDL boundary tiles now add explicit ADT-driven transition strip sections (`LogWowWorld: Spawned WDL tile ... with N transition strip sections`), `WowUnrealEditor` build succeeds, and runtime screenshot `Saved/Screenshots/terrain_lod_transition_fix_verify.png` shows textured distant terrain after an engine-side `HighResShot`
+- [x] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions — verified March 14, 2026: build succeeds, code review confirms LOD 1 (81-vert chunks with per-chunk splat materials), MAHO hole bitmask parsing/skipping, and ADT-driven transition strips; runtime screenshot shows textured distant terrain extending to horizon
 - [ ] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent`
 
 ## Phase 5: Static Objects
