@@ -133,7 +133,7 @@ The project needs proper UE `.umap` levels instead of running everything through
 - [ ] Create `StreamingTest` map (`Content/Maps/StreamingTest.umap`): full terrain streaming with fly camera, performance HUD, memory budget overlay. No UI, no networking. For profiling tile load/unload, LOD transitions, WDL distant terrain.
 
 ### Infrastructure
-- [ ] Create a base `AWowTestGameMode` that sets up MpqManager + fly camera but no UI/networking — test maps inherit from this
+- [?] Create a base `AWowTestGameMode` that sets up MpqManager + fly camera but no UI/networking — test maps inherit from this — verified March 14, 2026: `AWowTestGameMode` (Source/WowUnreal/WowTestGameMode.h/.cpp) inherits AGameModeBase, sets DefaultPawnClass=AWowFlyCamera, spawns PostProcess + WorldManager for MPQ access, provides protected helpers (SpawnGroundPlane, SpawnDirectionalLight, SpawnSkyManager), virtual SetupTestScene() for subclass override; builds (0 errors), smoke test passes
 - [ ] Add map selector to run scripts: `./run_terrain.sh`, `./run_character.sh`, etc. each pass the correct map path via command line
 - [ ] Update DefaultEngine.ini `GameDefaultMap` to point to `WowWorld` map once it exists
 
