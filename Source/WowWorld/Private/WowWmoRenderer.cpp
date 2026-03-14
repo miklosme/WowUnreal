@@ -63,13 +63,10 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     WmoActor->SetRootComponent(RootComp);
     RootComp->RegisterComponent();
 
-    // Set position and rotation from placement
-    FVector UEPos = FWowCoordinate::WowToUE(Placement.Position);
-    FRotator UERot = FWowCoordinate::WowRotationToUE(
-        Placement.Rotation.X,
-        Placement.Rotation.Y,
-        Placement.Rotation.Z
-    );
+    // MODF positions are in noggit3 space (X=east, Y=up, Z=south)
+    FVector UEPos = FWowCoordinate::NoggitToUE(
+        Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+    FRotator UERot = FRotator(0.0f, -Placement.Rotation.Y, 0.0f);
 
     WmoActor->SetActorLocation(UEPos);
     WmoActor->SetActorRotation(UERot);
@@ -140,12 +137,13 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WMO vertices are in model-local space
+            // WMO vertices are in model-local noggit3-like space
+            // NoggitToUE: UE.X = -Ng.Z*SCALE, UE.Y = Ng.X*SCALE, UE.Z = Ng.Y*SCALE
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(P.X, -P.Y, P.Z) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(-P.Z, P.X, P.Y) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(GroupData.Normals[i].X, -GroupData.Normals[i].Y, GroupData.Normals[i].Z)
+                ? FVector(-GroupData.Normals[i].Z, GroupData.Normals[i].X, GroupData.Normals[i].Y)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;

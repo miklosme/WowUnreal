@@ -106,10 +106,10 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
     for (int32 i = 0; i < NumVerts; ++i)
     {
         const FM2Vertex& V = Data.Vertices[i];
-        // M2 vertices are in model-local space; convert coordinate system
-        // WoW model space: X right, Y forward, Z up -> UE: X forward, Y right, Z up
-        Vertices[i] = FVector(V.Position.X, -V.Position.Y, V.Position.Z) * FWowCoordinate::SCALE;
-        Normals[i] = FVector(V.Normal.X, -V.Normal.Y, V.Normal.Z);
+        // M2 model vertices are in model-local noggit3-like space
+        // NoggitToUE: UE.X = -Ng.Z*SCALE, UE.Y = Ng.X*SCALE, UE.Z = Ng.Y*SCALE
+        Vertices[i] = FVector(-V.Position.Z, V.Position.X, V.Position.Y) * FWowCoordinate::SCALE;
+        Normals[i] = FVector(-V.Normal.Z, V.Normal.X, V.Normal.Y);
         Normals[i].Normalize();
         UVs[i] = V.TexCoord;
 
@@ -228,15 +228,13 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             continue;
         }
 
-        // Position: WoW absolute world coordinates -> UE
-        FVector UEPos = FWowCoordinate::WowToUE(Placement.Position);
+        // MDDF positions are in noggit3 space (X=east, Y=up, Z=south)
+        FVector UEPos = FWowCoordinate::NoggitToUE(
+            Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
 
-        // Rotation: WoW stores rotation in degrees
-        FRotator UERot = FWowCoordinate::WowRotationToUE(
-            Placement.Rotation.X,
-            Placement.Rotation.Y,
-            Placement.Rotation.Z
-        );
+        // Rotation: MDDF stores rotation in degrees
+        // For now use a simple mapping
+        FRotator UERot = FRotator(0.0f, -Placement.Rotation.Y, 0.0f);
 
         // Scale
         float ScaleVal = Placement.GetScaleFloat();

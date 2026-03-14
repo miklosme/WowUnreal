@@ -13,26 +13,26 @@ static constexpr uint32 MakeFourCC(char A, char B, char C, char D)
         | (static_cast<uint32>(D) << 24);
 }
 
-// Root chunks
-static constexpr uint32 CHUNK_MVER = MakeFourCC('M','V','E','R');
-static constexpr uint32 CHUNK_MOHD = MakeFourCC('M','O','H','D');
-static constexpr uint32 CHUNK_MOTX = MakeFourCC('M','O','T','X');
-static constexpr uint32 CHUNK_MOMT = MakeFourCC('M','O','M','T');
-static constexpr uint32 CHUNK_MOGN = MakeFourCC('M','O','G','N');
-static constexpr uint32 CHUNK_MOGI = MakeFourCC('M','O','G','I');
-static constexpr uint32 CHUNK_MODS = MakeFourCC('M','O','D','S');
-static constexpr uint32 CHUNK_MODN = MakeFourCC('M','O','D','N');
-static constexpr uint32 CHUNK_MODD = MakeFourCC('M','O','D','D');
+// Root chunks — REVERSED order, as stored on disk (little-endian uint32 read)
+static constexpr uint32 CHUNK_MVER = MakeFourCC('R','E','V','M');
+static constexpr uint32 CHUNK_MOHD = MakeFourCC('D','H','O','M');
+static constexpr uint32 CHUNK_MOTX = MakeFourCC('X','T','O','M');
+static constexpr uint32 CHUNK_MOMT = MakeFourCC('T','M','O','M');
+static constexpr uint32 CHUNK_MOGN = MakeFourCC('N','G','O','M');
+static constexpr uint32 CHUNK_MOGI = MakeFourCC('I','G','O','M');
+static constexpr uint32 CHUNK_MODS = MakeFourCC('S','D','O','M');
+static constexpr uint32 CHUNK_MODN = MakeFourCC('N','D','O','M');
+static constexpr uint32 CHUNK_MODD = MakeFourCC('D','D','O','M');
 
-// Group chunks
-static constexpr uint32 CHUNK_MOGP = MakeFourCC('M','O','G','P');
-static constexpr uint32 CHUNK_MOPY = MakeFourCC('M','O','P','Y');
-static constexpr uint32 CHUNK_MOVI = MakeFourCC('M','O','V','I');
-static constexpr uint32 CHUNK_MOVT = MakeFourCC('M','O','V','T');
-static constexpr uint32 CHUNK_MONR = MakeFourCC('M','O','N','R');
-static constexpr uint32 CHUNK_MOTV = MakeFourCC('M','O','T','V');
-static constexpr uint32 CHUNK_MOBA = MakeFourCC('M','O','B','A');
-static constexpr uint32 CHUNK_MOCV = MakeFourCC('M','O','C','V');
+// Group chunks — REVERSED order, as stored on disk (little-endian uint32 read)
+static constexpr uint32 CHUNK_MOGP = MakeFourCC('P','G','O','M');
+static constexpr uint32 CHUNK_MOPY = MakeFourCC('Y','P','O','M');
+static constexpr uint32 CHUNK_MOVI = MakeFourCC('I','V','O','M');
+static constexpr uint32 CHUNK_MOVT = MakeFourCC('T','V','O','M');
+static constexpr uint32 CHUNK_MONR = MakeFourCC('R','N','O','M');
+static constexpr uint32 CHUNK_MOTV = MakeFourCC('V','T','O','M');
+static constexpr uint32 CHUNK_MOBA = MakeFourCC('A','B','O','M');
+static constexpr uint32 CHUNK_MOCV = MakeFourCC('V','C','O','M');
 
 // Safe read helpers
 namespace

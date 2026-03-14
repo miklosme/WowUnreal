@@ -66,8 +66,17 @@ void AWowWorldManager::BeginPlay()
         UE_LOG(LogWowWorld, Warning, TEXT("Failed to load WDT: %s"), *WdtPath);
     }
 
-    // Load an initial test tile
-    LoadTile(DebugTileX, DebugTileY);
+    // Load a 3x3 grid of tiles around the debug tile
+    for (int32 DX = -1; DX <= 1; ++DX)
+    {
+        for (int32 DY = -1; DY <= 1; ++DY)
+        {
+            LoadTile(DebugTileX + DX, DebugTileY + DY);
+        }
+    }
+
+    // Enable streaming so more tiles load as camera moves
+    bStreamingEnabled = true;
 
     // Teleport player above the loaded terrain
     // The tile actor is at TileToWorld position, vertices are local to that
