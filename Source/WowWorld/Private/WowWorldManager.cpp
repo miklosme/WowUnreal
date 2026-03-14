@@ -369,14 +369,18 @@ void AWowWorldManager::UpdateStreaming()
             UE_LOG(LogWowWorld, Log, TEXT("Unloading tile %d,%d (too far)"), Tile->GetTileCoord().X, Tile->GetTileCoord().Y);
 
             // Clean up spawned objects tracked by this tile
-            for (auto& DoodadPair : Tile->SpawnedDoodads)
+            // HISMC doodads are destroyed automatically with the tile actor
+            if (!Tile->bUsesInstancedDoodads)
             {
-                if (DoodadPair.Value)
+                for (auto& DoodadPair : Tile->SpawnedDoodads)
                 {
-                    DoodadPair.Value->DestroyComponent();
-                    --ActiveDoodadCount;
+                    if (DoodadPair.Value)
+                    {
+                        DoodadPair.Value->DestroyComponent();
+                        --ActiveDoodadCount;
+                    }
+                    SpawnedDoodadIds.Remove(DoodadPair.Key);
                 }
-                SpawnedDoodadIds.Remove(DoodadPair.Key);
             }
             for (auto& WmoPair : Tile->SpawnedWmos)
             {
@@ -428,69 +432,66 @@ void AWowWorldManager::UpdateObjectStreaming()
         AWowTerrainTile* Tile = TilePair.Value;
         if (!Tile || !Tile->CachedMpq) continue;
 
-        // --- DOODADS: despawn out-of-range ---
+        // --- DOODADS: Skip per-instance streaming if tile uses HISMC instancing ---
+        // HISMC handles culling automatically via built-in LOD and cull distances
+        if (!Tile->bUsesInstancedDoodads)
         {
-            TArray<uint32> ToDespawn;
-            for (auto& Pair : Tile->SpawnedDoodads)
+            // Legacy per-instance doodad streaming (fallback)
+            // --- DOODADS: despawn out-of-range ---
             {
-                if (!Pair.Value) { ToDespawn.Add(Pair.Key); continue; }
-                float DistSq = FVector::DistSquared(CamLoc, Pair.Value->GetComponentLocation());
-                if (DistSq > DoodadDespawnRadiusSq)
+                TArray<uint32> ToDespawn;
+                for (auto& Pair : Tile->SpawnedDoodads)
                 {
-                    ToDespawn.Add(Pair.Key);
+                    if (!Pair.Value) { ToDespawn.Add(Pair.Key); continue; }
+                    float DistSq = FVector::DistSquared(CamLoc, Pair.Value->GetComponentLocation());
+                    if (DistSq > DoodadDespawnRadiusSq)
+                    {
+                        ToDespawn.Add(Pair.Key);
+                    }
+                }
+                for (uint32 Id : ToDespawn)
+                {
+                    TObjectPtr<UProceduralMeshComponent>* Comp = Tile->SpawnedDoodads.Find(Id);
+                    if (Comp && *Comp)
+                    {
+                        (*Comp)->DestroyComponent();
+                        --ActiveDoodadCount;
+                    }
+                    Tile->SpawnedDoodads.Remove(Id);
+                    SpawnedDoodadIds.Remove(Id);
                 }
             }
-            for (uint32 Id : ToDespawn)
+
+            // --- DOODADS: spawn in-range ---
+            for (const FAdtDoodadPlacement& Placement : Tile->DoodadPlacements)
             {
-                TObjectPtr<UProceduralMeshComponent>* Comp = Tile->SpawnedDoodads.Find(Id);
-                if (Comp && *Comp)
+                if (ActiveDoodadCount >= MaxActiveDoodads) break;
+
+                // Already spawned globally (could be on this tile or another)
+                if (SpawnedDoodadIds.Contains(Placement.UniqueId)) continue;
+
+                // Resolve path
+                if (Placement.NameIndex < 0 || Placement.NameIndex >= Tile->DoodadPaths.Num()) continue;
+                const FString& M2Path = Tile->DoodadPaths[Placement.NameIndex];
+                if (M2Path.IsEmpty()) continue;
+
+                // Distance check: convert MDDF to ADT space then UE (matches terrain)
+                FVector UEPos = FWowCoordinate::AdtToUE(
+                    Placement.Position.X,
+                    Placement.Position.Y,
+                    Placement.Position.Z);
+                float DistSq = FVector::DistSquared(CamLoc, UEPos);
+                if (DistSq > DoodadRadiusSq) continue;
+
+                // Spawn it
+                UProceduralMeshComponent* Comp = FWowDoodadManager::SpawnSingleDoodad(
+                    Tile, Placement, M2Path, Tile->CachedMpq, Tile->CachedCache);
+                if (Comp)
                 {
-                    (*Comp)->DestroyComponent();
-                    --ActiveDoodadCount;
+                    Tile->SpawnedDoodads.Add(Placement.UniqueId, Comp);
+                    SpawnedDoodadIds.Add(Placement.UniqueId);
+                    ++ActiveDoodadCount;
                 }
-                Tile->SpawnedDoodads.Remove(Id);
-                SpawnedDoodadIds.Remove(Id);
-            }
-        }
-
-        // --- DOODADS: spawn in-range ---
-        for (const FAdtDoodadPlacement& Placement : Tile->DoodadPlacements)
-        {
-            if (ActiveDoodadCount >= MaxActiveDoodads) break;
-
-            // Already spawned globally (could be on this tile or another)
-            if (SpawnedDoodadIds.Contains(Placement.UniqueId)) continue;
-
-            // Resolve path
-            if (Placement.NameIndex < 0 || Placement.NameIndex >= Tile->DoodadPaths.Num()) continue;
-            const FString& M2Path = Tile->DoodadPaths[Placement.NameIndex];
-            if (M2Path.IsEmpty()) continue;
-
-            // Distance check: convert MDDF to ADT space then UE (matches terrain)
-            FVector UEPos = FWowCoordinate::AdtToUE(
-                Placement.Position.X,
-                Placement.Position.Y,
-                Placement.Position.Z);
-            float DistSq = FVector::DistSquared(CamLoc, UEPos);
-            // Debug first doodad distance
-            static bool bLoggedOnce = false;
-            if (bDebugLog && !bLoggedOnce)
-            {
-                UE_LOG(LogWowWorld, Log, TEXT("  First doodad pos raw=(%f,%f,%f) → UE=%s, dist=%.0f, radius=%.0f"),
-                    Placement.Position.X, Placement.Position.Y, Placement.Position.Z,
-                    *UEPos.ToString(), FMath::Sqrt(DistSq), DoodadRadius);
-                bLoggedOnce = true;
-            }
-            if (DistSq > DoodadRadiusSq) continue;
-
-            // Spawn it
-            UProceduralMeshComponent* Comp = FWowDoodadManager::SpawnSingleDoodad(
-                Tile, Placement, M2Path, Tile->CachedMpq, Tile->CachedCache);
-            if (Comp)
-            {
-                Tile->SpawnedDoodads.Add(Placement.UniqueId, Comp);
-                SpawnedDoodadIds.Add(Placement.UniqueId);
-                ++ActiveDoodadCount;
             }
         }
 

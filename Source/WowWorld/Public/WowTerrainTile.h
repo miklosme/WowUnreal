@@ -8,6 +8,7 @@
 struct FAdtData;
 class FMpqManager;
 class FWowAssetCache;
+class UHierarchicalInstancedStaticMeshComponent;
 
 UCLASS()
 class WOWWORLD_API AWowTerrainTile : public AActor
@@ -25,12 +26,19 @@ public:
     TArray<FAdtWmoPlacement> WmoPlacements;
     TArray<FString> WmoPaths;
 
-    // Track which placements are currently spawned
+    // Track which placements are currently spawned (legacy per-instance mode)
     UPROPERTY()
     TMap<uint32, TObjectPtr<UProceduralMeshComponent>> SpawnedDoodads; // UniqueId -> component
 
     UPROPERTY()
     TMap<uint32, TObjectPtr<AActor>> SpawnedWmos; // UniqueId -> actor
+
+    /** HISMC components for instanced doodads (one per unique M2 model) */
+    UPROPERTY()
+    TArray<TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> InstancedDoodads;
+
+    /** Whether this tile's doodads are using HISMC instancing */
+    bool bUsesInstancedDoodads = false;
 
     // Cached pointers for deferred spawning
     FMpqManager* CachedMpq = nullptr;

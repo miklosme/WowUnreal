@@ -4,12 +4,14 @@
 class FMpqManager;
 class FWowAssetCache;
 class UProceduralMeshComponent;
+class UStaticMesh;
+class UHierarchicalInstancedStaticMeshComponent;
 struct FAdtDoodadPlacement;
 struct FM2Data;
 
 /**
- * Manages M2 doodad placement using ProceduralMeshComponent.
- * Creates one ProceduralMeshComponent per doodad instance.
+ * Manages M2 doodad placement.
+ * Supports both ProceduralMeshComponent (per-instance) and HISMC (instanced) modes.
  */
 class WOWWORLD_API FWowDoodadManager
 {
@@ -25,6 +27,18 @@ public:
     static UProceduralMeshComponent* SpawnSingleDoodad(AActor* ParentActor, const FAdtDoodadPlacement& Placement,
                                                         const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache);
 
+    /**
+     * Spawn all doodads for a tile using HISMC instancing.
+     * Groups placements by M2 model and creates one HISMC per unique model.
+     * Returns the created HISMC components (caller owns them).
+     */
+    static TArray<UHierarchicalInstancedStaticMeshComponent*> SpawnDoodadsInstanced(
+        AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
+        const TArray<FString>& DoodadPaths, FMpqManager* Mpq, FWowAssetCache* Cache);
+
+    /** Get or create a UStaticMesh from M2 data (cached in asset cache) */
+    static UStaticMesh* GetOrCreateStaticMesh(const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache);
+
 private:
     /** Cache of parsed M2 data (not UObjects, just geometry) */
     static TMap<FString, TSharedPtr<FM2Data>> ParsedM2Cache;
@@ -32,6 +46,10 @@ private:
 
     /** Build skin file path from M2 path */
     static FString GetSkinPath(const FString& M2Path);
+
+    /** Create a UStaticMesh from M2 geometry data */
+    static UStaticMesh* CreateStaticMeshFromM2(const FM2Data& Data, const FString& M2Path,
+                                                FMpqManager* Mpq, FWowAssetCache* Cache);
 
     /** Create a ProceduralMeshComponent from M2 data */
     static UProceduralMeshComponent* CreateM2MeshComponent(AActor* Owner, const FM2Data& Data,

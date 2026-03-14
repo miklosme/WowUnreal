@@ -123,14 +123,20 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         MeshComp->DestroyComponent();
     }
 
-    // Store placement data for distance-based streaming (spawned by AWowWorldManager::Tick)
-    DoodadPlacements = Data.DoodadPlacements;
-    DoodadPaths = Data.DoodadPaths;
+    // Spawn doodads using HISMC instancing (batched per unique M2 model)
+    if (Data.DoodadPlacements.Num() > 0)
+    {
+        InstancedDoodads = FWowDoodadManager::SpawnDoodadsInstanced(
+            this, Data.DoodadPlacements, Data.DoodadPaths, Mpq, Cache);
+        bUsesInstancedDoodads = (InstancedDoodads.Num() > 0);
+    }
+
+    // Store WMO placement data for distance-based streaming (doodads are now instanced)
     WmoPlacements = Data.WmoPlacements;
     WmoPaths = Data.WmoPaths;
     CachedMpq = Mpq;
     CachedCache = Cache;
 
-    UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: stored %d doodad placements, %d WMO placements for streaming"),
-        TX, TY, DoodadPlacements.Num(), WmoPlacements.Num());
+    UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d instanced doodad HISMCs, %d WMO placements for streaming"),
+        TX, TY, InstancedDoodads.Num(), WmoPlacements.Num());
 }
