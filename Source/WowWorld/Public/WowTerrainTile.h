@@ -51,6 +51,9 @@ private:
     UPROPERTY()
     TArray<TObjectPtr<UProceduralMeshComponent>> ChunkMeshes;
 
+    UPROPERTY()
+    TArray<TObjectPtr<UProceduralMeshComponent>> WaterMeshes;
+
     FIntPoint TileCoord;
 
     UMaterialInterface* GetDefaultTerrainMaterial() const;

@@ -43,6 +43,41 @@ struct WOWDATA_API FAdtWmoPlacement
     uint16 Scale = 1024;
 };
 
+/** A single liquid layer within a chunk */
+struct WOWDATA_API FMH2OInstance
+{
+	uint16 LiquidType = 0;
+	uint16 VertexFormat = 0;
+	float MinHeight = 0.0f;
+	float MaxHeight = 0.0f;
+	uint8 XOffset = 0;
+	uint8 YOffset = 0;
+	uint8 Width = 8;
+	uint8 Height = 8;
+	/** Existence bitmap: bit (y*8+x) set means sub-tile has liquid */
+	uint64 ExistsBitmap = 0;
+	/** Height values: (Width+1)*(Height+1) floats */
+	TArray<float> Heights;
+	/** Depth values: (Width+1)*(Height+1) uint8 */
+	TArray<uint8> Depths;
+
+	/** 0=water, 1=ocean, 2=magma, 3=slime based on LiquidType ranges */
+	int32 GetLiquidCategory() const
+	{
+		if (LiquidType <= 3) return 0; // water
+		if (LiquidType <= 7) return 1; // ocean (or more water types)
+		if (LiquidType <= 11) return 2; // magma
+		return 3; // slime
+	}
+};
+
+/** Water data for one chunk (up to multiple layers, usually 0-1) */
+struct WOWDATA_API FMH2OChunkData
+{
+	TArray<FMH2OInstance> Layers;
+	bool HasWater() const { return Layers.Num() > 0; }
+};
+
 struct WOWDATA_API FAdtData
 {
     FAdtChunkData Chunks[256];
@@ -51,6 +86,7 @@ struct WOWDATA_API FAdtData
     TArray<FString> WmoPaths;
     TArray<FAdtDoodadPlacement> DoodadPlacements;
     TArray<FAdtWmoPlacement> WmoPlacements;
+    FMH2OChunkData WaterChunks[256];
     bool bBigAlpha = false;
     bool bIsValid = false;
 };

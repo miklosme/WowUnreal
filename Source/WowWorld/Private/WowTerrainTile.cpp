@@ -5,6 +5,7 @@
 #include "Coord/WowCoordinate.h"
 #include "WowDoodadManager.h"
 #include "WowWmoRenderer.h"
+#include "WowWaterRenderer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerrainTile, Log, All);
 
@@ -121,6 +122,15 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     else
     {
         MeshComp->DestroyComponent();
+    }
+
+    // Spawn water meshes from MH2O data
+    {
+        TArray<UProceduralMeshComponent*> WaterComps = FWowWaterRenderer::CreateWaterMeshes(this, Data, TX, TY);
+        for (UProceduralMeshComponent* WC : WaterComps)
+        {
+            WaterMeshes.Add(WC);
+        }
     }
 
     // Spawn doodads using HISMC instancing (batched per unique M2 model)

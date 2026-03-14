@@ -75,7 +75,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 
 ## Phase 9: Polish
 - [?] Terrain LOD + WDL distant terrain (WDL parser, 17x17 mesh per tile, distance-based streaming)
-- [ ] Water rendering (MH2O)
+- [?] Water rendering (MH2O parser, per-chunk liquid meshes, existence bitmap filtering)
 - [ ] Sky/fog from DBC Light tables
 - [ ] Skeletal mesh + animation pipeline
 - [ ] Memory budget enforcement

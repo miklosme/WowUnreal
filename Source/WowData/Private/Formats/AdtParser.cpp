@@ -658,7 +658,102 @@ FAdtData FAdtParser::Parse(const TArray<uint8>& Data, bool bBigAlpha)
         }
     }
 
-    // ── MH2O (water data) — we skip for now ─────────────────────────────
+    // ── MH2O (water data) ────────────────────────────────────────────────
+    if (OfsMh2o != 0)
+    {
+        R.Seek(AbsOfs(OfsMh2o));
+        uint32 Magic, Size;
+        if (ReadChunkHeader(R, Magic, Size) && Magic == MAGIC_MH2O)
+        {
+            int32 Mh2oStart = R.Pos; // start of MH2O data (offsets are relative to this)
+
+            // 256 chunk headers (12 bytes each)
+            struct FMH2OHeader { uint32 OfsInstances; uint32 LayerCount; uint32 OfsRenderMask; };
+            FMH2OHeader Headers[256];
+            for (int32 i = 0; i < 256; i++)
+            {
+                Headers[i].OfsInstances  = R.ReadU32();
+                Headers[i].LayerCount    = R.ReadU32();
+                Headers[i].OfsRenderMask = R.ReadU32();
+            }
+
+            int32 WaterChunkCount = 0;
+            for (int32 i = 0; i < 256; i++)
+            {
+                if (Headers[i].LayerCount == 0 || Headers[i].OfsInstances == 0) continue;
+
+                R.Seek(Mh2oStart + Headers[i].OfsInstances);
+
+                for (uint32 Layer = 0; Layer < Headers[i].LayerCount; Layer++)
+                {
+                    if (!R.CanRead(24)) break;
+
+                    FMH2OInstance Inst;
+                    Inst.LiquidType    = R.ReadU16();
+                    Inst.VertexFormat  = R.ReadU16();
+                    Inst.MinHeight     = R.ReadF32();
+                    Inst.MaxHeight     = R.ReadF32();
+                    Inst.XOffset       = R.ReadU8();
+                    Inst.YOffset       = R.ReadU8();
+                    Inst.Width         = R.ReadU8();
+                    Inst.Height        = R.ReadU8();
+                    uint32 OfsMask     = R.ReadU32();
+                    uint32 OfsHeightmap = R.ReadU32();
+
+                    int32 NextLayerPos = R.Pos; // save position for next layer
+
+                    // Read existence bitmap (8 bytes)
+                    if (OfsMask != 0)
+                    {
+                        R.Seek(Mh2oStart + OfsMask);
+                        Inst.ExistsBitmap = 0;
+                        for (int32 Row = 0; Row < Inst.Height; Row++)
+                        {
+                            uint8 RowBits = R.ReadU8();
+                            Inst.ExistsBitmap |= ((uint64)RowBits) << (Row * 8);
+                        }
+                    }
+                    else
+                    {
+                        // No mask = all sub-tiles exist
+                        Inst.ExistsBitmap = 0xFFFFFFFFFFFFFFFFULL;
+                    }
+
+                    // Read height map: (Width+1) * (Height+1) floats
+                    int32 VertCount = (Inst.Width + 1) * (Inst.Height + 1);
+                    if (OfsHeightmap != 0 && Inst.VertexFormat == 0)
+                    {
+                        R.Seek(Mh2oStart + OfsHeightmap);
+                        Inst.Heights.SetNum(VertCount);
+                        for (int32 v = 0; v < VertCount; v++)
+                        {
+                            Inst.Heights[v] = R.ReadF32();
+                        }
+                        // Depth data follows heights
+                        Inst.Depths.SetNum(VertCount);
+                        for (int32 v = 0; v < VertCount; v++)
+                        {
+                            Inst.Depths[v] = R.ReadU8();
+                        }
+                    }
+                    else if (Inst.VertexFormat != 0)
+                    {
+                        // Non-zero vertex format: use flat height at MinHeight
+                        Inst.Heights.SetNum(VertCount);
+                        for (int32 v = 0; v < VertCount; v++)
+                        {
+                            Inst.Heights[v] = Inst.MinHeight;
+                        }
+                    }
+
+                    Result.WaterChunks[i].Layers.Add(MoveTemp(Inst));
+                    R.Seek(NextLayerPos); // restore for next layer
+                }
+                WaterChunkCount++;
+            }
+            UE_LOG(LogAdt, Log, TEXT("MH2O: %d chunks with water data"), WaterChunkCount);
+        }
+    }
 
     // ── MCIN — read MCNK offsets so we can seek directly ────────────────
     struct FMcinEntry { uint32 Offset; uint32 Size; };
