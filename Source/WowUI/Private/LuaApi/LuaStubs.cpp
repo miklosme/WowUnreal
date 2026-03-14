@@ -6,6 +6,9 @@
 #include "WowUpdateFields.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Formats/Dbc/SpellDbc.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Misc/App.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -58,7 +61,21 @@ STUB_RETURN_FALSE(IsInInstance)
 STUB_RETURN_ZERO(GetNumPartyMembers)
 STUB_RETURN_ZERO(GetNumRaidMembers)
 STUB_RETURN_FALSE(IsInGuild)
-STUB_RETURN_ZERO(GetMoney)
+static int L_GetMoney(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            lua_pushnumber(L, Player->GetCoinage());
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 0);
+    return 1;
+}
 STUB_RETURN_FALSE(InCombatLockdown)
 STUB_RETURN_FALSE(IsResting)
 STUB_RETURN_FALSE(IsMounted)
@@ -78,12 +95,29 @@ static int L_GetPlayerMapPosition(lua_State* L)
 // ─── Unit API ─────────────────────────────────────────────────────────────────
 static int L_UnitName(lua_State* L)
 {
-    // TODO: name lookup requires NameCache (SMSG_NAME_QUERY_RESPONSE)
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
     const char* unit = luaL_optstring(L, 1, "player");
-    if (strcmp(unit, "player") == 0)
-        lua_pushstring(L, "Player");
+
+    if (strcmp(unit, "player") == 0 && Ctx && Ctx->ConnectionManager)
+    {
+        FString CharName = Ctx->ConnectionManager->GetCharacterName();
+        if (!CharName.IsEmpty())
+        {
+            lua_pushstring(L, TCHAR_TO_UTF8(*CharName));
+            return 1;
+        }
+    }
+
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+    {
+        // For non-player entities, use display name if available
+        lua_pushstring(L, "Unknown");
+    }
     else
+    {
         lua_pushnil(L);
+    }
     return 1;
 }
 
@@ -137,9 +171,35 @@ static int L_UnitPowerMax(lua_State* L)
     return 1;
 }
 
+// WoW class ID → (display name, token) — 3.3.5a class IDs
+static const char* WowClassNames[] = {
+    "Unknown", "Warrior", "Paladin", "Hunter", "Rogue",
+    "Priest", "Death Knight", "Shaman", "Mage", "Warlock",
+    "Unknown", "Druid"
+};
+static const char* WowClassTokens[] = {
+    "UNKNOWN", "WARRIOR", "PALADIN", "HUNTER", "ROGUE",
+    "PRIEST", "DEATHKNIGHT", "SHAMAN", "MAGE", "WARLOCK",
+    "UNKNOWN", "DRUID"
+};
+
 static int L_UnitClass(lua_State* L)
 {
-    // TODO: resolve from entity class field + ChrClasses.dbc
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+    {
+        FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
+        if (Entity->IsUnit())
+        {
+            uint8 ClassId = Unit->GetClassId();
+            if (ClassId < UE_ARRAY_COUNT(WowClassNames))
+            {
+                lua_pushstring(L, WowClassNames[ClassId]);
+                lua_pushstring(L, WowClassTokens[ClassId]);
+                return 2;
+            }
+        }
+    }
     lua_pushstring(L, "Warrior");
     lua_pushstring(L, "WARRIOR");
     return 2;
@@ -147,7 +207,21 @@ static int L_UnitClass(lua_State* L)
 
 static int L_UnitRace(lua_State* L)
 {
-    // TODO: resolve from entity race field + ChrRaces.dbc
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity && Entity->IsUnit())
+    {
+        FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
+        uint8 RaceId = Unit->GetRaceId();
+
+        // Look up race name from ChrRaces.dbc
+        const FChrRacesDbcEntry* RaceEntry = FDbcStore::Get().ChrRaces().GetById(RaceId);
+        if (RaceEntry && !RaceEntry->Name.IsEmpty())
+        {
+            lua_pushstring(L, TCHAR_TO_UTF8(*RaceEntry->Name));
+            lua_pushstring(L, TCHAR_TO_UTF8(*RaceEntry->Name));
+            return 2;
+        }
+    }
     lua_pushstring(L, "Human");
     lua_pushstring(L, "Human");
     return 2;
@@ -229,15 +303,23 @@ static int L_GetRealmName(lua_State* L)
 // ─── Screen / resolution ────────────────────────────────────────────────────────
 static int L_GetScreenWidth(lua_State* L)
 {
-    // TODO: read from GEngine->GameViewport
-    lua_pushnumber(L, 1920);
+    FVector2D Size(1920, 1080);
+    if (GEngine && GEngine->GameViewport)
+    {
+        GEngine->GameViewport->GetViewportSize(Size);
+    }
+    lua_pushnumber(L, Size.X);
     return 1;
 }
 
 static int L_GetScreenHeight(lua_State* L)
 {
-    // TODO: read from GEngine->GameViewport
-    lua_pushnumber(L, 1080);
+    FVector2D Size(1920, 1080);
+    if (GEngine && GEngine->GameViewport)
+    {
+        GEngine->GameViewport->GetViewportSize(Size);
+    }
+    lua_pushnumber(L, Size.Y);
     return 1;
 }
 
@@ -268,8 +350,33 @@ STUB_RETURN_NIL(GetActionTexture)
 STUB_RETURN_NONE(UseAction)
 
 // ─── Spell functions ────────────────────────────────────────────────────────────
-STUB_RETURN_NIL(GetSpellInfo)
-STUB_RETURN_NIL(GetSpellCooldown)
+static int L_GetSpellInfo(lua_State* L)
+{
+    // GetSpellInfo(spellId) → name, rank, icon, castTime, minRange, maxRange
+    int32 SpellId = static_cast<int32>(luaL_checknumber(L, 1));
+    const FSpellDbcEntry* Entry = FDbcStore::Get().Spells().GetById(SpellId);
+    if (Entry)
+    {
+        lua_pushstring(L, TCHAR_TO_UTF8(*Entry->SpellName));  // name
+        lua_pushstring(L, TCHAR_TO_UTF8(*Entry->Rank));        // rank
+        lua_pushstring(L, "Interface\\Icons\\INV_Misc_QuestionMark"); // icon (placeholder)
+        lua_pushnumber(L, 0);  // castTime (would need CastingTime lookup)
+        lua_pushnumber(L, 0);  // minRange
+        lua_pushnumber(L, 0);  // maxRange
+        return 6;
+    }
+    lua_pushnil(L);
+    return 1;
+}
+
+static int L_GetSpellCooldown(lua_State* L)
+{
+    // GetSpellCooldown(spellId) → start, duration, enabled
+    lua_pushnumber(L, 0); // start
+    lua_pushnumber(L, 0); // duration
+    lua_pushnumber(L, 1); // enabled
+    return 3;
+}
 
 static int L_CastSpellByID(lua_State* L)
 {

@@ -51,6 +51,17 @@ public:
     /** Get current target GUID */
     UFUNCTION(BlueprintCallable) int64 GetTargetGuid() const { return TargetGuid; }
 
+    /** Get the character name of the local player (from cached character list) */
+    UFUNCTION(BlueprintCallable) FString GetCharacterName() const
+    {
+        uint64 Guid = PacketHandler.EntityManager.LocalPlayerGuid;
+        for (const FWowCharacterInfo& C : CachedCharacters)
+        {
+            if (static_cast<uint64>(C.Guid) == Guid) return C.Name;
+        }
+        return TEXT("");
+    }
+
     /** Send a raw packet (for advanced use) */
     void SendRawPacket(uint32 Opcode, const TArray<uint8>& Data = {});
 
