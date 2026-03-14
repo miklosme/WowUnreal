@@ -4,6 +4,7 @@
 #include "WowDebugHUD.h"
 #include "WowWorldManager.h"
 #include "WowSkyManager.h"
+#include "WowUIManager.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -37,6 +38,7 @@ void AWowViewerGameMode::BeginPlay()
     }
 
     // Auto-spawn the World Manager
+    AWowWorldManager* WorldManager = nullptr;
     {
         TArray<AActor*> Found;
         UGameplayStatics::GetAllActorsOfClass(World, AWowWorldManager::StaticClass(), Found);
@@ -45,14 +47,32 @@ void AWowViewerGameMode::BeginPlay()
         {
             FActorSpawnParameters Params;
             Params.Name = FName(TEXT("WowWorldManager"));
-            AWowWorldManager* Manager = World->SpawnActor<AWowWorldManager>(
+            WorldManager = World->SpawnActor<AWowWorldManager>(
                 AWowWorldManager::StaticClass(),
                 FVector::ZeroVector,
                 FRotator::ZeroRotator,
                 Params);
-            if (Manager)
+            if (WorldManager)
             {
                 UE_LOG(LogTemp, Log, TEXT("Auto-spawned WowWorldManager"));
+            }
+        }
+        else
+        {
+            WorldManager = Cast<AWowWorldManager>(Found[0]);
+        }
+    }
+
+    // Load WoW UI (FrameXML + addons) once MpqManager is available
+    if (WorldManager && WorldManager->GetMpqManager())
+    {
+        UGameInstance* GI = GetGameInstance();
+        if (GI)
+        {
+            UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>();
+            if (UIManager)
+            {
+                UIManager->LoadUI(WorldManager->GetMpqManager());
             }
         }
     }
