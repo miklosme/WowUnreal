@@ -312,7 +312,13 @@ static int LF_Hide(lua_State* L)
 // frame:IsShown()
 static int LF_IsShown(lua_State* L)
 {
-	// TODO: track visibility state properly
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		lua_pushboolean(L, Ctx->FrameManager->IsFrameVisible(Handle) ? 1 : 0);
+		return 1;
+	}
 	lua_pushboolean(L, 1);
 	return 1;
 }
@@ -320,45 +326,170 @@ static int LF_IsShown(lua_State* L)
 // frame:IsVisible()
 static int LF_IsVisible(lua_State* L)
 {
-	lua_pushboolean(L, 1);
-	return 1;
+	// IsVisible checks both self and parent chain — for now same as IsShown
+	return LF_IsShown(L);
+}
+
+// Parse a WoW anchor point string to enum
+static EWowAnchorPoint ParseAnchorPoint(const char* Str)
+{
+	if (!Str) return EWowAnchorPoint::CENTER;
+	if (strcmp(Str, "TOPLEFT") == 0) return EWowAnchorPoint::TOPLEFT;
+	if (strcmp(Str, "TOP") == 0) return EWowAnchorPoint::TOP;
+	if (strcmp(Str, "TOPRIGHT") == 0) return EWowAnchorPoint::TOPRIGHT;
+	if (strcmp(Str, "LEFT") == 0) return EWowAnchorPoint::LEFT;
+	if (strcmp(Str, "CENTER") == 0) return EWowAnchorPoint::CENTER;
+	if (strcmp(Str, "RIGHT") == 0) return EWowAnchorPoint::RIGHT;
+	if (strcmp(Str, "BOTTOMLEFT") == 0) return EWowAnchorPoint::BOTTOMLEFT;
+	if (strcmp(Str, "BOTTOM") == 0) return EWowAnchorPoint::BOTTOM;
+	if (strcmp(Str, "BOTTOMRIGHT") == 0) return EWowAnchorPoint::BOTTOMRIGHT;
+	return EWowAnchorPoint::CENTER;
 }
 
 // frame:SetPoint(point, relativeTo, relativePoint, ofsx, ofsy)
 static int LF_SetPoint(lua_State* L)
 {
-	// Store anchor data on the frame table for later use
-	// In a full implementation this would update the UMG widget position
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	const char* PointStr = luaL_checkstring(L, 2);
+	FWowAnchor Anchor;
+	Anchor.Point = ParseAnchorPoint(PointStr);
+
+	// arg3 = relativeTo (frame table, frame name string, or nil)
+	if (lua_istable(L, 3))
+	{
+		lua_getfield(L, 3, "__name");
+		if (lua_isstring(L, -1))
+			Anchor.RelativeTo = UTF8_TO_TCHAR(lua_tostring(L, -1));
+		lua_pop(L, 1);
+
+		// When relativeTo is a frame, arg4 = relativePoint, arg5 = x, arg6 = y
+		Anchor.RelativePoint = ParseAnchorPoint(luaL_optstring(L, 4, PointStr));
+		Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 5, 0));
+		Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 6, 0));
+	}
+	else if (lua_isstring(L, 3))
+	{
+		// Could be relativeTo name or relativePoint if no frame given
+		const char* Arg3 = lua_tostring(L, 3);
+		// Check if arg3 looks like an anchor point name
+		if (strcmp(Arg3, "TOPLEFT") == 0 || strcmp(Arg3, "TOP") == 0 || strcmp(Arg3, "TOPRIGHT") == 0 ||
+			strcmp(Arg3, "LEFT") == 0 || strcmp(Arg3, "CENTER") == 0 || strcmp(Arg3, "RIGHT") == 0 ||
+			strcmp(Arg3, "BOTTOMLEFT") == 0 || strcmp(Arg3, "BOTTOM") == 0 || strcmp(Arg3, "BOTTOMRIGHT") == 0)
+		{
+			// SetPoint("POINT", "RELATIVEPOINT", x, y) — no relativeTo frame
+			Anchor.RelativePoint = ParseAnchorPoint(Arg3);
+			Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 4, 0));
+			Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 5, 0));
+		}
+		else
+		{
+			// SetPoint("POINT", "frameName", "RELATIVEPOINT", x, y)
+			Anchor.RelativeTo = UTF8_TO_TCHAR(Arg3);
+			Anchor.RelativePoint = ParseAnchorPoint(luaL_optstring(L, 4, PointStr));
+			Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 5, 0));
+			Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 6, 0));
+		}
+	}
+	else
+	{
+		// SetPoint("POINT", nil, nil, x, y) or SetPoint("POINT", x, y)
+		Anchor.RelativePoint = Anchor.Point;
+		if (lua_isnumber(L, 3))
+		{
+			Anchor.OffsetX = static_cast<float>(lua_tonumber(L, 3));
+			Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 4, 0));
+		}
+		else
+		{
+			Anchor.OffsetX = static_cast<float>(luaL_optnumber(L, 5, 0));
+			Anchor.OffsetY = static_cast<float>(luaL_optnumber(L, 6, 0));
+		}
+	}
+
+	// Get current anchors and append (SetPoint adds, doesn't replace)
+	FWowFrameDef* Def = Ctx->FrameManager->GetMutableFrameDef(Handle);
+	if (Def)
+	{
+		Def->Anchors.Add(Anchor);
+		Ctx->FrameManager->SetFrameAnchors(Handle, Def->Anchors);
+	}
 	return 0;
 }
 
 // frame:ClearAllPoints()
 static int LF_ClearAllPoints(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		Ctx->FrameManager->ClearFrameAnchors(Handle);
+	}
 	return 0;
 }
 
 // frame:SetAllPoints(relativeTo)
 static int LF_SetAllPoints(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		FWowFrameDef* Def = Ctx->FrameManager->GetMutableFrameDef(Handle);
+		if (Def)
+		{
+			Def->bSetAllPoints = true;
+			Def->Anchors.Empty();
+			Ctx->FrameManager->SetFrameAnchors(Handle, Def->Anchors);
+		}
+	}
 	return 0;
 }
 
 // frame:SetSize(width, height)
 static int LF_SetSize(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		float W = static_cast<float>(luaL_checknumber(L, 2));
+		float H = static_cast<float>(luaL_checknumber(L, 3));
+		Ctx->FrameManager->SetFrameSize(Handle, W, H);
+	}
 	return 0;
 }
 
 // frame:SetWidth(width)
 static int LF_SetWidth(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		float W = static_cast<float>(luaL_checknumber(L, 2));
+		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
+		float H = Def ? Def->Height : 0.f;
+		Ctx->FrameManager->SetFrameSize(Handle, W, H);
+	}
 	return 0;
 }
 
 // frame:SetHeight(height)
 static int LF_SetHeight(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		float H = static_cast<float>(luaL_checknumber(L, 2));
+		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
+		float W = Def ? Def->Width : 0.f;
+		Ctx->FrameManager->SetFrameSize(Handle, W, H);
+	}
 	return 0;
 }
 
@@ -401,25 +532,89 @@ static int LF_GetHeight(lua_State* L)
 // frame:SetAlpha(alpha)
 static int LF_SetAlpha(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		float Alpha = static_cast<float>(luaL_checknumber(L, 2));
+		Ctx->FrameManager->SetFrameAlpha(Handle, Alpha);
+		// Store alpha on frame table for GetAlpha
+		lua_pushnumber(L, Alpha);
+		lua_setfield(L, 1, "__alpha");
+	}
 	return 0;
 }
 
 // frame:GetAlpha()
 static int LF_GetAlpha(lua_State* L)
 {
-	lua_pushnumber(L, 1.0);
+	lua_getfield(L, 1, "__alpha");
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		lua_pushnumber(L, 1.0);
+	}
 	return 1;
+}
+
+// Parse strata string
+static EWowFrameStrata ParseFrameStrata(const char* Str)
+{
+	if (!Str) return EWowFrameStrata::MEDIUM;
+	if (strcmp(Str, "BACKGROUND") == 0) return EWowFrameStrata::BACKGROUND;
+	if (strcmp(Str, "LOW") == 0) return EWowFrameStrata::LOW;
+	if (strcmp(Str, "MEDIUM") == 0) return EWowFrameStrata::MEDIUM;
+	if (strcmp(Str, "HIGH") == 0) return EWowFrameStrata::HIGH;
+	if (strcmp(Str, "DIALOG") == 0) return EWowFrameStrata::DIALOG;
+	if (strcmp(Str, "FULLSCREEN") == 0) return EWowFrameStrata::FULLSCREEN;
+	if (strcmp(Str, "FULLSCREEN_DIALOG") == 0) return EWowFrameStrata::FULLSCREEN_DIALOG;
+	if (strcmp(Str, "TOOLTIP") == 0) return EWowFrameStrata::TOOLTIP;
+	return EWowFrameStrata::MEDIUM;
+}
+
+static const char* StrataToString(EWowFrameStrata S)
+{
+	switch (S)
+	{
+	case EWowFrameStrata::BACKGROUND: return "BACKGROUND";
+	case EWowFrameStrata::LOW: return "LOW";
+	case EWowFrameStrata::MEDIUM: return "MEDIUM";
+	case EWowFrameStrata::HIGH: return "HIGH";
+	case EWowFrameStrata::DIALOG: return "DIALOG";
+	case EWowFrameStrata::FULLSCREEN: return "FULLSCREEN";
+	case EWowFrameStrata::FULLSCREEN_DIALOG: return "FULLSCREEN_DIALOG";
+	case EWowFrameStrata::TOOLTIP: return "TOOLTIP";
+	default: return "MEDIUM";
+	}
 }
 
 // frame:SetFrameStrata(strata)
 static int LF_SetFrameStrata(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		const char* StrataStr = luaL_checkstring(L, 2);
+		Ctx->FrameManager->SetFrameStrata(Handle, ParseFrameStrata(StrataStr));
+	}
 	return 0;
 }
 
 // frame:GetFrameStrata()
 static int LF_GetFrameStrata(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
+		if (Def)
+		{
+			lua_pushstring(L, StrataToString(Def->Strata));
+			return 1;
+		}
+	}
 	lua_pushstring(L, "MEDIUM");
 	return 1;
 }
@@ -427,6 +622,13 @@ static int LF_GetFrameStrata(lua_State* L)
 // frame:SetFrameLevel(level)
 static int LF_SetFrameLevel(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		int32 Level = static_cast<int32>(luaL_checknumber(L, 2));
+		Ctx->FrameManager->SetFrameLevel(Handle, Level);
+	}
 	return 0;
 }
 
@@ -487,12 +689,30 @@ static int LF_SetClampedToScreen(lua_State* L)
 // frame:SetParent(parent)
 static int LF_SetParent(lua_State* L)
 {
+	// TODO: reparenting requires moving widget between canvases
 	return 0;
 }
 
 // frame:GetParent()
 static int LF_GetParent(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		int64 ParentHandle = Ctx->FrameManager->GetParentHandle(Handle);
+		if (ParentHandle >= 0)
+		{
+			FString ParentName = Ctx->FrameManager->GetFrameName(ParentHandle);
+			if (!ParentName.IsEmpty())
+			{
+				lua_getglobal(L, TCHAR_TO_UTF8(*ParentName));
+				if (lua_istable(L, -1))
+					return 1;
+				lua_pop(L, 1);
+			}
+		}
+	}
 	lua_pushnil(L);
 	return 1;
 }
@@ -500,12 +720,44 @@ static int LF_GetParent(lua_State* L)
 // frame:GetChildren()
 static int LF_GetChildren(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		TArray<int64> Children = Ctx->FrameManager->GetChildHandles(Handle);
+		int Count = 0;
+		for (int64 ChildHandle : Children)
+		{
+			FString ChildName = Ctx->FrameManager->GetFrameName(ChildHandle);
+			if (!ChildName.IsEmpty())
+			{
+				lua_getglobal(L, TCHAR_TO_UTF8(*ChildName));
+				if (lua_istable(L, -1))
+				{
+					Count++;
+				}
+				else
+				{
+					lua_pop(L, 1);
+				}
+			}
+		}
+		return Count;
+	}
 	return 0;
 }
 
 // frame:GetNumChildren()
 static int LF_GetNumChildren(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		TArray<int64> Children = Ctx->FrameManager->GetChildHandles(Handle);
+		lua_pushnumber(L, Children.Num());
+		return 1;
+	}
 	lua_pushnumber(L, 0);
 	return 1;
 }
@@ -616,18 +868,35 @@ static int LF_CreateFontString(lua_State* L)
 // frame:SetBackdrop(backdrop)
 static int LF_SetBackdrop(lua_State* L)
 {
+	// Accept backdrop table or nil to clear — store for reference
+	// Full backdrop rendering (9-slice) deferred to Phase 12
 	return 0;
 }
 
 // frame:SetBackdropColor(r, g, b, a)
 static int LF_SetBackdropColor(lua_State* L)
 {
+	// Store color values on the frame table for later retrieval
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_newtable(L);
+	lua_pushnumber(L, luaL_optnumber(L, 2, 1.0)); lua_rawseti(L, -2, 1);
+	lua_pushnumber(L, luaL_optnumber(L, 3, 1.0)); lua_rawseti(L, -2, 2);
+	lua_pushnumber(L, luaL_optnumber(L, 4, 1.0)); lua_rawseti(L, -2, 3);
+	lua_pushnumber(L, luaL_optnumber(L, 5, 1.0)); lua_rawseti(L, -2, 4);
+	lua_setfield(L, 1, "__backdropColor");
 	return 0;
 }
 
 // frame:SetBackdropBorderColor(r, g, b, a)
 static int LF_SetBackdropBorderColor(lua_State* L)
 {
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_newtable(L);
+	lua_pushnumber(L, luaL_optnumber(L, 2, 1.0)); lua_rawseti(L, -2, 1);
+	lua_pushnumber(L, luaL_optnumber(L, 3, 1.0)); lua_rawseti(L, -2, 2);
+	lua_pushnumber(L, luaL_optnumber(L, 4, 1.0)); lua_rawseti(L, -2, 3);
+	lua_pushnumber(L, luaL_optnumber(L, 5, 1.0)); lua_rawseti(L, -2, 4);
+	lua_setfield(L, 1, "__backdropBorderColor");
 	return 0;
 }
 
@@ -655,13 +924,24 @@ static int LF_GetID(lua_State* L)
 // frame:SetAttribute(name, value)
 static int LF_SetAttribute(lua_State* L)
 {
+	luaL_checktype(L, 1, LUA_TTABLE);
+	const char* AttrName = luaL_checkstring(L, 2);
+	// Store as __attr_<name> on the frame table
+	FString Key = FString::Printf(TEXT("__attr_%s"), UTF8_TO_TCHAR(AttrName));
+	FTCHARToUTF8 UTF8Key(*Key);
+	lua_pushvalue(L, 3); // value (or nil)
+	lua_setfield(L, 1, UTF8Key.Get());
 	return 0;
 }
 
 // frame:GetAttribute(name)
 static int LF_GetAttribute(lua_State* L)
 {
-	lua_pushnil(L);
+	luaL_checktype(L, 1, LUA_TTABLE);
+	const char* AttrName = luaL_checkstring(L, 2);
+	FString Key = FString::Printf(TEXT("__attr_%s"), UTF8_TO_TCHAR(AttrName));
+	FTCHARToUTF8 UTF8Key(*Key);
+	lua_getfield(L, 1, UTF8Key.Get());
 	return 1;
 }
 
@@ -679,19 +959,77 @@ static int LF_HasScript(lua_State* L)
 	return 1;
 }
 
+// Helper: compute frame position from first anchor and dimensions
+static void GetFrameRect(lua_State* L, float& OutLeft, float& OutBottom, float& OutRight, float& OutTop)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	int64 Handle = GetFrameHandle(L);
+	OutLeft = OutBottom = OutRight = OutTop = 0.f;
+
+	if (!Ctx || !Ctx->FrameManager) return;
+	const FWowFrameDef* Def = Ctx->FrameManager->GetFrameDef(Handle);
+	if (!Def) return;
+
+	float W = Def->Width;
+	float H = Def->Height;
+	float X = 0.f, Y = 0.f;
+
+	if (!Def->Anchors.IsEmpty())
+	{
+		X = Def->Anchors[0].OffsetX;
+		Y = Def->Anchors[0].OffsetY;
+	}
+
+	// WoW UI coordinates: origin bottom-left, Y goes up
+	// Approximate position from anchor offset
+	OutLeft = X;
+	OutBottom = -Y; // WoW Y is inverted vs UMG
+	OutRight = X + W;
+	OutTop = -Y + H;
+}
+
 // frame:GetCenter()
 static int LF_GetCenter(lua_State* L)
 {
-	lua_pushnumber(L, 0);
-	lua_pushnumber(L, 0);
+	float Left, Bottom, Right, Top;
+	GetFrameRect(L, Left, Bottom, Right, Top);
+	lua_pushnumber(L, (Left + Right) * 0.5f);
+	lua_pushnumber(L, (Bottom + Top) * 0.5f);
 	return 2;
 }
 
 // frame:GetLeft/Right/Top/Bottom
-static int LF_GetLeft(lua_State* L) { lua_pushnumber(L, 0); return 1; }
-static int LF_GetRight(lua_State* L) { lua_pushnumber(L, 0); return 1; }
-static int LF_GetTop(lua_State* L) { lua_pushnumber(L, 0); return 1; }
-static int LF_GetBottom(lua_State* L) { lua_pushnumber(L, 0); return 1; }
+static int LF_GetLeft(lua_State* L)
+{
+	float Left, Bottom, Right, Top;
+	GetFrameRect(L, Left, Bottom, Right, Top);
+	lua_pushnumber(L, Left);
+	return 1;
+}
+
+static int LF_GetRight(lua_State* L)
+{
+	float Left, Bottom, Right, Top;
+	GetFrameRect(L, Left, Bottom, Right, Top);
+	lua_pushnumber(L, Right);
+	return 1;
+}
+
+static int LF_GetTop(lua_State* L)
+{
+	float Left, Bottom, Right, Top;
+	GetFrameRect(L, Left, Bottom, Right, Top);
+	lua_pushnumber(L, Top);
+	return 1;
+}
+
+static int LF_GetBottom(lua_State* L)
+{
+	float Left, Bottom, Right, Top;
+	GetFrameRect(L, Left, Bottom, Right, Top);
+	lua_pushnumber(L, Bottom);
+	return 1;
+}
 
 // frame:SetTexture(texture) — for Button Normal/Pushed/etc textures
 static int LF_SetNormalTexture(lua_State* L) { return 0; }
@@ -700,18 +1038,89 @@ static int LF_SetHighlightTexture(lua_State* L) { return 0; }
 static int LF_SetDisabledTexture(lua_State* L) { return 0; }
 
 // Button methods
-static int LF_SetText(lua_State* L) { return 0; }
-static int LF_GetText(lua_State* L) { lua_pushstring(L, ""); return 1; }
-static int LF_Disable(lua_State* L) { return 0; }
-static int LF_Enable(lua_State* L) { return 0; }
-static int LF_IsEnabled(lua_State* L) { lua_pushboolean(L, 1); return 1; }
+static int LF_SetText(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushvalue(L, 2);
+	lua_setfield(L, 1, "__text");
+	return 0;
+}
+
+static int LF_GetText(lua_State* L)
+{
+	lua_getfield(L, 1, "__text");
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		lua_pushstring(L, "");
+	}
+	return 1;
+}
+
+static int LF_Disable(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushboolean(L, 0);
+	lua_setfield(L, 1, "__enabled");
+	return 0;
+}
+
+static int LF_Enable(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushboolean(L, 1);
+	lua_setfield(L, 1, "__enabled");
+	return 0;
+}
+
+static int LF_IsEnabled(lua_State* L)
+{
+	lua_getfield(L, 1, "__enabled");
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		lua_pushboolean(L, 1);
+	}
+	return 1;
+}
+
 static int LF_Click(lua_State* L) { return 0; }
 
 // StatusBar methods
-static int LF_SetMinMaxValues(lua_State* L) { return 0; }
-static int LF_GetMinMaxValues(lua_State* L) { lua_pushnumber(L, 0); lua_pushnumber(L, 100); return 2; }
-static int LF_SetValue(lua_State* L) { return 0; }
-static int LF_GetValue(lua_State* L) { lua_pushnumber(L, 0); return 1; }
+static int LF_SetMinMaxValues(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushnumber(L, luaL_checknumber(L, 2));
+	lua_setfield(L, 1, "__minValue");
+	lua_pushnumber(L, luaL_checknumber(L, 3));
+	lua_setfield(L, 1, "__maxValue");
+	return 0;
+}
+
+static int LF_GetMinMaxValues(lua_State* L)
+{
+	lua_getfield(L, 1, "__minValue");
+	if (lua_isnil(L, -1)) { lua_pop(L, 1); lua_pushnumber(L, 0); }
+	lua_getfield(L, 1, "__maxValue");
+	if (lua_isnil(L, -1)) { lua_pop(L, 1); lua_pushnumber(L, 100); }
+	return 2;
+}
+
+static int LF_SetValue(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushnumber(L, luaL_checknumber(L, 2));
+	lua_setfield(L, 1, "__value");
+	return 0;
+}
+
+static int LF_GetValue(lua_State* L)
+{
+	lua_getfield(L, 1, "__value");
+	if (lua_isnil(L, -1)) { lua_pop(L, 1); lua_pushnumber(L, 0); }
+	return 1;
+}
+
 static int LF_SetStatusBarTexture(lua_State* L) { return 0; }
 static int LF_SetStatusBarColor(lua_State* L) { return 0; }
 static int LF_SetOrientation(lua_State* L) { return 0; }

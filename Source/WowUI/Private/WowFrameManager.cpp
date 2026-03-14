@@ -50,10 +50,126 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
 
+	Entry->Def.bHidden = !bVisible;
+
 	if (Entry->Widget.IsValid())
 	{
 		Entry->Widget->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
+}
+
+bool FWowFrameManager::IsFrameVisible(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? !Entry->Def.bHidden : false;
+}
+
+FWowFrameDef* FWowFrameManager::GetMutableFrameDef(int64 Handle)
+{
+	FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? &Entry->Def : nullptr;
+}
+
+void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
+{
+	FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry) return;
+
+	Entry->Def.Width = W;
+	Entry->Def.Height = H;
+
+	if (Entry->Widget.IsValid())
+	{
+		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Entry->Widget->Slot))
+		{
+			Slot->SetSize(FVector2D(W, H));
+		}
+	}
+}
+
+void FWowFrameManager::SetFrameAnchors(int64 Handle, const TArray<FWowAnchor>& NewAnchors)
+{
+	FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry) return;
+
+	Entry->Def.Anchors = NewAnchors;
+	Entry->Def.bSetAllPoints = false;
+
+	if (Entry->Widget.IsValid())
+	{
+		ApplyAnchors(Entry->Widget.Get(), Entry->Def);
+	}
+}
+
+void FWowFrameManager::ClearFrameAnchors(int64 Handle)
+{
+	FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry) return;
+
+	Entry->Def.Anchors.Empty();
+	Entry->Def.bSetAllPoints = false;
+}
+
+void FWowFrameManager::SetFrameAlpha(int64 Handle, float Alpha)
+{
+	FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry) return;
+
+	if (Entry->Widget.IsValid())
+	{
+		Entry->Widget->SetRenderOpacity(Alpha);
+	}
+}
+
+void FWowFrameManager::SetFrameStrata(int64 Handle, EWowFrameStrata Strata)
+{
+	FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry) return;
+
+	Entry->Def.Strata = Strata;
+
+	if (Entry->Widget.IsValid())
+	{
+		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Entry->Widget->Slot))
+		{
+			Slot->SetZOrder(static_cast<int32>(Strata) * 1000 + Entry->Def.FrameLevel);
+		}
+	}
+}
+
+void FWowFrameManager::SetFrameLevel(int64 Handle, int32 Level)
+{
+	FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry) return;
+
+	Entry->Def.FrameLevel = Level;
+
+	if (Entry->Widget.IsValid())
+	{
+		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Entry->Widget->Slot))
+		{
+			Slot->SetZOrder(static_cast<int32>(Entry->Def.Strata) * 1000 + Level);
+		}
+	}
+}
+
+int64 FWowFrameManager::GetParentHandle(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? Entry->ParentHandle : -1;
+}
+
+TArray<int64> FWowFrameManager::GetChildHandles(int64 Handle) const
+{
+	TArray<int64> Children;
+	for (const auto& Pair : Frames)
+	{
+		if (Pair.Value.ParentHandle == Handle)
+		{
+			Children.Add(Pair.Key);
+		}
+	}
+	return Children;
 }
 
 // ── Template Inheritance ──────────────────────────────────────────────────────

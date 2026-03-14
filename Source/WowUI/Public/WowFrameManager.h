@@ -36,8 +36,36 @@ public:
 	/** Get the frame definition for a handle (nullptr if not found) */
 	const FWowFrameDef* GetFrameDef(int64 Handle) const;
 
+	/** Get mutable frame definition for a handle (nullptr if not found) */
+	FWowFrameDef* GetMutableFrameDef(int64 Handle);
+
 	/** Show/hide a frame */
 	void SetFrameVisible(int64 Handle, bool bVisible);
+
+	/** Check if a frame is currently visible */
+	bool IsFrameVisible(int64 Handle) const;
+
+	/** Set frame size and update widget */
+	void SetFrameSize(int64 Handle, float W, float H);
+
+	/** Set frame anchors and reposition widget */
+	void SetFrameAnchors(int64 Handle, const TArray<FWowAnchor>& NewAnchors);
+
+	/** Clear all anchors on a frame */
+	void ClearFrameAnchors(int64 Handle);
+
+	/** Set frame alpha */
+	void SetFrameAlpha(int64 Handle, float Alpha);
+
+	/** Set frame strata and level */
+	void SetFrameStrata(int64 Handle, EWowFrameStrata Strata);
+	void SetFrameLevel(int64 Handle, int32 Level);
+
+	/** Get the parent handle of a frame (-1 if none) */
+	int64 GetParentHandle(int64 Handle) const;
+
+	/** Get child handles of a frame */
+	TArray<int64> GetChildHandles(int64 Handle) const;
 
 	/** Get frame count */
 	int32 GetFrameCount() const { return Frames.Num(); }
