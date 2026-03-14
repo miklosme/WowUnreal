@@ -133,14 +133,14 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             AdtY * FWowCoordinate::SCALE  // height (absolute, not relative)
         );
 
-        // Convert normal from WoW space to UE space
-        // WoW normals are in (X, Y, Z) WoW space; apply same transform as WowToUE
-        const FVector& WowNormal = ChunkData.Normals[i];
-        Result.Normals[i] = FVector(WowNormal.X, -WowNormal.Y, WowNormal.Z);
+        // Normals in ADT space (X=east, Y=up, Z=south) — same rotation as vertices: (-Z, X, Y)
+        const FVector& N = ChunkData.Normals[i];
+        Result.Normals[i] = FVector(-N.Z, N.X, N.Y);
         if (Result.Normals[i].IsNearlyZero())
         {
             Result.Normals[i] = FVector(0, 0, 1);
         }
+        Result.Normals[i].Normalize();
 
         // Tiling UVs: 0..8 range across the chunk for texture tiling
         Result.UVs[i] = FVector2D(GridX, GridY);
