@@ -50,6 +50,41 @@ UE="/Users/Shared/Epic Games/UE_5.7"
 2. Launch the game/editor
 3. Take a screenshot of the rendered world to visually confirm the change works
 4. Save screenshot to `Saved/Screenshots/` with descriptive name
+5. **VALIDATE the screenshot is not black/empty** — if it is, the task FAILED. Do not commit.
+
+### Screenshot Validation — MANDATORY
+
+After capturing a screenshot, you MUST validate it is not a black/empty image:
+```bash
+# Check if screenshot has actual content (not all black)
+python3 -c "
+from PIL import Image; import sys
+img = Image.open(sys.argv[1])
+pixels = list(img.getdata())
+non_black = sum(1 for p in pixels if max(p[:3]) > 10)
+pct = non_black / len(pixels) * 100
+print(f'Non-black pixels: {pct:.1f}%')
+if pct < 1.0:
+    print('FAIL: Screenshot is black/empty — game is not rendering')
+    sys.exit(1)
+print('PASS: Screenshot has content')
+" Saved/Screenshots/your_screenshot.png
+```
+
+**If the screenshot is black:**
+- Do NOT commit the change
+- Do NOT mark the task as `[?]`
+- Investigate WHY the game isn't rendering
+- Check the log for `FinalPreExposure`, `Error`, `Fatal`, or crash messages
+- Fix the rendering issue BEFORE proceeding
+
+### Memory & Performance — MANDATORY
+
+- **Never load more than 1 tile synchronously per tick** — use `LoadTileAsync`
+- **Never spawn LOD1/WDL tiles all at once** — throttle to a few per tick
+- **LOD1 tiles must NOT load per-chunk textures** — use simple solid materials
+- **If the game hangs, freezes, or locks up the machine, the task FAILED**
+- The game should remain responsive — no multi-second stalls on the game thread
 
 ---
 
@@ -127,9 +162,9 @@ UE="/Users/Shared/Epic Games/UE_5.7"
 
 ### Performance
 - Target: **60+ FPS** on mid-range GPU
-- Memory budget: **<2GB** for world data
 - Prefer instanced rendering for repeated meshes
 - No main-thread stalls during streaming — use async loading
+- Throttle tile/object spawning — never spawn dozens of heavy objects in a single frame
 
 ### Commit Style
 - One logical change per commit

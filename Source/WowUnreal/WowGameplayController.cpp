@@ -3,6 +3,7 @@
 #include "WowPacketHandler.h"
 #include "WowEntity.h"
 #include "WowOpcodes.h"
+#include "WowPlayerCharacter.h"
 #include "GameFramework/Character.h"
 #include "Coord/WowCoordinate.h"
 
@@ -33,16 +34,25 @@ void AWowGameplayController::BindEntityEvents()
         this, &AWowGameplayController::OnEntityUpdated);
 }
 
-void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z)
+void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation)
 {
-    FVector SpawnPos = FWowCoordinate::AdtToUE(X, Y, Z);
+    FVector SpawnPos = FWowCoordinate::WowToUE(X, Y, Z);
 
     APawn* P = GetPawn();
     if (P)
     {
-        P->SetActorLocation(SpawnPos);
-        UE_LOG(LogWowGameplay, Log, TEXT("Teleported to spawn: map=%d wow=(%.1f,%.1f,%.1f) ue=(%.0f,%.0f,%.0f)"),
-            MapId, X, Y, Z, SpawnPos.X, SpawnPos.Y, SpawnPos.Z);
+        if (AWowPlayerCharacter* PlayerCharacter = Cast<AWowPlayerCharacter>(P))
+        {
+            PlayerCharacter->ApplyLoginSpawn(SpawnPos, Orientation);
+        }
+        else
+        {
+            P->SetActorLocation(SpawnPos);
+            P->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+        }
+
+        UE_LOG(LogWowGameplay, Log, TEXT("Teleported to spawn: map=%d wow=(%.1f,%.1f,%.1f) orient=%.2f ue=(%.0f,%.0f,%.0f)"),
+            MapId, X, Y, Z, Orientation, SpawnPos.X, SpawnPos.Y, SpawnPos.Z);
     }
 
     bHasServerPosition = true;
@@ -96,10 +106,7 @@ void AWowGameplayController::SendMovementUpdate()
     if (Pos.Equals(LastSentPosition, 1.0f)) return;
     LastSentPosition = Pos;
 
-    // Convert UE position back to WoW coordinates for the server
-    // UE: X=-NgZ*S, Y=NgX*S, Z=NgY*S  →  WoW: NgX=UE.Y/S, NgY=UE.Z/S, NgZ=-UE.X/S
-    static constexpr float INV_SCALE = 1.0f / FWowCoordinate::SCALE;
-    FVector WowPos(Pos.Y * INV_SCALE, Pos.Z * INV_SCALE, -Pos.X * INV_SCALE);
+    FVector WowPos = FWowCoordinate::UEToWow(Pos);
 
     float Orientation = FMath::DegreesToRadians(P->GetActorRotation().Yaw);
 

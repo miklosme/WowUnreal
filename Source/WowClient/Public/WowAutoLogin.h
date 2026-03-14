@@ -22,6 +22,9 @@ public:
     /** Attempt autologin if requested */
     void TryAutoLogin();
 
+    /** Active connection manager created for the auto-login flow, if any */
+    UWowConnectionManager* GetConnectionManager() const { return AutoLoginConnMgr; }
+
 private:
     UFUNCTION() void OnRealmListReceived(const TArray<FWowRealmInfo>& Realms);
     UFUNCTION() void OnCharacterListReceived(const TArray<FWowCharacterInfo>& Characters);

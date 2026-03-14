@@ -186,11 +186,11 @@ void FWowAuthSocket::SendLogonChallenge()
     Packet.Add(Build & 0xFF);
     Packet.Add((Build >> 8) & 0xFF);
 
-    // platform "x86" reversed -> {0, '6', '8', 'x'}
-    Packet.Add(0); Packet.Add('6'); Packet.Add('8'); Packet.Add('x');
+    // platform "x86" stored as "68x\0" so the auth server reverses it back to "x86"
+    Packet.Add('6'); Packet.Add('8'); Packet.Add('x'); Packet.Add(0);
 
-    // os "Win" reversed -> {0, 'n', 'i', 'W'}
-    Packet.Add(0); Packet.Add('n'); Packet.Add('i'); Packet.Add('W');
+    // os "Win" stored as "niW\0" so the auth server reverses it back to "Win"
+    Packet.Add('n'); Packet.Add('i'); Packet.Add('W'); Packet.Add(0);
 
     // country "enUS" reversed -> {'S', 'U', 'n', 'e'}
     Packet.Add('S'); Packet.Add('U'); Packet.Add('n'); Packet.Add('e');
@@ -524,7 +524,10 @@ void FWowAuthSocket::HandleRealmList()
         Offset++;
 
         // uint8 realm_id
-        Offset++;
+        if (Offset < Body.Num())
+        {
+            Realm.RealmId = Body[Offset++];
+        }
 
         // If flag & 0x04, there are extra bytes (specifybuild)
         if (Flags & 0x04)
@@ -533,8 +536,8 @@ void FWowAuthSocket::HandleRealmList()
         }
 
         Realms.Add(Realm);
-        UE_LOG(LogWowAuth, Log, TEXT("Realm: %s (%s:%d) - %d chars"),
-               *Realm.Name, *Realm.Address, Realm.Port, Realm.CharacterCount);
+        UE_LOG(LogWowAuth, Log, TEXT("Realm: %s id=%u (%s:%d) - %d chars"),
+               *Realm.Name, Realm.RealmId, *Realm.Address, Realm.Port, Realm.CharacterCount);
     }
 
     AsyncTask(ENamedThreads::GameThread, [this, Realms]()

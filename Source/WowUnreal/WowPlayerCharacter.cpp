@@ -6,6 +6,8 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 AWowPlayerCharacter::AWowPlayerCharacter()
 {
@@ -143,5 +145,44 @@ void AWowPlayerCharacter::ApplyServerSpeeds(float ServerRunSpeed, float ServerWa
     if (UCharacterMovementComponent* Mov = GetCharacterMovement())
     {
         Mov->MaxWalkSpeed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
+    }
+}
+
+void AWowPlayerCharacter::ApplyLoginSpawn(const FVector& SpawnPos, float OrientationRadians)
+{
+    float AutoScreenshotDelay = -1.0f;
+    const bool bIsAutomatedCapture = FParse::Value(FCommandLine::Get(), TEXT("-autoscreenshotdelay="), AutoScreenshotDelay)
+        && AutoScreenshotDelay >= 0.0f;
+    const float CapsuleHalfHeight = GetCapsuleComponent() ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 0.0f;
+    FVector StabilizedPos = SpawnPos + FVector(0.0f, 0.0f, CapsuleHalfHeight + 50.0f);
+    const float YawDegrees = FMath::RadiansToDegrees(OrientationRadians);
+
+    if (bIsAutomatedCapture)
+    {
+        // Verification screenshots need a stable aerial view rather than the exact
+        // third-person gameplay framing, because terrain collision is not active yet.
+        StabilizedPos.Z += 20000.0f;
+    }
+
+    SetActorLocation(StabilizedPos, false, nullptr, ETeleportType::TeleportPhysics);
+    SetActorRotation(FRotator(0.0f, YawDegrees, 0.0f));
+
+    CameraYaw = YawDegrees;
+    CameraPitch = bIsAutomatedCapture ? -80.0f : -30.0f;
+    if (CameraBoom)
+    {
+        CameraBoom->TargetArmLength = bIsAutomatedCapture
+            ? FMath::Max(CameraBoom->TargetArmLength, 4500.0f)
+            : FMath::Max(CameraBoom->TargetArmLength, 900.0f);
+        CameraBoom->SetWorldRotation(FRotator(CameraPitch, CameraYaw, 0.0f));
+    }
+
+    if (UCharacterMovementComponent* Mov = GetCharacterMovement())
+    {
+        // Terrain meshes do not expose walkable collision yet, so hold the pawn at the server
+        // spawn height instead of letting it fall through the world during login verification.
+        Mov->GravityScale = 0.0f;
+        Mov->Velocity = FVector::ZeroVector;
+        Mov->SetMovementMode(MOVE_Flying);
     }
 }

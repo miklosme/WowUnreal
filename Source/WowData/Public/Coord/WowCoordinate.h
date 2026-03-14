@@ -49,10 +49,21 @@ struct WOWDATA_API FWowCoordinate
         return FIntPoint(TX, TY);
     }
 
-    /** Convert WoW world coords (X=north, Y=west, Z=up) to UE coords */
-    static FVector WowToUE(float X, float Y, float Z) { return FVector(X * SCALE, -Y * SCALE, Z * SCALE); }
+    /** Convert WoW world coords (centered map space used by movement/login packets) to UE coords */
+    static FVector WowToUE(float X, float Y, float Z)
+    {
+        const float NgX = MAP_ORIGIN - Y;
+        const float NgZ = MAP_ORIGIN - X;
+        return AdtToUE(NgX, Z, NgZ);
+    }
     static FVector WowToUE(const FVector& P) { return WowToUE(P.X, P.Y, P.Z); }
-    static FVector UEToWow(const FVector& P) { return FVector(P.X / SCALE, -P.Y / SCALE, P.Z / SCALE); }
+    static FVector UEToWow(const FVector& P)
+    {
+        const float NgX = P.Y / SCALE;
+        const float NgY = P.Z / SCALE;
+        const float NgZ = -P.X / SCALE;
+        return FVector(MAP_ORIGIN - NgZ, MAP_ORIGIN - NgX, NgY);
+    }
 
     static FRotator WowRotationToUE(float RX, float RY, float RZ) { return FRotator(RX, -RZ, RY); }
 };

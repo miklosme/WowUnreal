@@ -34,7 +34,7 @@ private:
     float KeepAliveInterval = 30.0f;
 
     // Server position sync
-    void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z);
+    void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);
     void OnEntityUpdated(const FWowEntity& Entity);
     bool bHasServerPosition = false;
 };

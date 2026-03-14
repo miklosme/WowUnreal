@@ -184,6 +184,31 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         {
             WaterMeshes.Add(WC);
         }
+
+        // Check for ocean liquid type and spawn ocean plane if found
+        float OceanHeight = 0.0f;
+        bool bHasOcean = false;
+        for (int32 i = 0; i < 256; i++)
+        {
+            for (const FMH2OInstance& Layer : Data.WaterChunks[i].Layers)
+            {
+                if (Layer.GetLiquidCategory() == 1) // ocean
+                {
+                    OceanHeight = Layer.MinHeight;
+                    bHasOcean = true;
+                    break;
+                }
+            }
+            if (bHasOcean) break;
+        }
+        if (bHasOcean)
+        {
+            UStaticMeshComponent* OceanComp = FWowWaterRenderer::CreateOceanPlane(this, OceanHeight, TX, TY);
+            if (OceanComp)
+            {
+                WaterMeshes.Add(OceanComp);
+            }
+        }
     }
 
     // Spawn doodads using HISMC instancing (batched per unique M2 model)

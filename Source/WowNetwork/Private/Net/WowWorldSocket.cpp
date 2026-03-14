@@ -39,10 +39,11 @@ FWowWorldSocket::~FWowWorldSocket()
 
 // ── Connect / Disconnect ───────────────────────────────────────────────────────
 
-bool FWowWorldSocket::Connect(const FString& Host, int32 Port, const FString& InAccountName, const TArray<uint8>& InSessionKey)
+bool FWowWorldSocket::Connect(const FString& Host, int32 Port, const FString& InAccountName, const TArray<uint8>& InSessionKey, uint32 InRealmId)
 {
     AccountName = InAccountName.ToUpper();
     SessionKey  = InSessionKey;
+    RealmId = InRealmId;
 
     ISocketSubsystem* SocketSub = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
     if (!SocketSub)
@@ -355,8 +356,7 @@ void FWowWorldSocket::HandleAuthChallenge(const TArray<uint8>& Data)
     uint32 BattleGroupId = 0;
     Payload.Append(reinterpret_cast<const uint8*>(&BattleGroupId), 4);
 
-    // uint32 realmId = 1
-    uint32 RealmId = 1;
+    // uint32 realmId
     Payload.Append(reinterpret_cast<const uint8*>(&RealmId), 4);
 
     // uint64 dosResponse = 0
@@ -404,7 +404,7 @@ void FWowWorldSocket::HandleAuthChallenge(const TArray<uint8>& Data)
         }
     }
 
-    UE_LOG(LogWowWorld, Log, TEXT("Sent CMSG_AUTH_SESSION for account: %s (payload %d bytes)"), *AccountName, Payload.Num());
+    UE_LOG(LogWowWorld, Log, TEXT("Sent CMSG_AUTH_SESSION for account: %s realm=%u (payload %d bytes)"), *AccountName, RealmId, Payload.Num());
 
     // Initialise encryption AFTER sending AUTH_SESSION (the response will be encrypted)
     Crypt.Init(SessionKey);

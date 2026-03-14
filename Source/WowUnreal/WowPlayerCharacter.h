@@ -62,6 +62,9 @@ public:
     /** Apply speeds received from the server entity */
     void ApplyServerSpeeds(float ServerRunSpeed, float ServerWalkSpeed);
 
+    /** Apply server spawn data and stabilize the camera until terrain collision exists locally. */
+    void ApplyLoginSpawn(const FVector& SpawnPos, float OrientationRadians);
+
 private:
     void OnMove(const FInputActionValue& Value);
     void OnLook(const FInputActionValue& Value);

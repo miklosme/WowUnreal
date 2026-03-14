@@ -2,10 +2,13 @@
 #include "WowPlayerCharacter.h"
 #include "WowGameplayController.h"
 #include "WowDebugHUD.h"
+#include "WowAutoLogin.h"
 #include "WowWorldManager.h"
 #include "WowSkyManager.h"
 #include "WowUIManager.h"
+#include "WowConnectionManager.h"
 #include "Engine/World.h"
+#include "Engine/PostProcessVolume.h"
 #include "Kismet/GameplayStatics.h"
 
 AWowViewerGameMode::AWowViewerGameMode()
@@ -21,6 +24,21 @@ void AWowViewerGameMode::BeginPlay()
 
     UWorld* World = GetWorld();
     if (!World) return;
+
+    // Spawn an unbound PostProcessVolume with fixed exposure to prevent black screen
+    // (FinalPreExposure > 0.0f ensure from eye adaptation computing zero)
+    {
+        APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>();
+        if (PPV)
+        {
+            PPV->bUnbound = true;
+            PPV->Settings.bOverride_AutoExposureMethod = true;
+            PPV->Settings.AutoExposureMethod = AEM_Manual;
+            PPV->Settings.bOverride_AutoExposureBias = true;
+            PPV->Settings.AutoExposureBias = 10.0f;
+            UE_LOG(LogTemp, Log, TEXT("Spawned global PostProcessVolume with fixed manual exposure"));
+        }
+    }
 
     // Spawn sky manager (handles sun, moon, sky atmosphere, fog, time-of-day)
     {
@@ -73,6 +91,24 @@ void AWowViewerGameMode::BeginPlay()
             if (UIManager)
             {
                 UIManager->LoadUI(WorldManager->GetMpqManager());
+            }
+        }
+    }
+
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UWowAutoLogin* AutoLogin = GI->GetSubsystem<UWowAutoLogin>())
+        {
+            AutoLogin->TryAutoLogin();
+
+            if (AWowGameplayController* GameplayController = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
+            {
+                if (UWowConnectionManager* ConnectionManager = AutoLogin->GetConnectionManager())
+                {
+                    GameplayController->ConnectionManager = ConnectionManager;
+                    GameplayController->BindEntityEvents();
+                    UE_LOG(LogTemp, Log, TEXT("Bound gameplay controller to autologin connection manager"));
+                }
             }
         }
     }

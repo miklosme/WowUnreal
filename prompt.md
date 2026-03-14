@@ -41,8 +41,29 @@ UE="/Users/Shared/Epic Games/UE_5.7"
   -game -windowed -resx=1920 -resy=1080 -nosplash -log
 
 # 3. Save screenshot to Saved/Screenshots/ with descriptive name
+
+# 4. VALIDATE screenshot is not black/empty (REQUIRED)
+python3 -c "
+from PIL import Image; import sys
+img = Image.open(sys.argv[1])
+pixels = list(img.getdata())
+non_black = sum(1 for p in pixels if max(p[:3]) > 10)
+pct = non_black / len(pixels) * 100
+print(f'Non-black pixels: {pct:.1f}%')
+if pct < 1.0:
+    print('FAIL: Screenshot is black — DO NOT COMMIT')
+    sys.exit(1)
+print('PASS')
+" Saved/Screenshots/your_screenshot.png
 ```
-If the build or run fails, fix it before moving on.
+If the build fails, fix it before moving on.
+**If the screenshot is black/empty, the task FAILED.** Do not commit. Do not mark `[?]`. Investigate and fix the rendering issue first. Check logs for errors.
+
+### CRITICAL: Resource Limits
+- **Never block the game thread** with synchronous tile loads
+- **Never spawn dozens of tiles in one frame** — throttle LOD1 and WDL spawning
+- **If the game hangs, freezes, or locks up the machine — the task FAILED**
+- The game must remain responsive — no multi-second stalls on the game thread
 
 ## Git Commits — MANDATORY
 After EVERY successful change:

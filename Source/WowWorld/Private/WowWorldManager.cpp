@@ -26,8 +26,10 @@
 #include "WowTerrainMeshBuilder.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMisc.h"
+#include "Misc/FileHelper.h"
 #include "Misc/DateTime.h"
 #include "Misc/Paths.h"
+#include "ImageUtils.h"
 #include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
@@ -44,6 +46,36 @@ constexpr float WdlTransitionDepthOffset = 15.0f;
 int32 OuterVertexIndex(int32 X, int32 Y)
 {
     return Y * 17 + X;
+}
+
+bool SaveViewportPng(const FString& OutputPath)
+{
+    if (!GEngine || !GEngine->GameViewport || !GEngine->GameViewport->Viewport)
+    {
+        return false;
+    }
+
+    FViewport* Viewport = GEngine->GameViewport->Viewport;
+    const FIntPoint Size = Viewport->GetSizeXY();
+    if (Size.X <= 0 || Size.Y <= 0)
+    {
+        return false;
+    }
+
+    TArray<FColor> Pixels;
+    if (!GetViewportScreenShot(Viewport, Pixels))
+    {
+        return false;
+    }
+
+    for (FColor& Pixel : Pixels)
+    {
+        Pixel.A = 255;
+    }
+
+    TArray64<uint8> CompressedPng;
+    FImageUtils::PNGCompressImageArray(Size.X, Size.Y, TArrayView64<const FColor>(Pixels.GetData(), Pixels.Num()), CompressedPng);
+    return FFileHelper::SaveArrayToFile(CompressedPng, *OutputPath);
 }
 
 int32 GetTileDistance(const FIntPoint& CameraTile, int32 TX, int32 TY)
@@ -311,7 +343,7 @@ void BuildWdlTransitionGeometry(
 }
 }
 
-AWowWorldManager::AWowWorldManager() { PrimaryActorTick.bCanEverTick = true; PrimaryActorTick.TickInterval = 0.5f; }
+AWowWorldManager::AWowWorldManager() { PrimaryActorTick.bCanEverTick = true; PrimaryActorTick.TickInterval = 0.1f; }
 
 void AWowWorldManager::BeginPlay()
 {
@@ -419,12 +451,13 @@ void AWowWorldManager::BeginPlay()
     // Set up Runtime Virtual Texture for terrain
     SetupRuntimeVirtualTexture();
 
-    // Load a 3x3 grid of tiles around the debug tile
+    // Load a 3x3 grid of tiles around the debug tile (async so the renderer
+    // is not starved — each tile builds 256 mesh chunks on the game thread).
     for (int32 DX = -1; DX <= 1; ++DX)
     {
         for (int32 DY = -1; DY <= 1; ++DY)
         {
-            LoadTile(StartupTileX + DX, StartupTileY + DY);
+            LoadTileAsync(StartupTileX + DX, StartupTileY + DY);
         }
     }
 
@@ -521,17 +554,11 @@ void AWowWorldManager::Tick(float DT)
 
     if (!bAutoScreenshotRequested && AutoScreenshotDelaySeconds >= 0.0f && AutoElapsedSeconds >= AutoScreenshotDelaySeconds)
     {
-        const FString ScreenshotCommand = FString::Printf(TEXT("HighResShot 1920x1080 filename=\"%s\""), *AutoScreenshotPath);
-        if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
-        {
-            PC->ConsoleCommand(ScreenshotCommand, true);
-        }
-        else if (GetWorld())
-        {
-            GetWorld()->Exec(GetWorld(), *ScreenshotCommand);
-        }
         bAutoScreenshotRequested = true;
-        UE_LOG(LogWowWorld, Log, TEXT("Requested auto screenshot command: %s"), *AutoScreenshotPath);
+        const bool bSaved = SaveViewportPng(AutoScreenshotPath);
+        UE_LOG(LogWowWorld, Log, TEXT("%s auto screenshot capture: %s"),
+            bSaved ? TEXT("Saved") : TEXT("Failed to save"),
+            *AutoScreenshotPath);
     }
 
     if (!bAutoQuitRequested && AutoQuitDelaySeconds >= 0.0f && AutoElapsedSeconds >= AutoQuitDelaySeconds)
@@ -552,7 +579,7 @@ void AWowWorldManager::Tick(float DT)
 
     // Periodically purge stale cache entries and check budget
     static int32 CachePurgeCounter = 0;
-    if (AssetCache && (++CachePurgeCounter % 20 == 0)) // every ~10 seconds at 0.5s tick
+    if (AssetCache && (++CachePurgeCounter % 100 == 0)) // every ~10 seconds at 0.1s tick
     {
         AssetCache->PurgeStaleEntries();
         if (AssetCache->IsOverBudget())
@@ -692,6 +719,11 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
 
 void AWowWorldManager::ProcessPendingLoads()
 {
+    // Finalize at most one tile per tick so the renderer is never starved.
+    // BuildFromAdtData builds 256 mesh chunks on the game thread and can
+    // take hundreds of milliseconds — doing more than one per tick causes
+    // multi-second hitches or a completely black screen on startup.
+    int32 Finalized = 0;
     for (int32 i = PendingLoads.Num() - 1; i >= 0; --i)
     {
         FPendingTileLoad& Pending = PendingLoads[i];
@@ -701,9 +733,16 @@ void AWowWorldManager::ProcessPendingLoads()
             int64 Key = TileKey(Pending.TX, Pending.TY);
             PendingTileKeys.Remove(Key);
 
-            if (Result)
+            if (Result && Finalized < 1)
             {
                 FinalizeTileLoad(Pending.TX, Pending.TY, Result);
+                ++Finalized;
+            }
+            else if (Result)
+            {
+                // Re-queue: data is ready but we hit the per-tick limit.
+                // Leave it in the array for next tick.
+                continue;
             }
 
             PendingLoads.RemoveAt(i);
@@ -746,15 +785,14 @@ void AWowWorldManager::UpdateStreaming()
     // Figure out which tile the camera is over
     FIntPoint CameraTile = FWowCoordinate::WorldToTile(CamLoc);
 
-    // Only update if camera moved to a different tile
-    if (CameraTile == LastCameraTile) return;
-    LastCameraTile = CameraTile;
+    const bool bTileChanged = (CameraTile != LastCameraTile);
 
-    // Update WDL distant terrain
+    // Always run throttled LOD1/WDL spawning (they limit per-tick work internally)
     UpdateWdlStreaming(CameraTile);
-
-    // Update LOD 1 terrain
     UpdateLod1Streaming(CameraTile);
+
+    if (!bTileChanged) return;
+    LastCameraTile = CameraTile;
 
     // Keep RVT volume centered on camera
     UpdateRVTBounds(CameraTile);
@@ -831,10 +869,12 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
 {
     if (!WdlData || !WdlData->bIsValid) return;
 
-    // Load WDL tiles in range (beyond LOD 0 radius, up to WdlRadius)
-    for (int32 DX = -WdlRadius; DX <= WdlRadius; ++DX)
+    // Load WDL tiles in range (beyond LOD 0 radius, up to WdlRadius).
+    // Throttle to 5 per call to avoid spawning 500+ tiles in one frame.
+    int32 WdlSpawned = 0;
+    for (int32 DX = -WdlRadius; DX <= WdlRadius && WdlSpawned < 5; ++DX)
     {
-        for (int32 DY = -WdlRadius; DY <= WdlRadius; ++DY)
+        for (int32 DY = -WdlRadius; DY <= WdlRadius && WdlSpawned < 5; ++DY)
         {
             int32 TX = CameraTile.X + DX;
             int32 TY = CameraTile.Y + DY;
@@ -852,6 +892,7 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
             if (!WdlData->HasTile(TX, TY)) continue;
 
             SpawnWdlTile(TX, TY);
+            ++WdlSpawned;
         }
     }
 
@@ -1083,10 +1124,12 @@ void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
 {
     if (!WdtData || !WdtData->bIsValid || !MpqManager) return;
 
-    // Load LOD 1 tiles in mid-range (beyond full-detail, within Lod1Radius)
-    for (int32 DX = -Lod1Radius; DX <= Lod1Radius; ++DX)
+    // Load LOD 1 tiles in mid-range (beyond full-detail, within Lod1Radius).
+    // Throttle to 1 per call to avoid a memory/CPU spike (96 tiles at radius 5).
+    int32 Lod1Spawned = 0;
+    for (int32 DX = -Lod1Radius; DX <= Lod1Radius && Lod1Spawned < 1; ++DX)
     {
-        for (int32 DY = -Lod1Radius; DY <= Lod1Radius; ++DY)
+        for (int32 DY = -Lod1Radius; DY <= Lod1Radius && Lod1Spawned < 1; ++DY)
         {
             int32 Dist = FMath::Max(FMath::Abs(DX), FMath::Abs(DY));
             // Only LOD 1 range: beyond LoadRadius, within Lod1Radius
@@ -1104,6 +1147,7 @@ void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
             if (Lod1Tiles.Contains(Key)) continue;
 
             SpawnLod1Tile(TX, TY);
+            ++Lod1Spawned;
         }
     }
 
@@ -1163,22 +1207,16 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = SMAttributes.GetVertexInstanceBinormalSigns();
     TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = SMAttributes.GetVertexInstanceUVs();
 
-    TArray<UMaterialInterface*> Lod1Materials;
-    int32 SectionIndex = 0;
-    int32 TexturedSections = 0;
-    UMaterialInterface* DefaultLod1Material = FWowTerrainMaterial::GetBaseMaterial();
-    if (!DefaultLod1Material)
-    {
-        DefaultLod1Material = UMaterial::GetDefaultMaterial(MD_Surface);
-    }
+    // LOD1 uses a single polygon group with a simple solid material — no per-chunk
+    // textures. This keeps memory usage low (old WoW ran on 2GB RAM total).
+    FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+    int32 TotalChunks = 0;
 
     for (int32 i = 0; i < 256; ++i)
     {
         const FAdtChunkData& ChunkData = AdtData.Chunks[i];
         FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(ChunkData, TX, TY);
         if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0) continue;
-
-        FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
 
         TArray<FVertexInstanceID> ChunkVertInstIDs;
         ChunkVertInstIDs.SetNum(MeshData.Vertices.Num());
@@ -1218,23 +1256,10 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
             MeshDesc.CreatePolygon(PolyGroup, TriVerts);
         }
 
-        UMaterialInstanceDynamic* ChunkMaterial = FWowTerrainMaterial::CreateChunkMaterial(
-            ChunkData, AdtData, MpqManager.Get(), AssetCache.Get(), Lod1Actor);
-
-        if (ChunkMaterial)
-        {
-            Lod1Materials.Add(ChunkMaterial);
-            TexturedSections++;
-        }
-        else
-        {
-            Lod1Materials.Add(DefaultLod1Material);
-        }
-
-        SectionIndex++;
+        TotalChunks++;
     }
 
-    if (SectionIndex > 0)
+    if (TotalChunks > 0)
     {
         UStaticMesh* SM = NewObject<UStaticMesh>();
         SM->AddToRoot();
@@ -1246,12 +1271,13 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
         Params.bFastBuild = true;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
 
-        for (int32 s = 0; s < Lod1Materials.Num(); ++s)
+        // Simple green-brown material for distant terrain (same as WDL)
+        UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
+            UMaterial::GetDefaultMaterial(MD_Surface), SM);
+        if (Mat)
         {
-            if (Lod1Materials[s])
-            {
-                SM->SetMaterial(s, Lod1Materials[s]);
-            }
+            Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
+            SM->SetMaterial(0, Mat);
         }
 
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
@@ -1263,7 +1289,7 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     }
 
     Lod1Tiles.Add(TileKey(TX, TY), Lod1Actor);
-    UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d sections, %d textured)"), TX, TY, SectionIndex, TexturedSections);
+    UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d chunks, no textures)"), TX, TY, TotalChunks);
 }
 
 void AWowWorldManager::UpdateObjectStreaming()

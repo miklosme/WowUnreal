@@ -30,6 +30,12 @@ void UWowAutoLogin::TryAutoLogin()
         return;
     }
 
+    if (AutoLoginConnMgr)
+    {
+        UE_LOG(LogWowAutoLogin, Log, TEXT("Autologin already started"));
+        return;
+    }
+
     // Load credentials
     UWowCredentialStore* CredStore = NewObject<UWowCredentialStore>(this);
     if (!CredStore->LoadCredentials())

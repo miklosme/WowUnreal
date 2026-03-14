@@ -15,7 +15,7 @@ public:
     FWowWorldSocket();
     virtual ~FWowWorldSocket();
 
-    bool Connect(const FString& Host, int32 Port, const FString& AccountName, const TArray<uint8>& SessionKey);
+    bool Connect(const FString& Host, int32 Port, const FString& AccountName, const TArray<uint8>& SessionKey, uint32 RealmId);
     void Disconnect();
 
     /** Send CMSG_CHAR_ENUM to request character list */
@@ -50,6 +50,7 @@ private:
     FWowAuthCrypt Crypt;
     FString AccountName;
     TArray<uint8> SessionKey;
+    uint32 RealmId = 1;
 
     bool bRunning = false;
     bool bEncrypted = false;

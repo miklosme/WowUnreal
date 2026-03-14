@@ -21,6 +21,7 @@ struct WOWNETWORK_API FWowRealmInfo
     UPROPERTY(BlueprintReadOnly) int32 Port = 0;
     UPROPERTY(BlueprintReadOnly) int32 CharacterCount = 0;
     UPROPERTY(BlueprintReadOnly) uint8 Type = 0;
+    UPROPERTY(BlueprintReadOnly) int32 RealmId = 0;
 };
 
 USTRUCT(BlueprintType)
