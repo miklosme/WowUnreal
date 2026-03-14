@@ -64,6 +64,7 @@ FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 
 	// Second pass: read MARE chunks by offset
 	int32 TileCount = 0;
+	int32 HoleCount = 0;
 	for (int32 y = 0; y < 64; y++)
 	{
 		for (int32 x = 0; x < 64; x++)
@@ -91,6 +92,20 @@ FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 			// Read 16x16 inner heights (int16)
 			FMemory::Memcpy(Tile->Height16, HeightData + 17 * 17 * sizeof(int16), 16 * 16 * sizeof(int16));
 
+			// Check for MAHO chunk following MARE
+			const uint8* MahoPtr = HeightData + TileSize; // right after MARE data
+			if (MahoPtr + 8 <= End)
+			{
+				uint32 MahoMagic = *reinterpret_cast<const uint32*>(MahoPtr);
+				uint32 MahoSize = *reinterpret_cast<const uint32*>(MahoPtr + 4);
+				if (MahoMagic == WDL_MAHO && MahoSize == 32 && MahoPtr + 8 + MahoSize <= End)
+				{
+					FMemory::Memcpy(Tile->HoleMask, MahoPtr + 8, 32);
+					Tile->bHasHoles = true;
+					HoleCount++;
+				}
+			}
+
 			Tile->bHasData = true;
 			Result.Tiles[y][x] = Tile;
 			TileCount++;
@@ -98,6 +113,6 @@ FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 	}
 
 	Result.bIsValid = TileCount > 0;
-	UE_LOG(LogWdl, Log, TEXT("WDL parsed: %d tiles with height data"), TileCount);
+	UE_LOG(LogWdl, Log, TEXT("WDL parsed: %d tiles with height data (%d with holes)"), TileCount, HoleCount);
 	return Result;
 }
