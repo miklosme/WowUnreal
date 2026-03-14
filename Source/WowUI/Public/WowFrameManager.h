@@ -48,4 +48,13 @@ private:
 	int64 NextHandle = 1;
 
 	UWidget* CreateWidgetForFrame(const FWowFrameDef& Def);
+
+	/** Resolve template inheritance for a frame definition */
+	FWowFrameDef ResolveInherits(const FWowFrameDef& Def) const;
+
+	/** Merge template attributes into a target definition (template first, then target overrides) */
+	static void MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& Template);
+
+	/** Apply anchor positioning to a widget's canvas slot */
+	void ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def);
 };
