@@ -136,6 +136,14 @@ private:
     /** Current count of active WMO group mesh components */
     int32 ActiveWmoGroupCount = 0;
 
+    /** Optional command-line driven screenshot path and timing for automated verification runs. */
+    FString AutoScreenshotPath;
+    float AutoScreenshotDelaySeconds = -1.0f;
+    float AutoQuitDelaySeconds = -1.0f;
+    double AutoStartWallClockSeconds = 0.0;
+    bool bAutoScreenshotRequested = false;
+    bool bAutoQuitRequested = false;
+
     void LoadTile(int32 TX, int32 TY);
     void LoadTileAsync(int32 TX, int32 TY);
     void FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData);

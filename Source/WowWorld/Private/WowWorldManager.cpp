@@ -24,6 +24,11 @@
 #include "VT/RuntimeVirtualTexture.h"
 #include "Components/RuntimeVirtualTextureComponent.h"
 #include "WowTerrainMeshBuilder.h"
+#include "HAL/PlatformFileManager.h"
+#include "HAL/PlatformMisc.h"
+#include "Misc/DateTime.h"
+#include "Misc/Paths.h"
+#include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 
@@ -316,6 +321,39 @@ void AWowWorldManager::BeginPlay()
     FString DataPath;
     FParse::Value(FCommandLine::Get(), TEXT("-wowdata="), DataPath);
     if (DataPath.IsEmpty()) DataPath = TEXT("/Users/clancey/Downloads/World of Warcraft 3.3.5a/Data");
+    int32 StartupTileX = DebugTileX;
+    int32 StartupTileY = DebugTileY;
+    float StartupCameraHeight = 40000.0f;
+    float StartupCameraPitch = -20.0f;
+    float StartupCameraYaw = 0.0f;
+    FParse::Value(FCommandLine::Get(), TEXT("-tilex="), StartupTileX);
+    FParse::Value(FCommandLine::Get(), TEXT("-tiley="), StartupTileY);
+    FParse::Value(FCommandLine::Get(), TEXT("-cameraheight="), StartupCameraHeight);
+    FParse::Value(FCommandLine::Get(), TEXT("-camerapitch="), StartupCameraPitch);
+    FParse::Value(FCommandLine::Get(), TEXT("-camerayaw="), StartupCameraYaw);
+    FParse::Value(FCommandLine::Get(), TEXT("-autoscreenshotdelay="), AutoScreenshotDelaySeconds);
+    FParse::Value(FCommandLine::Get(), TEXT("-autoquitdelay="), AutoQuitDelaySeconds);
+    FParse::Value(FCommandLine::Get(), TEXT("-autoscreenshot="), AutoScreenshotPath);
+    if (AutoScreenshotDelaySeconds >= 0.0f)
+    {
+        if (AutoScreenshotPath.IsEmpty())
+        {
+            AutoScreenshotPath = FString::Printf(TEXT("auto_%s.png"), *FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S")));
+        }
+        if (FPaths::IsRelative(AutoScreenshotPath))
+        {
+            AutoScreenshotPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Screenshots"), AutoScreenshotPath);
+        }
+
+        IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+        PlatformFile.CreateDirectoryTree(*FPaths::GetPath(AutoScreenshotPath));
+        UE_LOG(LogWowWorld, Log, TEXT("Auto screenshot scheduled at %.1fs -> %s"), AutoScreenshotDelaySeconds, *AutoScreenshotPath);
+    }
+    if (AutoQuitDelaySeconds >= 0.0f)
+    {
+        UE_LOG(LogWowWorld, Log, TEXT("Auto quit scheduled at %.1fs"), AutoQuitDelaySeconds);
+    }
+    AutoStartWallClockSeconds = FPlatformTime::Seconds();
     if (!MpqManager->Initialize(DataPath))
     {
         UE_LOG(LogWowWorld, Error, TEXT("Failed to init MPQ from: %s"), *DataPath);
@@ -354,10 +392,10 @@ void AWowWorldManager::BeginPlay()
         UE_LOG(LogWowWorld, Log, TEXT("WDT has %d tiles. First: %s"), TileCount, *FirstTiles);
 
         // Check if debug tile exists
-        if (DebugTileX >= 0 && DebugTileX < 64 && DebugTileY >= 0 && DebugTileY < 64)
+        if (StartupTileX >= 0 && StartupTileX < 64 && StartupTileY >= 0 && StartupTileY < 64)
         {
-            UE_LOG(LogWowWorld, Log, TEXT("Debug tile %d,%d exists: %s"), DebugTileX, DebugTileY,
-                WdtData->TileExists[DebugTileX][DebugTileY] ? TEXT("YES") : TEXT("NO"));
+            UE_LOG(LogWowWorld, Log, TEXT("Startup tile %d,%d exists: %s"), StartupTileX, StartupTileY,
+                WdtData->TileExists[StartupTileX][StartupTileY] ? TEXT("YES") : TEXT("NO"));
         }
     }
     else
@@ -386,7 +424,7 @@ void AWowWorldManager::BeginPlay()
     {
         for (int32 DY = -1; DY <= 1; ++DY)
         {
-            LoadTile(DebugTileX + DX, DebugTileY + DY);
+            LoadTile(StartupTileX + DX, StartupTileY + DY);
         }
     }
 
@@ -397,16 +435,16 @@ void AWowWorldManager::BeginPlay()
     // The tile actor is at TileToWorld position, vertices are local to that
     // First chunk (0,0) starts at local offset ~(-26667, -26667, height*100)
     // The height for Elwynn is ~236 WoW units = 23600 UE cm
-    FVector TileCenter = FWowCoordinate::TileToWorld(DebugTileX, DebugTileY);
+    FVector TileCenter = FWowCoordinate::TileToWorld(StartupTileX, StartupTileY);
     // Start at a reasonable flying height (above terrain which is ~100-300 WoW units = 10000-30000 cm)
-    TileCenter.Z = 40000.0f;  // 400m up, well above Elwynn terrain (~100-300 WoW units)
+    TileCenter.Z = StartupCameraHeight;
 
     APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
     if (PC && PC->GetPawn())
     {
         PC->GetPawn()->SetActorLocation(TileCenter);
-        // Look slightly down at the terrain (not straight down)
-        PC->SetControlRotation(FRotator(-20.0f, 0.0f, 0.0f));
+        // Allow verification runs to change the framing without touching defaults.
+        PC->SetControlRotation(FRotator(StartupCameraPitch, StartupCameraYaw, 0.0f));
         UE_LOG(LogWowWorld, Log, TEXT("Teleported player to: %s"), *TileCenter.ToString());
     }
 }
@@ -464,9 +502,45 @@ void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
 void AWowWorldManager::Tick(float DT)
 {
     Super::Tick(DT);
+    const double AutoElapsedSeconds = FPlatformTime::Seconds() - AutoStartWallClockSeconds;
+    static int32 AutoLogBucket = -1;
 
     // Always process completed async loads, even before streaming is enabled
     ProcessPendingLoads();
+
+    if ((AutoScreenshotDelaySeconds >= 0.0f || AutoQuitDelaySeconds >= 0.0f) && AutoElapsedSeconds >= 0.0)
+    {
+        const int32 CurrentBucket = FMath::FloorToInt32(AutoElapsedSeconds / 5.0);
+        if (CurrentBucket != AutoLogBucket)
+        {
+            AutoLogBucket = CurrentBucket;
+            UE_LOG(LogWowWorld, Log, TEXT("Auto timer: %.1fs elapsed (shot=%.1fs quit=%.1fs)"),
+                AutoElapsedSeconds, AutoScreenshotDelaySeconds, AutoQuitDelaySeconds);
+        }
+    }
+
+    if (!bAutoScreenshotRequested && AutoScreenshotDelaySeconds >= 0.0f && AutoElapsedSeconds >= AutoScreenshotDelaySeconds)
+    {
+        const FString ScreenshotCommand = FString::Printf(TEXT("HighResShot 1920x1080 filename=\"%s\""), *AutoScreenshotPath);
+        if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+        {
+            PC->ConsoleCommand(ScreenshotCommand, true);
+        }
+        else if (GetWorld())
+        {
+            GetWorld()->Exec(GetWorld(), *ScreenshotCommand);
+        }
+        bAutoScreenshotRequested = true;
+        UE_LOG(LogWowWorld, Log, TEXT("Requested auto screenshot command: %s"), *AutoScreenshotPath);
+    }
+
+    if (!bAutoQuitRequested && AutoQuitDelaySeconds >= 0.0f && AutoElapsedSeconds >= AutoQuitDelaySeconds)
+    {
+        bAutoQuitRequested = true;
+        UE_LOG(LogWowWorld, Log, TEXT("Requesting auto quit at %.1fs"), AutoElapsedSeconds);
+        FPlatformMisc::RequestExit(false);
+        return;
+    }
 
     if (!bStreamingEnabled || !MpqManager || !MpqManager->IsInitialized())
     {

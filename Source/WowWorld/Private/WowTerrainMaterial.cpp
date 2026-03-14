@@ -8,6 +8,7 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/SoftObjectPath.h"
+#include "UObject/UObjectGlobals.h"
 #include "Misc/PackageName.h"
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
@@ -297,7 +298,10 @@ UTexture2D* FWowTerrainMaterial::CreateAlphaTexture(const TArray<uint8>& AlphaDa
         return nullptr;
     }
 
-    UTexture2D* Tex = UTexture2D::CreateTransient(AlphaSize, AlphaSize, PF_G8, *Name);
+    // Alpha maps are generated per chunk at runtime, so they need unique transient names
+    // to avoid replacing textures that are still referenced by already-loaded tiles.
+    const FName UniqueName = MakeUniqueObjectName(GetTransientPackage(), UTexture2D::StaticClass(), *Name);
+    UTexture2D* Tex = UTexture2D::CreateTransient(AlphaSize, AlphaSize, PF_G8, UniqueName);
     if (!Tex) return nullptr;
 
     Tex->Filter = TF_Bilinear;
