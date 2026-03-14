@@ -383,6 +383,16 @@ void AWowWorldManager::BeginPlay()
     // Load DBC tables
     FDbcStore::Get().LoadAll(*MpqManager);
 
+    // Check if a test scene mode wants MPQ-only (no terrain loading)
+    FString TestScene;
+    FParse::Value(FCommandLine::Get(), TEXT("-testscene="), TestScene);
+    if (TestScene.Equals(TEXT("character"), ESearchCase::IgnoreCase) ||
+        TestScene.Equals(TEXT("ui"), ESearchCase::IgnoreCase))
+    {
+        UE_LOG(LogWowWorld, Log, TEXT("Terrain loading skipped for test scene '%s' (MPQ-only mode)"), *TestScene);
+        return;
+    }
+
     // Load WDT for the map
     FString WdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s.wdt"), *MapName, *MapName);
     TArray<uint8> WdtRaw;
@@ -449,7 +459,17 @@ void AWowWorldManager::BeginPlay()
     }
 
     // Enable streaming so more tiles load as camera moves
-    bStreamingEnabled = true;
+    // Test scenes with limited terrain disable streaming after initial load
+    if (TestScene.Equals(TEXT("terrain"), ESearchCase::IgnoreCase) ||
+        TestScene.Equals(TEXT("wmo"), ESearchCase::IgnoreCase))
+    {
+        bStreamingEnabled = false;
+        UE_LOG(LogWowWorld, Log, TEXT("Streaming disabled for test scene '%s'"), *TestScene);
+    }
+    else
+    {
+        bStreamingEnabled = true;
+    }
 
     // Teleport player above the loaded terrain
     // The tile actor is at TileToWorld position, vertices are local to that

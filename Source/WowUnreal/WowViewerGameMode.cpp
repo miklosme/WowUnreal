@@ -9,8 +9,16 @@
 #include "WowConnectionManager.h"
 #include "Engine/World.h"
 #include "Engine/PostProcessVolume.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Kismet/GameplayStatics.h"
 #include "HAL/IConsoleManager.h"
+#include "Materials/Material.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
 AWowViewerGameMode::AWowViewerGameMode()
 {
@@ -19,111 +27,231 @@ AWowViewerGameMode::AWowViewerGameMode()
     HUDClass = AWowDebugHUD::StaticClass();
 }
 
+void AWowViewerGameMode::SetupPostProcess(UWorld* World)
+{
+    if (IConsoleVariable* PreExpCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.PreExposureOverride")))
+    {
+        PreExpCVar->Set(1.0f);
+    }
+
+    APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>();
+    if (PPV)
+    {
+        PPV->bUnbound = true;
+        PPV->Settings.bOverride_AutoExposureMethod = true;
+        PPV->Settings.AutoExposureMethod = AEM_Manual;
+        PPV->Settings.bOverride_AutoExposureBias = true;
+        PPV->Settings.AutoExposureBias = 0.0f;
+        PPV->Settings.bOverride_AutoExposureMinBrightness = true;
+        PPV->Settings.AutoExposureMinBrightness = 1.0f;
+        PPV->Settings.bOverride_AutoExposureMaxBrightness = true;
+        PPV->Settings.AutoExposureMaxBrightness = 1.0f;
+    }
+}
+
+AWowWorldManager* AWowViewerGameMode::SpawnWorldManager(UWorld* World)
+{
+    TArray<AActor*> Found;
+    UGameplayStatics::GetAllActorsOfClass(World, AWowWorldManager::StaticClass(), Found);
+
+    if (Found.Num() > 0)
+    {
+        return Cast<AWowWorldManager>(Found[0]);
+    }
+
+    FActorSpawnParameters Params;
+    Params.Name = FName(TEXT("WowWorldManager"));
+    AWowWorldManager* WM = World->SpawnActor<AWowWorldManager>(
+        AWowWorldManager::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, Params);
+    if (WM)
+    {
+        UE_LOG(LogWowGameMode, Log, TEXT("Spawned WowWorldManager"));
+    }
+    return WM;
+}
+
+void AWowViewerGameMode::SpawnGroundPlane(UWorld* World, const FVector& Center, float Size)
+{
+    // Spawn a flat static mesh plane for test scenes
+    UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+    if (!PlaneMesh) return;
+
+    AStaticMeshActor* PlaneActor = World->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), FTransform(FRotator::ZeroRotator, Center));
+    if (!PlaneActor) return;
+
+    PlaneActor->GetStaticMeshComponent()->SetStaticMesh(PlaneMesh);
+    PlaneActor->SetActorScale3D(FVector(Size, Size, 1.0f));
+    PlaneActor->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+    PlaneActor->GetStaticMeshComponent()->SetCollisionObjectType(ECC_WorldStatic);
+    PlaneActor->GetStaticMeshComponent()->SetCollisionResponseToAllChannels(ECR_Block);
+
+    UE_LOG(LogWowGameMode, Log, TEXT("Spawned ground plane at %s (scale %.0f)"), *Center.ToString(), Size);
+}
+
+void AWowViewerGameMode::SpawnDirectionalLight(UWorld* World)
+{
+    ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(
+        ADirectionalLight::StaticClass(), FTransform(FRotator(-45.0f, 30.0f, 0.0f), FVector::ZeroVector));
+    if (Sun)
+    {
+        Sun->GetLightComponent()->SetIntensity(3.14159f);
+        Sun->GetLightComponent()->SetLightColor(FLinearColor(1.0f, 0.95f, 0.85f));
+    }
+}
+
 void AWowViewerGameMode::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Force fixed pre-exposure via CVar as early as possible to prevent
-    // FinalPreExposure=0.0 ensure failure on first rendered frames
-    if (IConsoleVariable* PreExpCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.EyeAdaptation.PreExposureOverride")))
-    {
-        PreExpCVar->Set(1.0f);
-        UE_LOG(LogTemp, Log, TEXT("Set r.EyeAdaptation.PreExposureOverride=1.0 (fixed pre-exposure)"));
-    }
-
     UWorld* World = GetWorld();
     if (!World) return;
 
-    // Spawn an unbound PostProcessVolume with fixed manual exposure to prevent black screen.
-    // The key fix is r.EyeAdaptation.PreExposureOverride=1.0 in DefaultEngine.ini which
-    // forces FinalPreExposure=1.0 bypassing the eye adaptation computation entirely.
-    // This PPV provides belt-and-suspenders protection via manual exposure mode.
-    {
-        APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>();
-        if (PPV)
-        {
-            PPV->bUnbound = true;
-            PPV->Settings.bOverride_AutoExposureMethod = true;
-            PPV->Settings.AutoExposureMethod = AEM_Manual;
-            PPV->Settings.bOverride_AutoExposureBias = true;
-            PPV->Settings.AutoExposureBias = 0.0f; // EV100=0 → exposure multiplier 1.0
-            PPV->Settings.bOverride_AutoExposureMinBrightness = true;
-            PPV->Settings.AutoExposureMinBrightness = 1.0f;
-            PPV->Settings.bOverride_AutoExposureMaxBrightness = true;
-            PPV->Settings.AutoExposureMaxBrightness = 1.0f;
-            UE_LOG(LogTemp, Log, TEXT("Spawned global PostProcessVolume with fixed manual exposure (EV0, PreExposureOverride=1.0)"));
-        }
-    }
+    // Parse test scene selector
+    FString TestScene;
+    FParse::Value(FCommandLine::Get(), TEXT("-testscene="), TestScene);
+    TestScene = TestScene.ToLower();
 
-    // Spawn sky manager (handles sun, moon, sky atmosphere, fog, time-of-day)
+    // Post-process is always needed
+    SetupPostProcess(World);
+
+    if (TestScene == TEXT("character"))
+    {
+        SetupCharacterTestScene(World);
+    }
+    else if (TestScene == TEXT("terrain"))
+    {
+        SetupTerrainTestScene(World);
+    }
+    else if (TestScene == TEXT("wmo"))
+    {
+        SetupWmoTestScene(World);
+    }
+    else if (TestScene == TEXT("ui"))
+    {
+        SetupUITestScene(World);
+    }
+    else
+    {
+        // Default: full world
+        SetupDefaultScene(World);
+    }
+}
+
+void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("Starting default (full world) scene"));
+
+    // Spawn sky
     {
         FActorSpawnParameters SkyParams;
         SkyParams.Name = FName(TEXT("WowSkyManager"));
-        AWowSkyManager* SkyMgr = World->SpawnActor<AWowSkyManager>(
-            AWowSkyManager::StaticClass(),
-            FVector::ZeroVector,
-            FRotator::ZeroRotator,
-            SkyParams);
-        if (SkyMgr)
-        {
-            UE_LOG(LogTemp, Log, TEXT("Spawned WowSkyManager (time-of-day, sun/moon, fog)"));
-        }
+        World->SpawnActor<AWowSkyManager>(AWowSkyManager::StaticClass(),
+            FVector::ZeroVector, FRotator::ZeroRotator, SkyParams);
     }
 
-    // Auto-spawn the World Manager
-    AWowWorldManager* WorldManager = nullptr;
-    {
-        TArray<AActor*> Found;
-        UGameplayStatics::GetAllActorsOfClass(World, AWowWorldManager::StaticClass(), Found);
+    // World manager (full streaming)
+    AWowWorldManager* WorldManager = SpawnWorldManager(World);
 
-        if (Found.Num() == 0)
-        {
-            FActorSpawnParameters Params;
-            Params.Name = FName(TEXT("WowWorldManager"));
-            WorldManager = World->SpawnActor<AWowWorldManager>(
-                AWowWorldManager::StaticClass(),
-                FVector::ZeroVector,
-                FRotator::ZeroRotator,
-                Params);
-            if (WorldManager)
-            {
-                UE_LOG(LogTemp, Log, TEXT("Auto-spawned WowWorldManager"));
-            }
-        }
-        else
-        {
-            WorldManager = Cast<AWowWorldManager>(Found[0]);
-        }
-    }
-
-    // Load WoW UI (FrameXML + addons) once MpqManager is available
+    // Load UI
     if (WorldManager && WorldManager->GetMpqManager())
     {
-        UGameInstance* GI = GetGameInstance();
-        if (GI)
+        if (UGameInstance* GI = GetGameInstance())
         {
-            UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>();
-            if (UIManager)
+            if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
             {
                 UIManager->LoadUI(WorldManager->GetMpqManager());
             }
         }
     }
 
+    // Auto-login + gameplay controller binding
     if (UGameInstance* GI = GetGameInstance())
     {
         if (UWowAutoLogin* AutoLogin = GI->GetSubsystem<UWowAutoLogin>())
         {
             AutoLogin->TryAutoLogin();
-
-            if (AWowGameplayController* GameplayController = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
+            if (AWowGameplayController* GPC = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
             {
-                if (UWowConnectionManager* ConnectionManager = AutoLogin->GetConnectionManager())
+                if (UWowConnectionManager* CM = AutoLogin->GetConnectionManager())
                 {
-                    GameplayController->ConnectionManager = ConnectionManager;
-                    GameplayController->BindEntityEvents();
-                    UE_LOG(LogTemp, Log, TEXT("Bound gameplay controller to autologin connection manager"));
+                    GPC->ConnectionManager = CM;
+                    GPC->BindEntityEvents();
                 }
+            }
+        }
+    }
+}
+
+void AWowViewerGameMode::SetupCharacterTestScene(UWorld* World)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("Starting character/animation test scene"));
+
+    SpawnDirectionalLight(World);
+    SpawnGroundPlane(World, FVector::ZeroVector, 100.0f);
+
+    // Teleport player just above the ground plane
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (PC && PC->GetPawn())
+    {
+        PC->GetPawn()->SetActorLocation(FVector(0.0f, 0.0f, 200.0f));
+        PC->SetControlRotation(FRotator(-15.0f, 0.0f, 0.0f));
+    }
+
+    // Spawn world manager for MPQ access (terrain loading skipped via -testscene check in WM::BeginPlay)
+    SpawnWorldManager(World);
+}
+
+void AWowViewerGameMode::SetupTerrainTestScene(UWorld* World)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("Starting single-tile terrain test scene"));
+
+    // Spawn sky for proper lighting
+    {
+        FActorSpawnParameters SkyParams;
+        SkyParams.Name = FName(TEXT("WowSkyManager"));
+        World->SpawnActor<AWowSkyManager>(AWowSkyManager::StaticClass(),
+            FVector::ZeroVector, FRotator::ZeroRotator, SkyParams);
+    }
+
+    // Spawn world manager — loads 3x3 grid then streaming is disabled via -testscene check
+    SpawnWorldManager(World);
+}
+
+void AWowViewerGameMode::SetupWmoTestScene(UWorld* World)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("Starting WMO test scene"));
+
+    SpawnDirectionalLight(World);
+
+    // Spawn world manager — loads 3x3 grid with WMOs, streaming disabled via -testscene check
+    SpawnWorldManager(World);
+}
+
+void AWowViewerGameMode::SetupUITestScene(UWorld* World)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("Starting UI test scene"));
+
+    SpawnDirectionalLight(World);
+    SpawnGroundPlane(World, FVector::ZeroVector, 10.0f);
+
+    // Teleport player
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (PC && PC->GetPawn())
+    {
+        PC->GetPawn()->SetActorLocation(FVector(0.0f, 0.0f, 200.0f));
+    }
+
+    // Spawn world manager for MPQ access (terrain loading skipped via -testscene check)
+    AWowWorldManager* WM = SpawnWorldManager(World);
+
+    // Load UI
+    if (WM && WM->GetMpqManager())
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
+            {
+                UIManager->LoadUI(WM->GetMpqManager());
             }
         }
     }
