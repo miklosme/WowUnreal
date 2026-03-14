@@ -99,6 +99,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Runtime Virtual Textures for terrain
 
 ## Phase 10: Bug Fixes & Stability
+- [ ] Replace 3rd-person character pawn with free-flying camera pawn: terrain has no collision so ACharacter falls forever — swap to a spectator/fly-cam pawn as the default during development, defer chase-cam character to Phase 11 when collision is in place
 - [ ] Fix UStaticMesh memory leaks: every runtime-created UStaticMesh calls AddToRoot() but RemoveFromRoot() is never called on unload — affects terrain (WowTerrainTile.cpp:149), water (WowWaterRenderer.cpp:72), WMO groups (WowWmoRenderer.cpp:289), WMO liquid (WowWmoRenderer.cpp:241), doodads (WowDoodadManager.cpp:208), WDL tiles (WowWorldManager.cpp:1030), LOD1 tiles (WowWorldManager.cpp:1265). Add cleanup in tile/object destruction paths.
 - [ ] Fix FinalPreExposure black screen: renderer hits `FinalPreExposure > 0.0f` ensure causing black rendering. PostProcessVolume and DefaultEngine.ini mitigations are in place but not fully effective. Verify fix works after async tile loading changes, adjust AutoExposureBias if needed.
 - [ ] Add thread safety to MpqManager::Initialize(): Archives array is modified without holding ArchiveLock during init, causing race with background ReadFile() calls. Add FScopeLock in Initialize() and shutdown fence.
