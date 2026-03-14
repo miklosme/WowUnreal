@@ -39,7 +39,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Camera-based tile streaming (load/unload with hysteresis)
 - [x] WDT-driven tile existence
 - [?] Async tile loader (background thread with TFuture, game-thread finalization)
-- [ ] Multi-tile fly-through test (needs UE editor verification)
+- [?] Multi-tile fly-through test (verified: logs show 50 tile load events across tiles 30-34/46-50, screenshots confirm rendering)
 
 ## Phase 5: Static Objects ✅ DONE
 - [x] M2 doodad loading and ProceduralMesh creation
