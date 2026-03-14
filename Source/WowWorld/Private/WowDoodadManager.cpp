@@ -231,11 +231,11 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             continue;
         }
 
-        // MDDF positions: same MAP_ORIGIN conversion as MODF
-        float WowX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
-        float WowY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
-        float WowZ = Placement.Position.Y;
-        FVector UEPos = FVector(WowX, -WowY, WowZ) * FWowCoordinate::SCALE;
+        // MDDF positions: convert to ADT space, then AdtToUE (matches terrain)
+        float AdtX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+        float AdtY = Placement.Position.Y;
+        float AdtZ = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+        FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
 
         // Rotation: (rotX, rotY-90, -rotZ) matching WowGodot
         FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
@@ -277,11 +277,11 @@ UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
         return nullptr;
     }
 
-    // MDDF positions: MAP_ORIGIN conversion
-    float WX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
-    float WY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
-    float WZ = Placement.Position.Y;
-    FVector UEPos = FVector(WX, -WY, WZ) * FWowCoordinate::SCALE;
+    // MDDF positions: convert to ADT space, then AdtToUE (matches terrain)
+    float AdtX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+    float AdtY = Placement.Position.Y;
+    float AdtZ = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+    FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
 
     FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
     float ScaleVal = Placement.GetScaleFloat();

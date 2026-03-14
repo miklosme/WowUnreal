@@ -64,13 +64,13 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     WmoActor->SetRootComponent(RootComp);
     RootComp->RegisterComponent();
 
-    // MODF positions are in "map coordinate" space (like WowGodot):
-    // wow_x = MAP_ORIGIN - pos[0], wow_y = MAP_ORIGIN - pos[2], wow_z = pos[1]
-    float WowX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
-    float WowY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
-    float WowZ = Placement.Position.Y;
-    // Convert WoW world (X=north, Y=west, Z=up) to UE (X=forward, Y=right, Z=up)
-    FVector UEPos = FVector(WowX, -WowY, WowZ) * FWowCoordinate::SCALE;
+    // MODF positions: convert to ADT space (same as terrain), then use AdtToUE
+    // ADT space: X=east, Y=up, Z=south. MODF stores as map-coords where
+    // adtX = MAP_ORIGIN - pos[0], adtZ = MAP_ORIGIN - pos[2], adtY = pos[1]
+    float AdtX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+    float AdtY = Placement.Position.Y;
+    float AdtZ = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+    FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
 
     // Rotation: from WowGodot — (rotX, rotY-90, -rotZ) as YXZ euler
     // UE uses Pitch(Y), Yaw(Z), Roll(X) but FRotator is (Pitch, Yaw, Roll)

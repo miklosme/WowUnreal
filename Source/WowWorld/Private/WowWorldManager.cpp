@@ -336,11 +336,11 @@ void AWowWorldManager::UpdateObjectStreaming()
             const FString& M2Path = Tile->DoodadPaths[Placement.NameIndex];
             if (M2Path.IsEmpty()) continue;
 
-            // Distance check: MDDF positions need MAP_ORIGIN conversion
-            float WX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
-            float WY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
-            float WZ = Placement.Position.Y;
-            FVector UEPos = FVector(WX, -WY, WZ) * FWowCoordinate::SCALE;
+            // Distance check: convert MDDF to ADT space then UE (matches terrain)
+            FVector UEPos = FWowCoordinate::AdtToUE(
+                FWowCoordinate::MAP_ORIGIN - Placement.Position.X,
+                Placement.Position.Y,
+                FWowCoordinate::MAP_ORIGIN - Placement.Position.Z);
             float DistSq = FVector::DistSquared(CamLoc, UEPos);
             if (DistSq > DoodadRadiusSq) continue;
 
@@ -393,11 +393,11 @@ void AWowWorldManager::UpdateObjectStreaming()
             const FString& WmoPath = Tile->WmoPaths[Placement.NameIndex];
             if (WmoPath.IsEmpty()) continue;
 
-            // Distance check: MODF positions need MAP_ORIGIN conversion
-            float WX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
-            float WY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
-            float WZ = Placement.Position.Y;
-            FVector UEPos = FVector(WX, -WY, WZ) * FWowCoordinate::SCALE;
+            // Distance check: convert MODF to ADT space then UE (matches terrain)
+            FVector UEPos = FWowCoordinate::AdtToUE(
+                FWowCoordinate::MAP_ORIGIN - Placement.Position.X,
+                Placement.Position.Y,
+                FWowCoordinate::MAP_ORIGIN - Placement.Position.Z);
             float DistSq = FVector::DistSquared(CamLoc, UEPos);
             if (DistSq > WmoRadiusSq) continue;
 
