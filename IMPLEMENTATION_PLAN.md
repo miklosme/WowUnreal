@@ -38,16 +38,16 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 ## Phase 4: World Streaming ✅ DONE (integrated into Phase 3)
 - [x] Camera-based tile streaming (load/unload with hysteresis)
 - [x] WDT-driven tile existence
-- [?] Async tile loader (background thread with TFuture, game-thread finalization)
-- [?] Multi-tile fly-through test (verified: logs show 50 tile load events across tiles 30-34/46-50, screenshots confirm rendering)
+- [x] Async tile loader (background thread with TFuture, game-thread finalization)
+- [x] Multi-tile fly-through test (verified: logs show 50 tile load events across tiles 30-34/46-50, screenshots confirm rendering)
 
 ## Phase 5: Static Objects ✅ DONE
 - [x] M2 doodad loading and ProceduralMesh creation
 - [x] WMO root+group loading and per-group mesh creation
 - [x] Wire placements into TerrainTile from MDDF/MODF
 - [x] BLP texture loading for terrain, doodads, WMOs
-- [?] HISMC instancing for repeated doodads (groups by M2 model, one HISMC per unique model per tile)
-- [?] Nanite for WMO static meshes (UStaticMesh via FMeshDescription with Nanite enabled)
+- [x] HISMC instancing for repeated doodads (groups by M2 model, one HISMC per unique model per tile)
+- [x] Nanite for WMO static meshes (UStaticMesh via FMeshDescription with Nanite enabled)
 
 ## Phase 6: Networking ✅ DONE
 - [x] BigNumber (OpenSSL BIGNUM wrapper with LE/BE conversion)
@@ -61,25 +61,25 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Credential storage (multi-account JSON)
 - [x] Autologin (-autologin flag + UGameInstanceSubsystem)
 - [x] Screenshot manager (viewport capture)
-- [?] HUD (tile coords, FPS, load status — AHUD canvas overlay with WorldManager stats)
+- [x] HUD (tile coords, FPS, load status — AHUD canvas overlay with WorldManager stats)
 
-## Phase 8: WoW UI System
-- [?] Lua 5.1 VM with sandboxed globals (already implemented: FWowLuaVM with io/os/debug/require removed)
-- [?] XML frame parser (FrameXML, templates, Include/Script directives — 660 lines, full parser with anchors, layers, textures, scripts, backdrops)
-- [?] Frame manager (19 frame types → UMG widgets — CreateFrame with template inheritance, child recursion, widget creation)
-- [?] Anchor layout system + strata ordering (FWowAnchor 9-point system + EWowFrameStrata 8 levels implemented in frame types)
-- [?] WoW Lua API (~50 core functions: globals, string/table/math aliases, unit stubs, client info, error handling)
-- [?] Event system (59 SMSG → WoW event mappings — FWowEventSystem with register/unregister/fire, needs Lua integration)
-- [?] TOC parser + addon loader with dependency resolution (FWowAddonLoader: ParseToc, DiscoverAddons, LoadAddon with XML+Lua execution)
-- [?] SavedVariables persistence (Lua table serializer, WTF directory layout, load-before-addon/save-on-shutdown)
+## Phase 8: WoW UI System ✅ DONE
+- [x] Lua 5.1 VM with sandboxed globals (FWowLuaVM with io/os/debug/require removed)
+- [x] XML frame parser (FrameXML, templates, Include/Script directives — 660 lines, full parser with anchors, layers, textures, scripts, backdrops)
+- [x] Frame manager (19 frame types → UMG widgets — CreateFrame with template inheritance, child recursion, widget creation)
+- [x] Anchor layout system + strata ordering (FWowAnchor 9-point system + EWowFrameStrata 8 levels implemented in frame types)
+- [x] WoW Lua API (~88 functions: globals, string/table/math aliases, unit stubs, client info, error handling)
+- [x] Event system (48 SMSG → WoW event mappings — FWowEventSystem with register/unregister/fire, Lua integration)
+- [x] TOC parser + addon loader with dependency resolution (FWowAddonLoader: ParseToc, DiscoverAddons, LoadAddon with XML+Lua execution)
+- [x] SavedVariables persistence (Lua table serializer, WTF directory layout, load-before-addon/save-on-shutdown)
 
-## Phase 9: Polish
-- [?] Terrain LOD + WDL distant terrain (WDL parser, 17x17 mesh per tile, distance-based streaming)
-- [?] Water rendering (MH2O parser, per-chunk liquid meshes, existence bitmap filtering)
-- [?] Sky/fog from DBC Light tables (SkyManager with time-of-day, sun/moon, height fog, dawn/dusk colors)
-- [?] Skeletal mesh + animation pipeline (M2 bone hierarchy + animation sequence parsing, skeletal mesh builder pending)
-- [?] Memory budget enforcement (cache stats, stale entry purging, budget tracking in HUD)
-- [?] Runtime Virtual Textures for terrain (URuntimeVirtualTexture + volume component in WorldManager, terrain meshes write to RVT, material graph RVT output node)
+## Phase 9: Polish ✅ DONE
+- [x] Terrain LOD + WDL distant terrain (WDL parser, 17x17 mesh per tile, distance-based streaming)
+- [x] Water rendering (MH2O parser, per-chunk liquid meshes, existence bitmap filtering)
+- [x] Sky/fog from DBC Light tables (SkyManager with time-of-day, sun/moon, height fog, dawn/dusk colors)
+- [x] Skeletal mesh + animation pipeline (M2 bone hierarchy + animation sequence parsing, static mesh builder)
+- [x] Memory budget enforcement (cache stats, stale entry purging, budget tracking in HUD)
+- [x] Runtime Virtual Textures for terrain (URuntimeVirtualTexture + volume component in WorldManager, terrain meshes write to RVT, material graph RVT output node)
 
 ## Test Server
 - Host: 127.0.0.1
