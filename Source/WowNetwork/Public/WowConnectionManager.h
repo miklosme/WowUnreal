@@ -3,6 +3,8 @@
 #include "WowSessionState.h"
 #include "WowConnectionManager.generated.h"
 
+class FWowAuthSocket;
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSessionStateChanged, EWowSessionState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRealmList, const TArray<FWowRealmInfo>&, Realms);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharacterList, const TArray<FWowCharacterInfo>&, Characters);
@@ -27,4 +29,11 @@ public:
 private:
     EWowSessionState State = EWowSessionState::Disconnected;
     void SetState(EWowSessionState S);
+
+    void OnAuthResultReceived(bool bSuccess);
+    void OnRealmListReceived(const TArray<FWowRealmInfo>& Realms);
+
+    TSharedPtr<FWowAuthSocket> AuthSocket;
+    TArray<uint8> SessionKey;
+    TArray<FWowRealmInfo> CachedRealms;
 };
