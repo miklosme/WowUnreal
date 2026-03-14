@@ -3,12 +3,8 @@
 #include "WowViewerPlayerController.h"
 #include "WowDebugHUD.h"
 #include "WowWorldManager.h"
+#include "WowSkyManager.h"
 #include "Engine/World.h"
-#include "Engine/DirectionalLight.h"
-#include "Components/DirectionalLightComponent.h"
-#include "Components/SkyAtmosphereComponent.h"
-#include "Components/SkyLightComponent.h"
-#include "Engine/SkyLight.h"
 #include "Kismet/GameplayStatics.h"
 
 AWowViewerGameMode::AWowViewerGameMode()
@@ -25,46 +21,18 @@ void AWowViewerGameMode::BeginPlay()
     UWorld* World = GetWorld();
     if (!World) return;
 
-    // Spawn lighting so the scene isn't black
+    // Spawn sky manager (handles sun, moon, sky atmosphere, fog, time-of-day)
     {
-        // Directional light (sun)
-        FActorSpawnParameters LightParams;
-        LightParams.Name = FName(TEXT("WowSunLight"));
-        ADirectionalLight* Sun = World->SpawnActor<ADirectionalLight>(
-            ADirectionalLight::StaticClass(),
-            FVector::ZeroVector,
-            FRotator(-45.0f, 30.0f, 0.0f),
-            LightParams);
-        if (Sun)
-        {
-            Sun->GetLightComponent()->SetIntensity(3.14f);
-            Sun->GetLightComponent()->SetLightColor(FLinearColor(1.0f, 0.95f, 0.85f));
-            UE_LOG(LogTemp, Log, TEXT("Spawned directional light (sun)"));
-        }
-
-        // Sky atmosphere
-        AActor* SkyAtmo = World->SpawnActor<AActor>(AActor::StaticClass());
-        if (SkyAtmo)
-        {
-            USkyAtmosphereComponent* Atmo = NewObject<USkyAtmosphereComponent>(SkyAtmo);
-            Atmo->RegisterComponent();
-            SkyAtmo->AddInstanceComponent(Atmo);
-            UE_LOG(LogTemp, Log, TEXT("Spawned sky atmosphere"));
-        }
-
-        // Sky light for ambient
-        FActorSpawnParameters SkyLightParams;
-        SkyLightParams.Name = FName(TEXT("WowSkyLight"));
-        ASkyLight* SkyLight = World->SpawnActor<ASkyLight>(
-            ASkyLight::StaticClass(),
+        FActorSpawnParameters SkyParams;
+        SkyParams.Name = FName(TEXT("WowSkyManager"));
+        AWowSkyManager* SkyMgr = World->SpawnActor<AWowSkyManager>(
+            AWowSkyManager::StaticClass(),
             FVector::ZeroVector,
             FRotator::ZeroRotator,
-            SkyLightParams);
-        if (SkyLight)
+            SkyParams);
+        if (SkyMgr)
         {
-            SkyLight->GetLightComponent()->SetIntensity(1.0f);
-            SkyLight->GetLightComponent()->bRealTimeCapture = true;
-            UE_LOG(LogTemp, Log, TEXT("Spawned sky light"));
+            UE_LOG(LogTemp, Log, TEXT("Spawned WowSkyManager (time-of-day, sun/moon, fog)"));
         }
     }
 
