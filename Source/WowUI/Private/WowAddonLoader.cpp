@@ -3,8 +3,39 @@
 #include "WowLuaVM.h"
 #include "WowFrameXmlParser.h"
 #include "WowSavedVariables.h"
+#include "WowFrameManager.h"
+#include "WowEventSystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowAddon, Log, All);
+
+// Well-known Blizzard addon names from WoW 3.3.5 (those shipped inside MPQ)
+static const char* BlizzardAddons[] =
+{
+	"Blizzard_AchievementUI",
+	"Blizzard_ArenaUI",
+	"Blizzard_AuctionUI",
+	"Blizzard_BarbershopUI",
+	"Blizzard_BattlefieldMinimap",
+	"Blizzard_BindingUI",
+	"Blizzard_Calendar",
+	"Blizzard_CombatLog",
+	"Blizzard_CombatText",
+	"Blizzard_DebugTools",
+	"Blizzard_GlyphUI",
+	"Blizzard_GMChatUI",
+	"Blizzard_GMSurveyUI",
+	"Blizzard_GuildBankUI",
+	"Blizzard_InspectUI",
+	"Blizzard_ItemSocketingUI",
+	"Blizzard_MacroUI",
+	"Blizzard_RaidUI",
+	"Blizzard_TalentUI",
+	"Blizzard_TimeManager",
+	"Blizzard_TokenUI",
+	"Blizzard_TradeSkillUI",
+	"Blizzard_TrainerUI",
+	nullptr
+};
 
 FWowTocData FWowAddonLoader::ParseToc(const TArray<uint8>& Data)
 {
@@ -131,10 +162,6 @@ TArray<FString> FWowAddonLoader::DiscoverAddons(FMpqManager* Mpq)
 		return AddonNames;
 	}
 
-	// In WoW 3.3.5, addons live under Interface/AddOns/ in the data directory
-	// Since MPQ doesn't support directory listing, we check well-known addon names
-	// and also check the filesystem under the data path
-
 	// Check filesystem for addon directories
 	FString AddOnsPath = FPaths::Combine(Mpq->GetDataPath(), TEXT("Interface"), TEXT("AddOns"));
 	IFileManager& FM = IFileManager::Get();
@@ -147,10 +174,22 @@ TArray<FString> FWowAddonLoader::DiscoverAddons(FMpqManager* Mpq)
 		FString AddonName = FPaths::GetCleanFilename(Dir);
 		// Verify a .toc file exists
 		FString TocPath = FString::Printf(TEXT("Interface\\AddOns\\%s\\%s.toc"), *AddonName, *AddonName);
-		TArray<uint8> TocData;
 		if (Mpq->FileExists(TocPath) || FM.FileExists(*FPaths::Combine(AddOnsPath, AddonName, AddonName + TEXT(".toc"))))
 		{
-			AddonNames.Add(AddonName);
+			AddonNames.AddUnique(AddonName);
+		}
+	}
+
+	// Check well-known Blizzard addons from MPQ
+	for (int32 i = 0; BlizzardAddons[i]; i++)
+	{
+		FString Name = UTF8_TO_TCHAR(BlizzardAddons[i]);
+		if (AddonNames.Contains(Name)) continue;
+
+		FString TocPath = FString::Printf(TEXT("Interface\\AddOns\\%s\\%s.toc"), *Name, *Name);
+		if (Mpq->FileExists(TocPath))
+		{
+			AddonNames.AddUnique(Name);
 		}
 	}
 
@@ -158,7 +197,125 @@ TArray<FString> FWowAddonLoader::DiscoverAddons(FMpqManager* Mpq)
 	return AddonNames;
 }
 
-bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWowLuaVM* LuaVM)
+TArray<FString> FWowAddonLoader::ResolveLoadOrder(FMpqManager* Mpq, const TArray<FString>& AddonNames)
+{
+	if (!Mpq) return AddonNames;
+
+	// Parse all TOC files to build dependency graph
+	TMap<FString, FWowTocData> TocMap;
+	for (const FString& Name : AddonNames)
+	{
+		FString TocPath = FString::Printf(TEXT("Interface\\AddOns\\%s\\%s.toc"), *Name, *Name);
+		TArray<uint8> TocData;
+
+		bool bLoaded = Mpq->ReadFile(TocPath, TocData);
+		if (!bLoaded)
+		{
+			FString FsTocPath = FPaths::Combine(Mpq->GetDataPath(), TocPath.Replace(TEXT("\\"), TEXT("/")));
+			bLoaded = FFileHelper::LoadFileToArray(TocData, *FsTocPath);
+		}
+
+		if (bLoaded)
+		{
+			TocMap.Add(Name, ParseToc(TocData));
+		}
+	}
+
+	// Topological sort using Kahn's algorithm
+	TSet<FString> Available(AddonNames);
+	TMap<FString, TSet<FString>> InDeps; // addon -> set of unresolved required dependencies
+
+	for (const FString& Name : AddonNames)
+	{
+		FWowTocData* Toc = TocMap.Find(Name);
+		if (!Toc) continue;
+		if (Toc->bDisabled || Toc->bLoadOnDemand) continue;
+
+		TSet<FString>& Deps = InDeps.FindOrAdd(Name);
+		for (const FString& Dep : Toc->RequiredDeps)
+		{
+			if (Available.Contains(Dep) && Dep != Name)
+			{
+				Deps.Add(Dep);
+			}
+		}
+		// Optional deps: if available, add as soft dependency for ordering
+		for (const FString& Dep : Toc->OptionalDeps)
+		{
+			if (Available.Contains(Dep) && Dep != Name)
+			{
+				Deps.Add(Dep);
+			}
+		}
+	}
+
+	TArray<FString> Sorted;
+	TSet<FString> Visited;
+
+	// Repeatedly find addons with no unresolved deps
+	while (Sorted.Num() < AddonNames.Num())
+	{
+		bool bProgress = false;
+
+		for (const FString& Name : AddonNames)
+		{
+			if (Visited.Contains(Name)) continue;
+
+			FWowTocData* Toc = TocMap.Find(Name);
+			if (Toc && (Toc->bDisabled || Toc->bLoadOnDemand))
+			{
+				Visited.Add(Name);
+				continue;
+			}
+
+			TSet<FString>* Deps = InDeps.Find(Name);
+			bool bReady = true;
+			if (Deps)
+			{
+				for (const FString& Dep : *Deps)
+				{
+					if (!Visited.Contains(Dep))
+					{
+						bReady = false;
+						break;
+					}
+				}
+			}
+
+			if (bReady)
+			{
+				Sorted.Add(Name);
+				Visited.Add(Name);
+				bProgress = true;
+			}
+		}
+
+		if (!bProgress)
+		{
+			// Circular dependency or missing deps — add remaining addons
+			for (const FString& Name : AddonNames)
+			{
+				if (!Visited.Contains(Name))
+				{
+					FWowTocData* Toc = TocMap.Find(Name);
+					if (Toc && !Toc->bDisabled && !Toc->bLoadOnDemand)
+					{
+						UE_LOG(LogWowAddon, Warning, TEXT("Unresolved deps for addon: %s"), *Name);
+						Sorted.Add(Name);
+					}
+					Visited.Add(Name);
+				}
+			}
+			break;
+		}
+	}
+
+	UE_LOG(LogWowAddon, Log, TEXT("Resolved load order for %d addons"), Sorted.Num());
+	return Sorted;
+}
+
+bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWowLuaVM* LuaVM,
+	FWowFrameManager* FrameManager, FWowEventSystem* EventSystem)
 {
 	if (!Mpq || !LuaVM)
 	{
@@ -224,7 +381,6 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 		{
 			TArray<FWowXmlDirective> Directives = FWowFrameXmlParser::ParseXml(FileData, FullPath);
 
-			// Process directives: execute scripts, handle includes
 			for (const FWowXmlDirective& Dir : Directives)
 			{
 				switch (Dir.Type)
@@ -252,7 +408,6 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 						if (Mpq->ReadFile(IncPath, IncData) ||
 						    FFileHelper::LoadFileToArray(IncData, *FPaths::Combine(Mpq->GetDataPath(), IncPath.Replace(TEXT("\\"), TEXT("/")))))
 						{
-							// Recursively parse included XML
 							FWowFrameXmlParser::ParseXml(IncData, IncPath);
 						}
 					}
@@ -260,8 +415,14 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 				}
 				case FWowXmlDirective::EType::Frame:
 				{
-					// Frame creation will be handled by the frame manager
-					UE_LOG(LogWowAddon, Verbose, TEXT("  Frame: %s"), *Dir.FrameDef.Name);
+					if (FrameManager)
+					{
+						FrameManager->CreateFrame(Dir.FrameDef);
+					}
+					else
+					{
+						UE_LOG(LogWowAddon, Verbose, TEXT("  Frame: %s (no FrameManager)"), *Dir.FrameDef.Name);
+					}
 					break;
 				}
 				case FWowXmlDirective::EType::Font:
@@ -276,4 +437,28 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 
 	UE_LOG(LogWowAddon, Log, TEXT("Addon %s loaded successfully"), *AddonName);
 	return true;
+}
+
+void FWowAddonLoader::LoadAllAddons(FMpqManager* Mpq, FWowLuaVM* LuaVM,
+	FWowFrameManager* FrameManager, FWowEventSystem* EventSystem)
+{
+	if (!Mpq || !LuaVM)
+	{
+		UE_LOG(LogWowAddon, Error, TEXT("LoadAllAddons: null MPQ or Lua VM"));
+		return;
+	}
+
+	TArray<FString> Discovered = DiscoverAddons(Mpq);
+	TArray<FString> Ordered = ResolveLoadOrder(Mpq, Discovered);
+
+	int32 Loaded = 0;
+	for (const FString& AddonName : Ordered)
+	{
+		if (LoadAddon(AddonName, Mpq, LuaVM, FrameManager, EventSystem))
+		{
+			Loaded++;
+		}
+	}
+
+	UE_LOG(LogWowAddon, Log, TEXT("Loaded %d/%d addons"), Loaded, Ordered.Num());
 }

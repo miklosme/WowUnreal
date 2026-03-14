@@ -4,6 +4,8 @@
 class FMpqManager;
 class FWowLuaVM;
 class FWowFrameXmlParser;
+class FWowFrameManager;
+class FWowEventSystem;
 
 /** TOC file metadata */
 struct FWowTocData
@@ -28,9 +30,17 @@ public:
 	/** Parse a .toc file */
 	static FWowTocData ParseToc(const TArray<uint8>& Data);
 
-	/** Discover addons in Interface/AddOns/ */
+	/** Discover addons in Interface/AddOns/ (filesystem + well-known Blizzard addons in MPQ) */
 	static TArray<FString> DiscoverAddons(FMpqManager* Mpq);
 
-	/** Load an addon's files (XML and Lua) */
-	static bool LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWowLuaVM* LuaVM);
+	/** Resolve dependency-ordered load list from discovered addons */
+	static TArray<FString> ResolveLoadOrder(FMpqManager* Mpq, const TArray<FString>& AddonNames);
+
+	/** Load an addon's files (XML and Lua), creating frames via FrameManager */
+	static bool LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWowLuaVM* LuaVM,
+		FWowFrameManager* FrameManager = nullptr, FWowEventSystem* EventSystem = nullptr);
+
+	/** Discover, resolve dependencies, and load all addons in order */
+	static void LoadAllAddons(FMpqManager* Mpq, FWowLuaVM* LuaVM,
+		FWowFrameManager* FrameManager = nullptr, FWowEventSystem* EventSystem = nullptr);
 };
