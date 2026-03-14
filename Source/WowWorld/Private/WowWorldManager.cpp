@@ -292,6 +292,20 @@ void AWowWorldManager::UpdateObjectStreaming()
     const float WmoRadiusSq = WmoRadius * WmoRadius;
     const float WmoDespawnRadiusSq = (WmoRadius * 1.2f) * (WmoRadius * 1.2f);
 
+    // Debug: log once per second
+    static int32 DebugCounter = 0;
+    bool bDebugLog = (DebugCounter++ % 2 == 0); // every other tick (1 second at 0.5s tick)
+    if (bDebugLog)
+    {
+        int32 TotalDoodads = 0, TotalWmos = 0;
+        for (auto& TP : LoadedTiles)
+        {
+            if (TP.Value) { TotalDoodads += TP.Value->DoodadPlacements.Num(); TotalWmos += TP.Value->WmoPlacements.Num(); }
+        }
+        UE_LOG(LogWowWorld, Log, TEXT("ObjectStreaming: cam=%s, %d tiles, %d total doodads, %d total wmos, active: %d doodads, %d wmo groups"),
+            *CamLoc.ToString(), LoadedTiles.Num(), TotalDoodads, TotalWmos, ActiveDoodadCount, ActiveWmoGroupCount);
+    }
+
     // Iterate all loaded tiles
     for (auto& TilePair : LoadedTiles)
     {
@@ -338,10 +352,19 @@ void AWowWorldManager::UpdateObjectStreaming()
 
             // Distance check: convert MDDF to ADT space then UE (matches terrain)
             FVector UEPos = FWowCoordinate::AdtToUE(
-                FWowCoordinate::MAP_ORIGIN - Placement.Position.X,
+                Placement.Position.X,
                 Placement.Position.Y,
-                FWowCoordinate::MAP_ORIGIN - Placement.Position.Z);
+                Placement.Position.Z);
             float DistSq = FVector::DistSquared(CamLoc, UEPos);
+            // Debug first doodad distance
+            static bool bLoggedOnce = false;
+            if (bDebugLog && !bLoggedOnce)
+            {
+                UE_LOG(LogWowWorld, Log, TEXT("  First doodad pos raw=(%f,%f,%f) → UE=%s, dist=%.0f, radius=%.0f"),
+                    Placement.Position.X, Placement.Position.Y, Placement.Position.Z,
+                    *UEPos.ToString(), FMath::Sqrt(DistSq), DoodadRadius);
+                bLoggedOnce = true;
+            }
             if (DistSq > DoodadRadiusSq) continue;
 
             // Spawn it
@@ -395,9 +418,9 @@ void AWowWorldManager::UpdateObjectStreaming()
 
             // Distance check: convert MODF to ADT space then UE (matches terrain)
             FVector UEPos = FWowCoordinate::AdtToUE(
-                FWowCoordinate::MAP_ORIGIN - Placement.Position.X,
+                Placement.Position.X,
                 Placement.Position.Y,
-                FWowCoordinate::MAP_ORIGIN - Placement.Position.Z);
+                Placement.Position.Z);
             float DistSq = FVector::DistSquared(CamLoc, UEPos);
             if (DistSq > WmoRadiusSq) continue;
 

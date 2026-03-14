@@ -64,13 +64,9 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     WmoActor->SetRootComponent(RootComp);
     RootComp->RegisterComponent();
 
-    // MODF positions: convert to ADT space (same as terrain), then use AdtToUE
-    // ADT space: X=east, Y=up, Z=south. MODF stores as map-coords where
-    // adtX = MAP_ORIGIN - pos[0], adtZ = MAP_ORIGIN - pos[2], adtY = pos[1]
-    float AdtX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
-    float AdtY = Placement.Position.Y;
-    float AdtZ = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
-    FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
+    // MODF positions are already in ADT space (X=east, Y=up, Z=south)
+    // Same coordinate system as terrain vertices — use AdtToUE directly
+    FVector UEPos = FWowCoordinate::AdtToUE(Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
 
     // Rotation: from WowGodot — (rotX, rotY-90, -rotZ) as YXZ euler
     // UE uses Pitch(Y), Yaw(Z), Roll(X) but FRotator is (Pitch, Yaw, Roll)

@@ -232,9 +232,9 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
         }
 
         // MDDF positions: convert to ADT space, then AdtToUE (matches terrain)
-        float AdtX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+        float AdtX = Placement.Position.X;
         float AdtY = Placement.Position.Y;
-        float AdtZ = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+        float AdtZ = Placement.Position.Z;
         FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
 
         // Rotation: (rotX, rotY-90, -rotZ) matching WowGodot
@@ -278,9 +278,9 @@ UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
     }
 
     // MDDF positions: convert to ADT space, then AdtToUE (matches terrain)
-    float AdtX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+    float AdtX = Placement.Position.X;
     float AdtY = Placement.Position.Y;
-    float AdtZ = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+    float AdtZ = Placement.Position.Z;
     FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
 
     FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
