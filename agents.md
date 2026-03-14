@@ -32,24 +32,28 @@ UE="/Users/Shared/Epic Games/UE_5.7"
 
 ## Run & Screenshot Verification
 
-```bash
-# Launch editor in unattended mode, load default map, take screenshot, exit
-"$UE/Engine/Binaries/Mac/UnrealEditor" \
-  "/Users/clancey/Projects/WowUnreal/WowUnreal.uproject" \
-  -game -unattended -nosplash -nullrhi -log \
-  -ExecCmds="HighResShot 1920x1080" -AutomationExitOnFinish
+**IMPORTANT: Do NOT use OS-level screenshot tools (`screencapture`, `osascript`, etc.). Always use the Unreal Engine screenshot API.**
 
-# Or launch PIE from editor CLI
+```bash
+# Launch the game with rendering enabled (NO -nullrhi — that disables the GPU)
 "$UE/Engine/Binaries/Mac/UnrealEditor" \
   "/Users/clancey/Projects/WowUnreal/WowUnreal.uproject" \
   -game -windowed -resx=1920 -resy=1080 -nosplash -log
 ```
 
+Screenshots are taken via `UWowScreenshotManager::TakeScreenshot()` which calls `FScreenshotRequest::RequestScreenshot()` — the correct UE API that captures the rendered viewport. The game also supports a delayed auto-screenshot on launch (see `AWowWorldManager`).
+
+To request a screenshot from the console or exec command:
+```bash
+# Use UE console command to capture viewport
+-ExecCmds="HighResShot 1920x1080"
+```
+
 **Every task completion MUST include:**
 1. Build succeeds (zero errors)
-2. Launch the game/editor
-3. Take a screenshot of the rendered world to visually confirm the change works
-4. Save screenshot to `Saved/Screenshots/` with descriptive name
+2. Launch the game with rendering enabled (never use `-nullrhi` for visual verification)
+3. Take a screenshot using the UE screenshot API (NOT OS-level `screencapture`)
+4. Screenshot saves to `Saved/Screenshots/` with descriptive name
 5. **VALIDATE the screenshot is not black/empty** — if it is, the task FAILED. Do not commit.
 
 ### Screenshot Validation — MANDATORY
@@ -91,12 +95,13 @@ print('PASS: Screenshot has content')
 ## Test Commands
 
 ```bash
-# UE5 Automation tests (if any exist)
+# UE5 Automation tests (if any exist) — nullrhi is OK here since these are logic tests
 "$UE/Engine/Binaries/Mac/UnrealEditor" \
   "/Users/clancey/Projects/WowUnreal/WowUnreal.uproject" \
   -ExecCmds="Automation RunTests WowUnreal" -unattended -nosplash -nullrhi -log
 
 # Quick smoke test: does it compile and launch without crashing?
+# NOTE: Use -nullrhi ONLY for non-visual smoke tests. For screenshot verification, always launch with rendering enabled.
 "$UE/Engine/Binaries/Mac/UnrealEditor" \
   "/Users/clancey/Projects/WowUnreal/WowUnreal.uproject" \
   -game -nullrhi -unattended -nosplash -log -ExecCmds="quit"

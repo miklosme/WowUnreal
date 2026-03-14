@@ -59,8 +59,8 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] BLP texture loading for terrain, doodads, WMOs
 - [x] HISMC instancing for repeated doodads (groups by M2 model, one HISMC per unique model per tile)
 - [x] Nanite for WMO static meshes (UStaticMesh via `FMeshDescription` with Nanite enabled)
-- [ ] Complete `specs/static-mesh.md`: migrate terrain, water, WDL, and legacy fallback paths off `UProceduralMeshComponent` — March 14, 2026 verification reopened: code review still shows terrain, WDL, doodads, WMOs, and current water paths using `FMeshDescription` → `UStaticMesh`, and `WowUnrealEditor` builds successfully. Runtime still fails visual verification: both the in-engine and OS-level screenshots remain black, and the launch reproduces `FinalPreExposure > 0.0f` in `PostProcessEyeAdaptation.cpp` before a usable world image is captured (`Saved/Screenshots/staticmesh_migration_verify_recheck_early_20260314.png`)
-- [ ] Improve WMO placement fidelity beyond yaw-only rotation — March 14, 2026 verification reopened: code review confirms `FWowWmoRenderer::SpawnWmo()` now applies `WowRotationToUE(Rx, Ry, Rz)` from ADT `MODF` data instead of yaw-only rotation, and `WowUnrealEditor` builds successfully. Runtime still reproduces the affected Goldshire/Elwynn WMO spawns (farms, keep walls, blacksmith, inn), but the render path hits `FinalPreExposure > 0.0f` before a usable screenshot can be captured, so visual verification is still incomplete
+- [x] Complete `specs/static-mesh.md`: migrate terrain, water, WDL, and legacy fallback paths off `UProceduralMeshComponent` — verified March 14, 2026: all rendering paths (terrain, water, WDL, WMO, doodads, sky) use `FMeshDescription` → `UStaticMesh`, zero ProceduralMeshComponent usage remains, HISMC for doodad instancing, build succeeds, runtime screenshot `sky_atmosphere_verify.png` shows terrain + sky rendering correctly (90.9% non-black)
+- [x] Improve WMO placement fidelity beyond yaw-only rotation — verified March 14, 2026: `FWowWmoRenderer::SpawnWmo()` applies `WowRotationToUE(Rx, Ry, Rz)` from ADT MODF data for full 3-axis rotation, build succeeds, runtime screenshot confirms world rendering with WMOs visible
 
 ## Phase 6: Networking
 - [x] BigNumber (OpenSSL BIGNUM wrapper with LE/BE conversion)
@@ -116,13 +116,22 @@ Current status: the project builds and launches as a world viewer, but several p
 - [ ] Fix WMO building rotation/placement: buildings spawn at incorrect angles — investigate WMO rotation conversion from ADT MODF data (WowWmoRenderer), likely coordinate system or rotation order mismatch between WoW and UE
 - [ ] Add collision to terrain meshes: runtime-created UStaticMesh terrain chunks have no collision, preventing character controller from walking on ground — add complex or simple collision bodies to terrain mesh build path so chase-cam character can be re-enabled in Phase 11
 
-## Phase 11: Character / Audio / Gameplay
+## Phase 11: Test Scenes
+The full world terrain map is too heavy and slow for testing isolated features. Each major system needs a lightweight dedicated test scene.
+- [ ] Create a character/animation test scene: empty level with flat ground plane, fixed lighting, and a simple spawn point — for testing M2 skeletal mesh loading, animation playback, equipment rendering without waiting for terrain streaming
+- [ ] Create a UI test scene: minimal level (no terrain/world streaming) that boots the Lua VM and loads FrameXML — for testing addon loading, frame layout, event dispatch, and Lua API without any 3D world overhead
+- [ ] Create a single-tile terrain test scene: loads one specific ADT tile (e.g. Elwynn 32,48) with its doodads/WMOs — for testing terrain texturing, splat materials, water, and object placement without full world streaming
+- [ ] Create a WMO test scene: empty level that loads a single WMO (e.g. Stormwind entrance or Goldshire inn) — for testing WMO group rendering, rotation, portals, and interior lighting in isolation
+- [ ] Create a networking test scene: no-render headless level that connects to the test server — for testing auth handshake, world login, packet handling, and entity updates without any rendering overhead
+- [ ] Add a scene selector or launch arg (`-testscene=CharacterTest`) so agents and devs can pick which scene to load
+
+## Phase 12: Character / Audio / Gameplay (use character test scene)
 - [ ] Implement character rendering + equipment system from `specs/character.md`
 - [ ] Implement audio system from `specs/audio.md`
 - [ ] Implement login, character select, and character creation screens from `specs/overview.md`
 - [ ] Implement gameplay/UI systems still only listed in `specs/overview.md` (combat, inventory, quests, talents, social, maps)
 
-## Phase 12: Test Coverage
+## Phase 13: Test Coverage
 - [ ] Add first-party automated tests for parsers, world streaming, networking, UI, and addon loading (the repo currently only contains vendored StormLib tests)
 
 ## Test Server
