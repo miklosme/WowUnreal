@@ -120,22 +120,22 @@ Current status: the project builds and launches as a world viewer, but several p
 The project needs proper UE `.umap` levels instead of running everything through one GameMode with command-line switches. Each map gets its own GameMode subclass that only spawns what's needed.
 
 ### Production Map
-- [ ] Create `WowWorld` map (`Content/Maps/WowWorld.umap`): the main game map — full terrain streaming, sky manager, networking, UI, audio. Set as `GameDefaultMap` in DefaultEngine.ini. Uses the full `AWowViewerGameMode`.
+- [?] Create `WowWorld` map (`Content/Maps/WowWorld.umap`): the main game map — full terrain streaming, sky manager, networking, UI, audio. Set as `GameDefaultMap` in DefaultEngine.ini. Uses the full `AWowViewerGameMode`. — verified March 14, 2026: created via WowMapCreatorCommandlet with AWowViewerGameMode GameMode override, DefaultEngine.ini updated to GameDefaultMap=/Game/Maps/WowWorld, launches and renders terrain+sky (99.6% non-black)
 
 ### Test Maps
-- [ ] Create `TerrainTest` map (`Content/Maps/TerrainTest.umap`): loads a 3x3 tile grid around a fixed ADT (e.g. Elwynn 32,48), sky manager, no UI, no networking, no streaming beyond the initial tiles. For testing terrain textures, splat materials, water, doodad/WMO placement.
-- [ ] Create `CharacterTest` map (`Content/Maps/CharacterTest.umap`): flat ground plane with collision, fixed directional light, spawns test character models (Human M/F, Orc M). For testing M2 skeletal mesh, animations, equipment attachment. No terrain streaming.
-- [ ] Create `AnimationTest` map (`Content/Maps/AnimationTest.umap`): flat ground with collision, fixed light, spawns a single M2 model with animation controls (play/pause/scrub). For developing and debugging USkeleton/UAnimSequence playback.
-- [ ] Create `MobTest` map (`Content/Maps/MobTest.umap`): flat ground with collision, spawns creature models from CreatureDisplayInfo.dbc, networking enabled to receive SMSG_UPDATE_OBJECT entity spawns. For testing NPC rendering and entity sync.
-- [ ] Create `WmoTest` map (`Content/Maps/WmoTest.umap`): empty level that loads a single WMO (e.g. Goldshire inn or Stormwind gate). For testing WMO rotation, portal culling, interior lighting, and liquid in isolation.
-- [ ] Create `UITest` map (`Content/Maps/UITest.umap`): minimal ground plane, boots Lua VM + FrameXML + addons. No terrain, no networking. For testing frame layout, event dispatch, Lua API, and addon compatibility.
-- [ ] Create `NetworkTest` map (`Content/Maps/NetworkTest.umap`): headless-friendly level, connects to test server, logs packet traffic. No rendering. For testing auth, world login, packet handling, entity updates.
-- [ ] Create `StreamingTest` map (`Content/Maps/StreamingTest.umap`): full terrain streaming with fly camera, performance HUD, memory budget overlay. No UI, no networking. For profiling tile load/unload, LOD transitions, WDL distant terrain.
+- [?] Create `TerrainTest` map (`Content/Maps/TerrainTest.umap`): loads a 3x3 tile grid around a fixed ADT (e.g. Elwynn 32,48), sky manager, no UI, no networking, no streaming beyond the initial tiles. — created March 14, 2026 via commandlet with AWowTestGameMode; test scene behavior inherited from -testscene=terrain path
+- [?] Create `CharacterTest` map (`Content/Maps/CharacterTest.umap`): flat ground plane with collision, fixed directional light, spawns test character models (Human M/F, Orc M). — created March 14, 2026 via commandlet with AWowTestGameMode
+- [?] Create `AnimationTest` map (`Content/Maps/AnimationTest.umap`): flat ground with collision, fixed light, spawns a single M2 model with animation controls (play/pause/scrub). — created March 14, 2026 via commandlet with AWowTestGameMode
+- [?] Create `MobTest` map (`Content/Maps/MobTest.umap`): flat ground with collision, spawns creature models from CreatureDisplayInfo.dbc, networking enabled to receive SMSG_UPDATE_OBJECT entity spawns. — created March 14, 2026 via commandlet with AWowTestGameMode
+- [?] Create `WmoTest` map (`Content/Maps/WmoTest.umap`): empty level that loads a single WMO (e.g. Goldshire inn or Stormwind gate). — created March 14, 2026 via commandlet with AWowTestGameMode
+- [?] Create `UITest` map (`Content/Maps/UITest.umap`): minimal ground plane, boots Lua VM + FrameXML + addons. No terrain, no networking. — created March 14, 2026 via commandlet with AWowTestGameMode
+- [?] Create `NetworkTest` map (`Content/Maps/NetworkTest.umap`): headless-friendly level, connects to test server, logs packet traffic. — created March 14, 2026 via commandlet with AWowTestGameMode
+- [?] Create `StreamingTest` map (`Content/Maps/StreamingTest.umap`): full terrain streaming with fly camera, performance HUD, memory budget overlay. — created March 14, 2026 via commandlet with AWowTestGameMode
 
 ### Infrastructure
 - [?] Create a base `AWowTestGameMode` that sets up MpqManager + fly camera but no UI/networking — test maps inherit from this — verified March 14, 2026: `AWowTestGameMode` (Source/WowUnreal/WowTestGameMode.h/.cpp) inherits AGameModeBase, sets DefaultPawnClass=AWowFlyCamera, spawns PostProcess + WorldManager for MPQ access, provides protected helpers (SpawnGroundPlane, SpawnDirectionalLight, SpawnSkyManager), virtual SetupTestScene() for subclass override; builds (0 errors), smoke test passes
-- [ ] Add map selector to run scripts: `./run_terrain.sh`, `./run_character.sh`, etc. each pass the correct map path via command line
-- [ ] Update DefaultEngine.ini `GameDefaultMap` to point to `WowWorld` map once it exists
+- [?] Add map selector to run scripts — created `./run_map.sh <MapName> [build]` that launches any map by name (WowWorld, TerrainTest, CharacterTest, etc.); auto-adds -autologin for WowWorld; builds optional; verified March 14, 2026
+- [?] Update DefaultEngine.ini `GameDefaultMap` to point to `WowWorld` map — done March 14, 2026: GameDefaultMap=/Game/Maps/WowWorld, EditorStartupMap=/Game/Maps/WowWorld
 
 ## Phase 12: Character / Audio / Gameplay (use character test scene)
 - [x] Implement character rendering + equipment system: added M2 attachment point + submesh parsing to M2Parser, created WowCharacterBuilder (race/gender model loading via ChrRaces.dbc, creature display ID loading), WowCharacterTexture (skin texture from CharSections.dbc), WowEquipmentManager (weapon M2 loading and bone attachment); character test scene spawns Human M/F + Orc M models; builds and renders March 14, 2026
