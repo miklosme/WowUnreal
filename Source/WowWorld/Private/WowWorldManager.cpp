@@ -16,6 +16,7 @@
 #include "Async/Async.h"
 #include "VT/RuntimeVirtualTexture.h"
 #include "Components/RuntimeVirtualTextureComponent.h"
+#include "WowTerrainMeshBuilder.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 
@@ -153,6 +154,13 @@ void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
         if (Pair.Value) Pair.Value->Destroy();
     }
     WdlTiles.Empty();
+
+    // Destroy LOD 1 tiles
+    for (auto& Pair : Lod1Tiles)
+    {
+        if (Pair.Value) Pair.Value->Destroy();
+    }
+    Lod1Tiles.Empty();
 
     WdtData.Reset();
     WdlData.Reset();
@@ -380,6 +388,9 @@ void AWowWorldManager::UpdateStreaming()
     // Update WDL distant terrain
     UpdateWdlStreaming(CameraTile);
 
+    // Update LOD 1 terrain
+    UpdateLod1Streaming(CameraTile);
+
     // Keep RVT volume centered on camera
     UpdateRVTBounds(CameraTile);
 
@@ -464,8 +475,9 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
             int32 TY = CameraTile.Y + DY;
             if (TX < 0 || TX >= 64 || TY < 0 || TY >= 64) continue;
 
-            // Skip tiles that have full-detail ADT loaded or pending
+            // Skip tiles that have full-detail ADT loaded, pending, or LOD 1
             if (IsTileLoaded(TX, TY) || IsTilePending(TX, TY)) continue;
+            if (Lod1Tiles.Contains(TileKey(TX, TY))) continue;
 
             // Skip tiles already loaded as WDL
             int64 Key = TileKey(TX, TY);
@@ -532,6 +544,14 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
             float NgY = (float)TileData.Height17[Row][Col];
 
             FVector UEPos = FWowCoordinate::AdtToUE(NgX, NgY, NgZ);
+
+            // Lower edge vertices slightly to prevent gaps at LOD boundaries
+            bool bIsEdge = (Row == 0 || Row == 16 || Col == 0 || Col == 16);
+            if (bIsEdge)
+            {
+                UEPos.Z -= 50.0f; // Drop edge verts 0.5m to tuck under adjacent LOD
+            }
+
             Vertices.Add(UEPos);
             UVs.Add(FVector2D((float)Col / 16.0f, (float)Row / 16.0f));
         }
@@ -543,6 +563,10 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     {
         for (int32 Col = 0; Col < 16; Col++)
         {
+            // Skip holes from MAHO data
+            if (TileData.IsHole(Col, Row))
+                continue;
+
             int32 TL = Row * 17 + Col;
             int32 TR = TL + 1;
             int32 BL = TL + 17;
@@ -604,6 +628,118 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     WdlTiles.Add(TileKey(TX, TY), WdlActor);
 
     UE_LOG(LogWowWorld, Verbose, TEXT("Spawned WDL tile %d,%d (%d verts)"), TX, TY, Vertices.Num());
+}
+
+void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
+{
+    if (!WdtData || !WdtData->bIsValid || !MpqManager) return;
+
+    // Load LOD 1 tiles in mid-range (beyond full-detail, within Lod1Radius)
+    for (int32 DX = -Lod1Radius; DX <= Lod1Radius; ++DX)
+    {
+        for (int32 DY = -Lod1Radius; DY <= Lod1Radius; ++DY)
+        {
+            int32 Dist = FMath::Max(FMath::Abs(DX), FMath::Abs(DY));
+            // Only LOD 1 range: beyond LoadRadius, within Lod1Radius
+            if (Dist <= LoadRadius) continue;
+
+            int32 TX = CameraTile.X + DX;
+            int32 TY = CameraTile.Y + DY;
+            if (TX < 0 || TX >= 64 || TY < 0 || TY >= 64) continue;
+            if (!WdtData->TileExists[TX][TY]) continue;
+
+            // Skip if full ADT loaded or pending
+            if (IsTileLoaded(TX, TY) || IsTilePending(TX, TY)) continue;
+
+            int64 Key = TileKey(TX, TY);
+            if (Lod1Tiles.Contains(Key)) continue;
+
+            SpawnLod1Tile(TX, TY);
+        }
+    }
+
+    // Unload LOD 1 tiles that are too far or superseded by full ADT
+    TArray<int64> ToUnload;
+    for (auto& Pair : Lod1Tiles)
+    {
+        int32 TX = (int32)(Pair.Key >> 32);
+        int32 TY = (int32)(Pair.Key & 0xFFFFFFFF);
+        int32 Dist = FMath::Max(FMath::Abs(TX - CameraTile.X), FMath::Abs(TY - CameraTile.Y));
+
+        if (Dist > Lod1Radius + 1 || IsTileLoaded(TX, TY))
+        {
+            ToUnload.Add(Pair.Key);
+        }
+    }
+    for (int64 Key : ToUnload)
+    {
+        TObjectPtr<AActor>* Found = Lod1Tiles.Find(Key);
+        if (Found && *Found) (*Found)->Destroy();
+        Lod1Tiles.Remove(Key);
+    }
+}
+
+void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
+{
+    FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *MapName, *MapName, TX, TY);
+    TArray<uint8> AdtRaw;
+    if (!MpqManager->ReadFile(AdtPath, AdtRaw))
+    {
+        return;
+    }
+
+    bool bBigAlpha = WdtData ? WdtData->bUseBigAlpha : false;
+    FAdtData AdtData = FAdtParser::Parse(AdtRaw, bBigAlpha);
+    if (!AdtData.bIsValid) return;
+
+    FVector TileCenter = FWowCoordinate::TileToWorld(TX, TY);
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Name = *FString::Printf(TEXT("Lod1Tile_%d_%d"), TX, TY);
+    AActor* Lod1Actor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), TileCenter, FRotator::ZeroRotator, SpawnParams);
+    if (!Lod1Actor) return;
+
+    USceneComponent* Root = NewObject<USceneComponent>(Lod1Actor, TEXT("Root"));
+    Root->RegisterComponent();
+    Lod1Actor->SetRootComponent(Root);
+
+    UProceduralMeshComponent* MeshComp = NewObject<UProceduralMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
+    MeshComp->SetupAttachment(Root);
+    MeshComp->RegisterComponent();
+    MeshComp->SetCastShadow(false);
+    MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+    // Simple green-brown material for LOD 1 terrain (same as WDL)
+    UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
+        UMaterial::GetDefaultMaterial(MD_Surface), Lod1Actor);
+    if (Mat)
+    {
+        Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.35f, 0.42f, 0.22f, 1.0f));
+    }
+
+    int32 SectionIndex = 0;
+    for (int32 i = 0; i < 256; ++i)
+    {
+        FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(AdtData.Chunks[i], TX, TY);
+        if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0) continue;
+
+        TArray<FLinearColor> EmptyColors;
+        TArray<FProcMeshTangent> EmptyTangents;
+
+        MeshComp->CreateMeshSection_LinearColor(
+            SectionIndex, MeshData.Vertices, MeshData.Indices,
+            MeshData.Normals, MeshData.UVs, EmptyColors, EmptyTangents, false);
+
+        if (Mat)
+        {
+            MeshComp->SetMaterial(SectionIndex, Mat);
+        }
+
+        SectionIndex++;
+    }
+
+    Lod1Tiles.Add(TileKey(TX, TY), Lod1Actor);
+    UE_LOG(LogWowWorld, Verbose, TEXT("Spawned LOD 1 tile %d,%d (%d sections)"), TX, TY, SectionIndex);
 }
 
 void AWowWorldManager::UpdateObjectStreaming()

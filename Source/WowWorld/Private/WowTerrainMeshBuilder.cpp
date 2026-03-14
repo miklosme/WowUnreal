@@ -201,3 +201,109 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
 
     return Result;
 }
+
+FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMeshLOD1(const FAdtChunkData& ChunkData, int32 TileX, int32 TileY)
+{
+    FTerrainChunkMeshData Result;
+
+    // Compute chunk position from tile + chunk indices (same as regular method)
+    const float Xbase = TileX * FWowCoordinate::TILE_SIZE + ChunkData.IndexX * FWowCoordinate::CHUNK_SIZE;
+    const float Zbase = TileY * FWowCoordinate::TILE_SIZE + ChunkData.IndexY * FWowCoordinate::CHUNK_SIZE;
+    const float Ybase = ChunkData.WorldZ; // Height from MCNK header
+
+    // Tile center in WoW ADT space for relative positioning
+    const float TileCenterX = TileX * FWowCoordinate::TILE_SIZE + FWowCoordinate::TILE_SIZE * 0.5f;
+    const float TileCenterZ = TileY * FWowCoordinate::TILE_SIZE + FWowCoordinate::TILE_SIZE * 0.5f;
+
+    // Build only 81 outer vertices (9x9 grid)
+    Result.Vertices.SetNum(81);
+    Result.Normals.SetNum(81);
+    Result.UVs.SetNum(81);
+    Result.AlphaUVs.SetNum(81);
+    Result.VertexColors.SetNum(81);
+
+    int32 VertIdx = 0;
+    for (int32 Row = 0; Row < 9; ++Row)
+    {
+        for (int32 Col = 0; Col < 9; ++Col)
+        {
+            // Use OuterIndex to read height from the original 145-height array
+            int32 HeightIndex = OuterIndex(Col, Row);
+
+            // Grid position for outer vertices (integer positions)
+            float GridX = (float)Col;
+            float GridY = (float)Row;
+
+            // WoW ADT vertex position calculation (same as regular method)
+            float AdtX = Xbase + GridX * FWowCoordinate::UNIT_SIZE;  // east-west
+            float AdtY = Ybase + ChunkData.Heights[HeightIndex];     // up
+            float AdtZ = Zbase + GridY * FWowCoordinate::UNIT_SIZE;  // north-south
+
+            // Make relative to tile center
+            float RelX = AdtX - TileCenterX;
+            float RelZ = AdtZ - TileCenterZ;
+
+            // Convert to UE coordinates (same as regular method)
+            Result.Vertices[VertIdx] = FVector(
+                -RelZ * FWowCoordinate::SCALE,   // north-south (negate: WoW ADT Z=south, UE X=north)
+                RelX * FWowCoordinate::SCALE,    // east-west
+                AdtY * FWowCoordinate::SCALE     // height (absolute, not relative)
+            );
+
+            // Set normal to UP for now
+            Result.Normals[VertIdx] = FVector(0, 0, 1);
+
+            // Tiling UVs: 0..8 range across the chunk for texture tiling
+            Result.UVs[VertIdx] = FVector2D(GridX, GridY);
+
+            // Alpha map UVs: 0..1 range across the chunk
+            Result.AlphaUVs[VertIdx] = FVector2D(GridX / 8.0f, GridY / 8.0f);
+
+            // Vertex colors
+            if (ChunkData.bHasVertexColors)
+            {
+                Result.VertexColors[VertIdx] = ChunkData.VertexColors[HeightIndex];
+            }
+            else
+            {
+                Result.VertexColors[VertIdx] = FColor::White;
+            }
+
+            ++VertIdx;
+        }
+    }
+
+    // Build triangle indices using simple 2-triangle-per-quad pattern
+    // 8x8 quads, each with 2 triangles = 128 triangles max (minus holes)
+    Result.Indices.Reserve(384); // 128 * 3
+
+    for (int32 QY = 0; QY < 8; ++QY)
+    {
+        for (int32 QX = 0; QX < 8; ++QX)
+        {
+            // Skip hole quads
+            if (IsHole(ChunkData.Holes, QX, QY))
+            {
+                continue;
+            }
+
+            // Vertex indices in the 81-vertex array (9x9 grid)
+            int32 TopLeft     = QY * 9 + QX;
+            int32 TopRight    = QY * 9 + QX + 1;
+            int32 BottomLeft  = (QY + 1) * 9 + QX;
+            int32 BottomRight = (QY + 1) * 9 + QX + 1;
+
+            // First triangle: TL, BL, TR (CW winding)
+            Result.Indices.Add(TopLeft);
+            Result.Indices.Add(BottomLeft);
+            Result.Indices.Add(TopRight);
+
+            // Second triangle: TR, BL, BR (CW winding)
+            Result.Indices.Add(TopRight);
+            Result.Indices.Add(BottomLeft);
+            Result.Indices.Add(BottomRight);
+        }
+    }
+
+    return Result;
+}

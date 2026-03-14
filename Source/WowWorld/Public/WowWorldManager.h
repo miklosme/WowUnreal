@@ -62,6 +62,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 WdlUnloadRadius = 15;
 
+    /** Radius in tiles for LOD 1 simplified terrain (between LoadRadius and WdlRadius) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    int32 Lod1Radius = 5;
+
     /** Initial tile to load for testing (Elwynn Forest area) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Debug")
     int32 DebugTileX = 32;
@@ -106,6 +110,10 @@ private:
     UPROPERTY()
     TMap<int64, TObjectPtr<AActor>> WdlTiles;
 
+    /** LOD 1 simplified terrain tiles (mid-distance) */
+    UPROPERTY()
+    TMap<int64, TObjectPtr<AActor>> Lod1Tiles;
+
     /** Runtime Virtual Texture for terrain */
     UPROPERTY()
     TObjectPtr<URuntimeVirtualTexture> TerrainRVT;
@@ -136,7 +144,9 @@ private:
     void UpdateStreaming();
     void UpdateObjectStreaming();
     void UpdateWdlStreaming(const FIntPoint& CameraTile);
+    void UpdateLod1Streaming(const FIntPoint& CameraTile);
     void SpawnWdlTile(int32 TX, int32 TY);
+    void SpawnLod1Tile(int32 TX, int32 TY);
     void SetupRuntimeVirtualTexture();
     void UpdateRVTBounds(const FIntPoint& CameraTile);
     bool IsTileLoaded(int32 TX, int32 TY) const;
