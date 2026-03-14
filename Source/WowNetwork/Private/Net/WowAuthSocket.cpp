@@ -80,11 +80,14 @@ void FWowAuthSocket::Disconnect()
 {
     bRunning = false;
 
-    if (Socket)
     {
-        Socket->Close();
-        ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Socket);
-        Socket = nullptr;
+        FScopeLock Lock(&SocketLock);
+        if (Socket)
+        {
+            Socket->Close();
+            ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->DestroySocket(Socket);
+            Socket = nullptr;
+        }
     }
 
     if (Thread)
@@ -548,6 +551,7 @@ void FWowAuthSocket::HandleRealmList()
 
 bool FWowAuthSocket::SendBytes(const TArray<uint8>& Data)
 {
+    FScopeLock Lock(&SocketLock);
     if (!Socket)
     {
         return false;
@@ -561,24 +565,38 @@ bool FWowAuthSocket::RecvBytes(TArray<uint8>& OutData, int32 NumBytes)
 {
     OutData.SetNumUninitialized(NumBytes);
     int32 TotalRead = 0;
+    constexpr double TimeoutSeconds = 30.0;
+    double IdleStart = FPlatformTime::Seconds();
 
     while (TotalRead < NumBytes && bRunning)
     {
         int32 BytesRead = 0;
-        if (!Socket->Recv(OutData.GetData() + TotalRead, NumBytes - TotalRead, BytesRead))
         {
-            UE_LOG(LogWowAuth, Error, TEXT("Socket recv failed"));
-            return false;
+            FScopeLock Lock(&SocketLock);
+            if (!Socket)
+            {
+                return false;
+            }
+            if (!Socket->Recv(OutData.GetData() + TotalRead, NumBytes - TotalRead, BytesRead))
+            {
+                UE_LOG(LogWowAuth, Error, TEXT("Socket recv failed"));
+                return false;
+            }
         }
 
         if (BytesRead == 0)
         {
-            // Connection closed or no data yet, wait a bit
+            if (FPlatformTime::Seconds() - IdleStart > TimeoutSeconds)
+            {
+                UE_LOG(LogWowAuth, Error, TEXT("Socket recv timed out after %.0fs"), TimeoutSeconds);
+                return false;
+            }
             FPlatformProcess::Sleep(0.01f);
             continue;
         }
 
         TotalRead += BytesRead;
+        IdleStart = FPlatformTime::Seconds();
     }
 
     return TotalRead == NumBytes;

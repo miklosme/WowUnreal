@@ -612,21 +612,32 @@ bool FWowWorldSocket::SendRawBytes(const uint8* Data, int32 Len)
 bool FWowWorldSocket::RecvExact(uint8* Buffer, int32 Len)
 {
     int32 TotalRead = 0;
+    constexpr double TimeoutSeconds = 30.0;
+    double IdleStart = FPlatformTime::Seconds();
+
     while (TotalRead < Len && bRunning)
     {
         int32 BytesRead = 0;
-        FScopeLock Lock(&SocketLock);
-        if (!Socket) return false;
-        if (!Socket->Recv(Buffer + TotalRead, Len - TotalRead, BytesRead))
         {
-            return false;
+            FScopeLock Lock(&SocketLock);
+            if (!Socket) return false;
+            if (!Socket->Recv(Buffer + TotalRead, Len - TotalRead, BytesRead))
+            {
+                return false;
+            }
         }
         if (BytesRead == 0)
         {
+            if (FPlatformTime::Seconds() - IdleStart > TimeoutSeconds)
+            {
+                UE_LOG(LogWowWorld, Error, TEXT("Socket recv timed out after %.0fs"), TimeoutSeconds);
+                return false;
+            }
             FPlatformProcess::Sleep(0.01f);
             continue;
         }
         TotalRead += BytesRead;
+        IdleStart = FPlatformTime::Seconds();
     }
     return TotalRead == Len;
 }

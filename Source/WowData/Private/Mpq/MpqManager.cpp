@@ -11,6 +11,8 @@ FMpqManager::~FMpqManager() { Shutdown(); }
 bool FMpqManager::Initialize(const FString& InDataPath)
 {
     if (bInitialized) Shutdown();
+
+    FScopeLock Lock(&ArchiveLock);
     DataPath = InDataPath;
 
     if (!FPaths::DirectoryExists(DataPath))

@@ -55,4 +55,6 @@ private:
 
     // SRP6 state
     TSharedPtr<class FWowSRP6> SRP6;
+
+    mutable FCriticalSection SocketLock;
 };
