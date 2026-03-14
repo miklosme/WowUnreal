@@ -10,7 +10,8 @@
         { "Name": "WowWorld", "Type": "Runtime", "LoadingPhase": "Default" },
         { "Name": "WowUI", "Type": "Runtime", "LoadingPhase": "Default" },
         { "Name": "WowNetwork", "Type": "Runtime", "LoadingPhase": "Default" },
-        { "Name": "WowClient", "Type": "Runtime", "LoadingPhase": "Default" }
+        { "Name": "WowClient", "Type": "Runtime", "LoadingPhase": "Default" },
+        { "Name": "WowTests", "Type": "Runtime", "LoadingPhase": "Default" }
     ],
     "Plugins": [
         { "Name": "ModelingToolsEditorMode", "Enabled": true, "TargetAllowList": ["Editor"] },

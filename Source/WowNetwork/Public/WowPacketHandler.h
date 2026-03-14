@@ -5,6 +5,7 @@
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
+DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
 DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
 
 // Simple byte-stream reader for packet payloads
@@ -97,6 +98,7 @@ public:
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
+    FOnSpellStart OnSpellStart;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
@@ -118,6 +120,11 @@ private:
     void HandleInitialSpells(FPacketReader& R);
     void HandleActionButtons(FPacketReader& R);
     void HandleTimeSyncReq(FPacketReader& R);
+    void HandleSpellStart(FPacketReader& R);
+    void HandleSpellGo(FPacketReader& R);
+    void HandleAuraUpdate(FPacketReader& R);
+    void HandlePowerUpdate(FPacketReader& R);
+    void HandleMonsterMove(FPacketReader& R);
 
     // Internal parsing
     void ParseUpdateBlock(FPacketReader& R);

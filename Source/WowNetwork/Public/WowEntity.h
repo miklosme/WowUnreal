@@ -24,6 +24,17 @@ struct FWowMovementInfo
     float TransportOrientation = 0.0f;
 };
 
+// Aura information for a single aura slot
+struct FAuraInfo
+{
+    uint32 SpellId = 0;
+    uint8 Flags = 0;
+    uint8 Level = 0;
+    uint8 Charges = 0;
+    uint64 CasterGuid = 0;
+    bool bActive = false;
+};
+
 // Base entity — represents any WoW object tracked by the client
 struct WOWNETWORK_API FWowEntity
 {
@@ -35,8 +46,17 @@ struct WOWNETWORK_API FWowEntity
 
     FWowMovementInfo Movement;
 
+    // Aura slots (max 64 aura slots in 3.3.5a)
+    TArray<FAuraInfo> Auras;
+
     // Raw update field values (indexed by field offset)
     TMap<uint16, uint32> Fields;
+
+    FWowEntity()
+    {
+        // Initialize 64 aura slots
+        Auras.SetNum(64);
+    }
 
     // Convenience accessors
     bool IsPlayer() const { return (TypeMask & WowTypeMask::PLAYER) != 0; }

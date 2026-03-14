@@ -20,6 +20,9 @@
 #include "WowCharacterBuilder.h"
 #include "WowAudioManager.h"
 #include "WowLoginController.h"
+#include "WowCredentialStore.h"
+#include "WowEntity.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
@@ -136,6 +139,10 @@ void AWowViewerGameMode::BeginPlay()
     else if (TestScene == TEXT("login"))
     {
         SetupLoginScene(World);
+    }
+    else if (TestScene == TEXT("network"))
+    {
+        SetupNetworkTestScene(World);
     }
     else
     {
@@ -323,4 +330,238 @@ void AWowViewerGameMode::SetupLoginScene(UWorld* World)
     LoginParams.Name = FName(TEXT("WowLoginController"));
     World->SpawnActor<AWowLoginController>(AWowLoginController::StaticClass(),
         FVector::ZeroVector, FRotator::ZeroRotator, LoginParams);
+}
+
+void AWowViewerGameMode::SetupNetworkTestScene(UWorld* World)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("=== NETWORK TEST SCENE ==="));
+    UE_LOG(LogWowGameMode, Log, TEXT("Headless networking test — no rendering, connects to test server"));
+    UE_LOG(LogWowGameMode, Log, TEXT("Tests: auth handshake, realm list, character enum, world login, packet handling, entity updates"));
+
+    // Parse optional timeout from command line (default 30s)
+    float Timeout = 30.0f;
+    FParse::Value(FCommandLine::Get(), TEXT("-nettesttimeout="), Timeout);
+    NetworkTestTimeout = FMath::Clamp(Timeout, 5.0f, 120.0f);
+
+    // Load credentials
+    UWowCredentialStore* CredStore = NewObject<UWowCredentialStore>(GetTransientPackage());
+    if (!CredStore->LoadCredentials())
+    {
+        UE_LOG(LogWowGameMode, Error, TEXT("[NETTEST] FAIL: Could not load credentials"));
+        FGenericPlatformMisc::RequestExit(false);
+        return;
+    }
+
+    FString AccountAlias;
+    FParse::Value(FCommandLine::Get(), TEXT("-account="), AccountAlias);
+
+    FWowCredential Cred;
+    if (AccountAlias.IsEmpty())
+    {
+        Cred = CredStore->GetDefaultCredential();
+    }
+    else
+    {
+        bool bFound = false;
+        for (const FWowCredential& C : CredStore->GetAllCredentials())
+        {
+            if (C.Alias.Equals(AccountAlias, ESearchCase::IgnoreCase))
+            {
+                Cred = C;
+                bFound = true;
+                break;
+            }
+        }
+        if (!bFound)
+        {
+            UE_LOG(LogWowGameMode, Error, TEXT("[NETTEST] FAIL: Credential alias '%s' not found"), *AccountAlias);
+            FGenericPlatformMisc::RequestExit(false);
+            return;
+        }
+    }
+
+    if (Cred.Username.IsEmpty() || Cred.Password.IsEmpty())
+    {
+        UE_LOG(LogWowGameMode, Error, TEXT("[NETTEST] FAIL: Credential has empty username or password"));
+        FGenericPlatformMisc::RequestExit(false);
+        return;
+    }
+
+    UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] Connecting as '%s' to %s:%d (timeout %.0fs)"),
+           *Cred.Username, *Cred.ServerAddress, Cred.AuthPort, NetworkTestTimeout);
+
+    // Create connection manager
+    NetworkTestConnMgr = NewObject<UWowConnectionManager>(GetGameInstance());
+    NetworkTestConnMgr->AddToRoot();
+
+    // Bind events
+    NetworkTestConnMgr->OnStateChanged.AddDynamic(this, &AWowViewerGameMode::OnNetworkTestStateChanged);
+    NetworkTestConnMgr->OnError.AddDynamic(this, &AWowViewerGameMode::OnNetworkTestError);
+    NetworkTestConnMgr->OnRealmList.AddDynamic(this, &AWowViewerGameMode::OnNetworkTestRealmList);
+    NetworkTestConnMgr->OnCharacterList.AddDynamic(this, &AWowViewerGameMode::OnNetworkTestCharacterList);
+
+    // Start login
+    NetworkTestConnMgr->Login(Cred.Username, Cred.Password, Cred.ServerAddress, Cred.AuthPort);
+
+    // Set up a periodic tick timer (every 1s) to log status and check timeout
+    NetworkTestElapsed = 0.0f;
+    bNetworkTestComplete = false;
+    FTimerDelegate TimerDel;
+    TimerDel.BindWeakLambda(this, [this]() { NetworkTestTick(); });
+    World->GetTimerManager().SetTimer(NetworkTestTimerHandle, TimerDel, 1.0f, true, 1.0f);
+}
+
+void AWowViewerGameMode::OnNetworkTestStateChanged(EWowSessionState NewState)
+{
+    static const TCHAR* StateNames[] = {
+        TEXT("Disconnected"),
+        TEXT("AuthConnecting"), TEXT("AuthChallengeSent"), TEXT("AuthProofSent"),
+        TEXT("AuthRequestingRealmList"), TEXT("AuthHaveRealmList"),
+        TEXT("WorldConnecting"), TEXT("WorldAuthChallengeReceived"), TEXT("WorldAuthSessionSent"),
+        TEXT("WorldAuthenticated"), TEXT("WorldRequestingCharList"), TEXT("WorldHaveCharList"),
+        TEXT("WorldEnteringWorld"), TEXT("WorldInGame"),
+        TEXT("Error")
+    };
+    int32 Idx = static_cast<int32>(NewState);
+    const TCHAR* Name = (Idx >= 0 && Idx < UE_ARRAY_COUNT(StateNames)) ? StateNames[Idx] : TEXT("Unknown");
+    UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] State: %s"), Name);
+
+    if (!NetworkTestConnMgr) return;
+
+    // Auto-progress through the login flow
+    if (NewState == EWowSessionState::WorldAuthenticated)
+    {
+        UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] PASS: World auth complete, requesting character list"));
+        NetworkTestConnMgr->RequestCharacterList();
+    }
+}
+
+void AWowViewerGameMode::OnNetworkTestError(const FString& Msg)
+{
+    UE_LOG(LogWowGameMode, Error, TEXT("[NETTEST] ERROR: %s"), *Msg);
+}
+
+void AWowViewerGameMode::OnNetworkTestRealmList(const TArray<FWowRealmInfo>& Realms)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] PASS: Received %d realm(s)"), Realms.Num());
+    for (int32 i = 0; i < Realms.Num(); ++i)
+    {
+        UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST]   Realm %d: '%s' (%s:%d, %d chars)"),
+               i, *Realms[i].Name, *Realms[i].Address, Realms[i].Port, Realms[i].CharacterCount);
+    }
+
+    if (NetworkTestConnMgr && Realms.Num() > 0)
+    {
+        UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] Selecting realm 0"));
+        NetworkTestConnMgr->SelectRealm(0);
+    }
+}
+
+void AWowViewerGameMode::OnNetworkTestCharacterList(const TArray<FWowCharacterInfo>& Characters)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] PASS: Received %d character(s)"), Characters.Num());
+    for (int32 i = 0; i < Characters.Num(); ++i)
+    {
+        const FWowCharacterInfo& C = Characters[i];
+        UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST]   Char %d: '%s' Level %d (Race %d, Class %d, Map %d, Zone %d)"),
+               i, *C.Name, C.Level, C.Race, C.Class, C.MapId, C.ZoneId);
+    }
+
+    if (NetworkTestConnMgr && Characters.Num() > 0)
+    {
+        UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] Entering world with '%s' (GUID %llu)"),
+               *Characters[0].Name, Characters[0].Guid);
+        NetworkTestConnMgr->EnterWorld(Characters[0].Guid);
+    }
+}
+
+void AWowViewerGameMode::NetworkTestTick()
+{
+    NetworkTestElapsed += 1.0f;
+
+    if (!NetworkTestConnMgr || bNetworkTestComplete)
+    {
+        return;
+    }
+
+    EWowSessionState CurrentState = NetworkTestConnMgr->GetState();
+    FWowEntityManager& EM = NetworkTestConnMgr->PacketHandler.EntityManager;
+    const TSet<uint32>& Spells = NetworkTestConnMgr->PacketHandler.KnownSpells;
+
+    // Log periodic status while in-game
+    if (CurrentState == EWowSessionState::WorldInGame)
+    {
+        int32 PlayerCount = 0;
+        int32 UnitCount = 0;
+        int32 GOCount = 0;
+        for (const auto& Pair : EM.GetAll())
+        {
+            if (Pair.Value->IsPlayer()) ++PlayerCount;
+            else if (Pair.Value->IsUnit()) ++UnitCount;
+            else if (Pair.Value->IsGameObject()) ++GOCount;
+        }
+
+        UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST] %.0fs — InGame | Entities: %d total (%d players, %d units, %d GOs) | Spells: %d"),
+               NetworkTestElapsed, EM.Num(), PlayerCount, UnitCount, GOCount, Spells.Num());
+
+        // Check local player
+        if (FWowEntity* LocalPlayer = EM.GetLocalPlayer())
+        {
+            UE_LOG(LogWowGameMode, Log, TEXT("[NETTEST]   LocalPlayer GUID=%llu Pos=(%.1f, %.1f, %.1f) HP=%d/%d Level=%d"),
+                   LocalPlayer->Guid,
+                   LocalPlayer->Movement.Position.X, LocalPlayer->Movement.Position.Y, LocalPlayer->Movement.Position.Z,
+                   LocalPlayer->GetHealth(), LocalPlayer->GetMaxHealth(), LocalPlayer->GetLevel());
+        }
+    }
+
+    // After 10 seconds in-game (or on timeout), print final summary and exit
+    bool bInGameLongEnough = (CurrentState == EWowSessionState::WorldInGame && NetworkTestElapsed >= 15.0f);
+    bool bTimedOut = (NetworkTestElapsed >= NetworkTestTimeout);
+
+    if (bInGameLongEnough || bTimedOut)
+    {
+        bNetworkTestComplete = true;
+
+        UE_LOG(LogWowGameMode, Log, TEXT(""));
+        UE_LOG(LogWowGameMode, Log, TEXT("=== NETWORK TEST RESULTS ==="));
+        UE_LOG(LogWowGameMode, Log, TEXT("  Duration:     %.0f seconds"), NetworkTestElapsed);
+        UE_LOG(LogWowGameMode, Log, TEXT("  Final State:  %d (%s)"),
+               static_cast<int32>(CurrentState),
+               CurrentState == EWowSessionState::WorldInGame ? TEXT("WorldInGame") : TEXT("NOT InGame"));
+
+        bool bAuthOk = static_cast<int32>(CurrentState) >= static_cast<int32>(EWowSessionState::AuthHaveRealmList);
+        bool bWorldOk = static_cast<int32>(CurrentState) >= static_cast<int32>(EWowSessionState::WorldAuthenticated);
+        bool bCharOk = static_cast<int32>(CurrentState) >= static_cast<int32>(EWowSessionState::WorldHaveCharList);
+        bool bInGame = CurrentState == EWowSessionState::WorldInGame;
+        bool bEntities = EM.Num() > 0;
+        bool bLocalPlayer = EM.GetLocalPlayer() != nullptr;
+
+        UE_LOG(LogWowGameMode, Log, TEXT("  Auth:         %s"), bAuthOk ? TEXT("PASS") : TEXT("FAIL"));
+        UE_LOG(LogWowGameMode, Log, TEXT("  World Auth:   %s"), bWorldOk ? TEXT("PASS") : TEXT("FAIL"));
+        UE_LOG(LogWowGameMode, Log, TEXT("  Char Enum:    %s"), bCharOk ? TEXT("PASS") : TEXT("FAIL"));
+        UE_LOG(LogWowGameMode, Log, TEXT("  In Game:      %s"), bInGame ? TEXT("PASS") : TEXT("FAIL"));
+        UE_LOG(LogWowGameMode, Log, TEXT("  Entities:     %s (%d tracked)"), bEntities ? TEXT("PASS") : TEXT("FAIL"), EM.Num());
+        UE_LOG(LogWowGameMode, Log, TEXT("  Local Player: %s (GUID %llu)"), bLocalPlayer ? TEXT("PASS") : TEXT("FAIL"), EM.LocalPlayerGuid);
+        UE_LOG(LogWowGameMode, Log, TEXT("  Known Spells: %d"), Spells.Num());
+
+        bool bAllPass = bAuthOk && bWorldOk && bCharOk && bInGame && bEntities && bLocalPlayer;
+        UE_LOG(LogWowGameMode, Log, TEXT("  OVERALL:      %s"), bAllPass ? TEXT("ALL PASS") : TEXT("SOME FAILED"));
+        UE_LOG(LogWowGameMode, Log, TEXT("============================="));
+        UE_LOG(LogWowGameMode, Log, TEXT(""));
+
+        // Cleanup and exit
+        if (NetworkTestConnMgr)
+        {
+            NetworkTestConnMgr->Disconnect();
+            NetworkTestConnMgr->RemoveFromRoot();
+            NetworkTestConnMgr = nullptr;
+        }
+
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().ClearTimer(NetworkTestTimerHandle);
+        }
+
+        FGenericPlatformMisc::RequestExit(false);
+    }
 }

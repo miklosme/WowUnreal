@@ -16,6 +16,11 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_INITIAL_SPELLS,           &FWowPacketHandler::HandleInitialSpells);
     Handlers.Add(WowOpcode::SMSG_ACTION_BUTTONS,           &FWowPacketHandler::HandleActionButtons);
     Handlers.Add(WowOpcode::SMSG_TIME_SYNC_REQ,            &FWowPacketHandler::HandleTimeSyncReq);
+    Handlers.Add(WowOpcode::SMSG_SPELL_START,              &FWowPacketHandler::HandleSpellStart);
+    Handlers.Add(WowOpcode::SMSG_SPELL_GO,                 &FWowPacketHandler::HandleSpellGo);
+    Handlers.Add(WowOpcode::SMSG_AURA_UPDATE,              &FWowPacketHandler::HandleAuraUpdate);
+    Handlers.Add(WowOpcode::SMSG_POWER_UPDATE,             &FWowPacketHandler::HandlePowerUpdate);
+    Handlers.Add(WowOpcode::SMSG_MONSTER_MOVE,             &FWowPacketHandler::HandleMonsterMove);
 
     // Movement handlers — all use the same parser
     for (uint16 Op = WowOpcode::MSG_MOVE_START_FORWARD; Op <= WowOpcode::MSG_MOVE_SET_PITCH; ++Op)
@@ -557,4 +562,241 @@ void FWowPacketHandler::HandleTimeSyncReq(FPacketReader& R)
     FMemory::Memcpy(Resp.GetData() + 4, &ClientTicks, 4);
 
     OnSendPacket.ExecuteIfBound(WowOpcode::CMSG_TIME_SYNC_RESP, Resp);
+}
+
+// ── SMSG_SPELL_START ─────────────────────────────────────────────────────
+// packed guid caster, packed guid caster again, uint8 cast counter, uint32 spell id, uint32 cast flags, int32 cast time, (targets)
+
+void FWowPacketHandler::HandleSpellStart(FPacketReader& R)
+{
+    if (!R.CanRead(18)) // minimum: 2 packed guids (2 bytes each) + cast counter + spell id + cast flags + cast time
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("SPELL_START: packet too short"));
+        return;
+    }
+
+    uint64 CasterGuid1 = R.ReadPackedGuid(); // Item or caster guid
+    uint64 CasterGuid = R.ReadPackedGuid();  // Actual caster guid
+    uint8 CastCounter = R.ReadU8();
+    uint32 SpellId = R.ReadU32();
+    uint32 CastFlags = R.ReadU32();
+    int32 CastTime = static_cast<int32>(R.ReadU32());
+
+    UE_LOG(LogWowPacket, Log, TEXT("SPELL_START: caster=%llu spell=%u castTime=%dms"),
+        CasterGuid, SpellId, CastTime);
+
+    OnSpellStart.Broadcast(CasterGuid, SpellId, CastFlags, CastTime);
+
+    // Skip remaining data (targets and additional cast flag data)
+}
+
+// ── SMSG_SPELL_GO ───────────────────────────────────────────────────────
+// packed guid caster, packed guid caster again, uint8 cast counter, uint32 spell id, uint32 cast flags, uint32 timestamp,
+// uint8 hit count, packed guids..., uint8 miss count, packed guids + miss reasons...
+
+void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
+{
+    if (!R.CanRead(20)) // minimum: 2 packed guids + cast counter + spell id + cast flags + timestamp + hit count + miss count
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("SPELL_GO: packet too short"));
+        return;
+    }
+
+    uint64 CasterGuid1 = R.ReadPackedGuid(); // Item or caster guid
+    uint64 CasterGuid = R.ReadPackedGuid();  // Actual caster guid
+    uint8 CastCounter = R.ReadU8();
+    uint32 SpellId = R.ReadU32();
+    uint32 CastFlags = R.ReadU32();
+    uint32 Timestamp = R.ReadU32();
+
+    // Hit targets
+    if (!R.CanRead(1)) return;
+    uint8 HitCount = R.ReadU8();
+    for (uint32 i = 0; i < HitCount; ++i)
+    {
+        if (R.Remaining() == 0) break;
+        R.ReadPackedGuid(); // hit target guid
+    }
+
+    // Miss targets
+    if (!R.CanRead(1)) return;
+    uint8 MissCount = R.ReadU8();
+    for (uint32 i = 0; i < MissCount; ++i)
+    {
+        if (!R.CanRead(2)) break; // need at least guid + miss reason
+        R.ReadPackedGuid(); // miss target guid
+        uint8 MissReason = R.ReadU8();
+        if (MissReason == 11) // SPELL_MISS_REFLECT
+        {
+            if (R.CanRead(1))
+                R.ReadU8(); // reflect result
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("SPELL_GO: caster=%llu spell=%u hits=%d misses=%d"),
+        CasterGuid, SpellId, HitCount, MissCount);
+
+    // Skip remaining data (targets and additional cast flag data)
+}
+
+// ── SMSG_AURA_UPDATE ────────────────────────────────────────────────────
+// packed guid target, uint8 slot, [if slot != 0xFF: uint32 spell id, uint8 flags, uint8 level, uint8 charges, possible packed guid caster]
+
+void FWowPacketHandler::HandleAuraUpdate(FPacketReader& R)
+{
+    if (!R.CanRead(2)) // minimum: packed guid + slot
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("AURA_UPDATE: packet too short"));
+        return;
+    }
+
+    uint64 TargetGuid = R.ReadPackedGuid();
+
+    FWowEntity* Entity = EntityManager.Find(TargetGuid);
+    if (!Entity)
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("AURA_UPDATE: unknown entity %llu"), TargetGuid);
+        return;
+    }
+
+    if (!R.CanRead(1)) return;
+    uint8 Slot = R.ReadU8();
+
+    if (Slot == 0xFF)
+    {
+        // End of aura updates
+        return;
+    }
+
+    if (Slot >= Entity->Auras.Num())
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("AURA_UPDATE: invalid slot %d"), Slot);
+        return;
+    }
+
+    if (!R.CanRead(4)) return;
+    uint32 SpellId = R.ReadU32();
+
+    if (SpellId == 0)
+    {
+        // Remove aura
+        Entity->Auras[Slot].bActive = false;
+        Entity->Auras[Slot].SpellId = 0;
+        UE_LOG(LogWowPacket, Verbose, TEXT("AURA_UPDATE: target=%llu slot=%d removed"), TargetGuid, Slot);
+        return;
+    }
+
+    // Add/update aura
+    if (!R.CanRead(3)) return;
+    uint8 Flags = R.ReadU8();
+    uint8 Level = R.ReadU8();
+    uint8 Charges = R.ReadU8();
+
+    FAuraInfo& Aura = Entity->Auras[Slot];
+    Aura.SpellId = SpellId;
+    Aura.Flags = Flags;
+    Aura.Level = Level;
+    Aura.Charges = Charges;
+    Aura.bActive = true;
+
+    // Check if caster GUID is present (depends on flags)
+    const uint8 AFLAG_CASTER = 0x08;
+    if (Flags & AFLAG_CASTER)
+    {
+        if (R.Remaining() > 0)
+        {
+            Aura.CasterGuid = R.ReadPackedGuid();
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("AURA_UPDATE: target=%llu slot=%d spell=%u"),
+        TargetGuid, Slot, SpellId);
+}
+
+// ── SMSG_POWER_UPDATE ───────────────────────────────────────────────────
+// packed guid target, uint8 power type, uint32 power value
+
+void FWowPacketHandler::HandlePowerUpdate(FPacketReader& R)
+{
+    if (!R.CanRead(6)) // minimum: packed guid + power type + power value
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("POWER_UPDATE: packet too short"));
+        return;
+    }
+
+    uint64 TargetGuid = R.ReadPackedGuid();
+    uint8 PowerType = R.ReadU8();
+    uint32 PowerValue = R.ReadU32();
+
+    FWowEntity* Entity = EntityManager.Find(TargetGuid);
+    if (Entity)
+    {
+        // Update power field in entity based on power type
+        if (PowerType < 7) // Valid power types: 0=mana, 1=rage, 2=focus, 3=energy, 4=happiness, 5=runes, 6=runic power
+        {
+            // WoW power fields start at UNIT_FIELD_POWER1 + power_type
+            uint16 PowerFieldIndex = UnitField::POWER1 + PowerType;
+            Entity->SetField(PowerFieldIndex, PowerValue);
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("POWER_UPDATE: target=%llu type=%d value=%u"),
+        TargetGuid, PowerType, PowerValue);
+}
+
+// ── SMSG_MONSTER_MOVE ───────────────────────────────────────────────────
+// packed guid target, uint8 new_in_31, 3 floats position, uint32 timestamp, uint8 move_type,
+// [if move_type == 0: uint32 spline_flags, uint32 duration, uint32 point_count, points...]
+
+void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
+{
+    if (!R.CanRead(18)) // minimum: packed guid + new flag + position + timestamp + move type
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: packet too short"));
+        return;
+    }
+
+    uint64 TargetGuid = R.ReadPackedGuid();
+    uint8 NewIn31 = R.ReadU8(); // new in 3.1 - usually 0
+    float PosX = R.ReadFloat();
+    float PosY = R.ReadFloat();
+    float PosZ = R.ReadFloat();
+    uint32 Timestamp = R.ReadU32();
+    uint8 MoveType = R.ReadU8();
+
+    FWowEntity* Entity = EntityManager.Find(TargetGuid);
+    if (Entity)
+    {
+        // Update entity position
+        Entity->Movement.Position.X = PosX;
+        Entity->Movement.Position.Y = PosY;
+        Entity->Movement.Position.Z = PosZ;
+    }
+
+    uint32 PointCount = 0;
+
+    if (MoveType == 0) // Normal movement with spline
+    {
+        if (!R.CanRead(12)) return;
+        uint32 SplineFlags = R.ReadU32();
+        uint32 Duration = R.ReadU32();
+        PointCount = R.ReadU32();
+
+        // Read waypoints
+        for (uint32 i = 0; i < PointCount && R.CanRead(12); ++i)
+        {
+            float WPX = R.ReadFloat();
+            float WPY = R.ReadFloat();
+            float WPZ = R.ReadFloat();
+            // Store waypoints if needed
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: guid=%llu pos=(%.1f,%.1f,%.1f) points=%u"),
+        TargetGuid, PosX, PosY, PosZ, PointCount);
+
+    if (Entity)
+    {
+        EntityManager.OnEntityUpdated.Broadcast(*Entity);
+    }
 }

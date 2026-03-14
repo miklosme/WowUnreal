@@ -1,10 +1,12 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "WowSessionState.h"
 #include "WowViewerGameMode.generated.h"
 
 class AWowWorldManager;
 class AWowLoginController;
+class UWowConnectionManager;
 
 UCLASS()
 class WOWUNREAL_API AWowViewerGameMode : public AGameModeBase
@@ -26,4 +28,17 @@ private:
     void SetupWmoTestScene(UWorld* World);
     void SetupUITestScene(UWorld* World);
     void SetupLoginScene(UWorld* World);
+    void SetupNetworkTestScene(UWorld* World);
+
+    /** Network test scene state */
+    UPROPERTY() TObjectPtr<UWowConnectionManager> NetworkTestConnMgr;
+    FTimerHandle NetworkTestTimerHandle;
+    float NetworkTestElapsed = 0.0f;
+    float NetworkTestTimeout = 30.0f;
+    bool bNetworkTestComplete = false;
+    void NetworkTestTick();
+    UFUNCTION() void OnNetworkTestStateChanged(EWowSessionState NewState);
+    UFUNCTION() void OnNetworkTestError(const FString& Msg);
+    UFUNCTION() void OnNetworkTestRealmList(const TArray<FWowRealmInfo>& Realms);
+    UFUNCTION() void OnNetworkTestCharacterList(const TArray<FWowCharacterInfo>& Characters);
 };
