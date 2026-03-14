@@ -45,6 +45,7 @@ AWowPlayerCharacter::AWowPlayerCharacter()
 	Mov->BrakingDecelerationWalking = 2000.0f;
 	Mov->MaxStepHeight = 45.0f;
 	Mov->SetWalkableFloorAngle(50.0f);
+	Mov->MaxSwimSpeed = RunSpeed * SwimSpeedFactor;
 
 	// Spring arm (camera boom)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -70,6 +71,8 @@ AWowPlayerCharacter::AWowPlayerCharacter()
 	LookAction = CreateInputAction(this, TEXT("IA_Look"), EInputActionValueType::Axis2D);
 	JumpAction = CreateInputAction(this, TEXT("IA_Jump"), EInputActionValueType::Boolean);
 	ZoomAction = CreateInputAction(this, TEXT("IA_Zoom"), EInputActionValueType::Axis1D);
+	ToggleWalkAction = CreateInputAction(this, TEXT("IA_ToggleWalk"), EInputActionValueType::Boolean);
+	AutoRunAction = CreateInputAction(this, TEXT("IA_AutoRun"), EInputActionValueType::Boolean);
 
 	// Create mapping context and bind keys
 	GameplayContext = NewObject<UInputMappingContext>(this, TEXT("IMC_Gameplay"));
@@ -98,16 +101,20 @@ AWowPlayerCharacter::AWowPlayerCharacter()
 		A.Modifiers.Add(NegateA);
 	}
 
-	// Mouse look (right mouse button must be held — handled in OnLook)
-	{
-		FEnhancedActionKeyMapping& MouseXY = GameplayContext->MapKey(LookAction, EKeys::Mouse2D);
-	}
+	// Mouse look
+	GameplayContext->MapKey(LookAction, EKeys::Mouse2D);
 
 	// Jump
 	GameplayContext->MapKey(JumpAction, EKeys::SpaceBar);
 
 	// Zoom (mouse wheel)
 	GameplayContext->MapKey(ZoomAction, EKeys::MouseWheelAxis);
+
+	// Walk/run toggle (/ key, like WoW)
+	GameplayContext->MapKey(ToggleWalkAction, EKeys::Slash);
+
+	// Auto-run (Num Lock)
+	GameplayContext->MapKey(AutoRunAction, EKeys::NumLock);
 }
 
 void AWowPlayerCharacter::BeginPlay()
@@ -135,6 +142,70 @@ void AWowPlayerCharacter::Tick(float DeltaTime)
 	FRotator Target(CameraPitch, CameraYaw, 0.0f);
 	FRotator Current = CameraBoom->GetComponentRotation();
 	CameraBoom->SetWorldRotation(FMath::RInterpTo(Current, Target, DeltaTime, 15.0f));
+
+	// First-person mode at minimum zoom
+	if (FollowCamera && CameraBoom)
+	{
+		const bool bFirstPerson = CameraBoom->TargetArmLength <= MinCameraDistance + 10.0f;
+		// Hide character mesh in first person (when mesh exists)
+		if (GetMesh())
+		{
+			GetMesh()->SetOwnerNoSee(bFirstPerson);
+		}
+	}
+
+	// Auto-run: inject forward movement each tick
+	if (bIsAutoRunning)
+	{
+		const FRotator CameraRot(0.0f, CameraYaw, 0.0f);
+		const FVector Forward = FRotationMatrix(CameraRot).GetUnitAxis(EAxis::X);
+		AddMovementInput(Forward, 1.0f);
+	}
+
+	// Fall tracking
+	UCharacterMovementComponent* Mov = GetCharacterMovement();
+	if (Mov && Mov->IsFalling())
+	{
+		if (!bIsFalling)
+		{
+			bIsFalling = true;
+			FallStartZ = GetActorLocation().Z;
+		}
+	}
+
+	// Left mouse drag: turn character to face camera direction
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (PC && PC->IsInputKeyDown(EKeys::LeftMouseButton))
+	{
+		bLeftMouseTurning = true;
+		// Orient character to camera yaw while left mouse is held
+		SetActorRotation(FRotator(0.0f, CameraYaw, 0.0f));
+	}
+	else
+	{
+		bLeftMouseTurning = false;
+	}
+}
+
+void AWowPlayerCharacter::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+
+	if (bIsFalling)
+	{
+		bIsFalling = false;
+		const float FallDistance = FallStartZ - GetActorLocation().Z;
+
+		if (FallDistance > FallDamageMinHeight)
+		{
+			// Fall damage: proportional to distance beyond threshold
+			const float ExcessFall = FallDistance - FallDamageMinHeight;
+			const float DamagePct = FMath::Clamp(ExcessFall / 3000.0f, 0.0f, 1.0f); // max at ~30 extra yards
+			UE_LOG(LogWowPlayerChar, Log, TEXT("Fall damage: fell %.0f cm (%.0f excess), %.0f%% damage"),
+				FallDistance, ExcessFall, DamagePct * 100.0f);
+			// Actual HP damage would be applied via server — log it for now
+		}
+	}
 }
 
 void AWowPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -151,6 +222,8 @@ void AWowPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInput
 			EI->BindAction(JumpAction, ETriggerEvent::Completed, this, &AWowPlayerCharacter::OnJumpReleased);
 		}
 		if (ZoomAction) EI->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &AWowPlayerCharacter::OnZoom);
+		if (ToggleWalkAction) EI->BindAction(ToggleWalkAction, ETriggerEvent::Started, this, &AWowPlayerCharacter::OnToggleWalk);
+		if (AutoRunAction) EI->BindAction(AutoRunAction, ETriggerEvent::Started, this, &AWowPlayerCharacter::OnToggleAutoRun);
 	}
 }
 
@@ -158,6 +231,29 @@ void AWowPlayerCharacter::OnMove(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
 	if (Input.IsNearlyZero()) return;
+
+	// Any manual movement cancels auto-run
+	if (bIsAutoRunning)
+	{
+		bIsAutoRunning = false;
+		UE_LOG(LogWowPlayerChar, Log, TEXT("Auto-run cancelled by movement input"));
+	}
+
+	// Backpedal speed: 60% when moving backward (negative Y = S key)
+	UCharacterMovementComponent* Mov = GetCharacterMovement();
+	if (Mov)
+	{
+		const float BaseSpeed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
+		if (Input.Y < -0.1f)
+		{
+			// Backpedaling
+			Mov->MaxWalkSpeed = BaseSpeed * BackpedalFactor;
+		}
+		else
+		{
+			Mov->MaxWalkSpeed = BaseSpeed;
+		}
+	}
 
 	// Movement relative to camera facing
 	const FRotator CameraRot(0.0f, CameraYaw, 0.0f);
@@ -172,16 +268,22 @@ void AWowPlayerCharacter::OnLook(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
 
-	// Only orbit camera when right mouse button is held
 	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (!PC || !PC->IsInputKeyDown(EKeys::RightMouseButton)) return;
+	if (!PC) return;
 
-	CameraYaw += Input.X * 0.15f;
-	CameraPitch = FMath::Clamp(CameraPitch + Input.Y * -0.15f, -80.0f, 10.0f);
+	// Right mouse drag: orbit camera without turning character
+	// Left mouse drag: turn character (handled in Tick via bLeftMouseTurning)
+	// Both behaviors orbit the camera
+	if (PC->IsInputKeyDown(EKeys::RightMouseButton) || PC->IsInputKeyDown(EKeys::LeftMouseButton))
+	{
+		CameraYaw += Input.X * 0.15f;
+		CameraPitch = FMath::Clamp(CameraPitch + Input.Y * -0.15f, -80.0f, 10.0f);
+	}
 }
 
 void AWowPlayerCharacter::OnJumpPressed()
 {
+	// Swimming: space = swim up (handled by character movement in swimming mode)
 	Jump();
 }
 
@@ -197,14 +299,36 @@ void AWowPlayerCharacter::OnZoom(const FInputActionValue& Value)
 	CameraBoom->TargetArmLength = FMath::Clamp(Current - Delta * 50.0f, MinCameraDistance, MaxCameraDistance);
 }
 
+void AWowPlayerCharacter::OnToggleWalk()
+{
+	bIsWalking = !bIsWalking;
+
+	UCharacterMovementComponent* Mov = GetCharacterMovement();
+	if (Mov)
+	{
+		Mov->MaxWalkSpeed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
+	}
+
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Movement mode: %s (speed: %.0f cm/s)"),
+		bIsWalking ? TEXT("Walk") : TEXT("Run"),
+		Mov ? Mov->MaxWalkSpeed : 0.0f);
+}
+
+void AWowPlayerCharacter::OnToggleAutoRun()
+{
+	bIsAutoRunning = !bIsAutoRunning;
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Auto-run: %s"), bIsAutoRunning ? TEXT("ON") : TEXT("OFF"));
+}
+
 void AWowPlayerCharacter::ApplyServerSpeeds(float ServerRunSpeed, float ServerWalkSpeed)
 {
 	RunSpeed = ServerRunSpeed * 100.0f; // WoW units → cm
-	WalkSpeedFactor = ServerWalkSpeed / ServerRunSpeed;
+	WalkSpeedFactor = (ServerRunSpeed > 0.0f) ? (ServerWalkSpeed / ServerRunSpeed) : 0.357f;
 
 	if (UCharacterMovementComponent* Mov = GetCharacterMovement())
 	{
 		Mov->MaxWalkSpeed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
+		Mov->MaxSwimSpeed = RunSpeed * SwimSpeedFactor;
 	}
 }
 

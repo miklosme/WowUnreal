@@ -19,6 +19,7 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
     virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+    virtual void Landed(const FHitResult& Hit) override;
 
     // ── Camera ────────────────────────────────────────────────────────────────
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
@@ -49,6 +50,12 @@ public:
     UPROPERTY()
     TObjectPtr<UInputAction> ZoomAction;
 
+    UPROPERTY()
+    TObjectPtr<UInputAction> ToggleWalkAction;
+
+    UPROPERTY()
+    TObjectPtr<UInputAction> AutoRunAction;
+
     // ── Movement ──────────────────────────────────────────────────────────────
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float RunSpeed = 700.0f;  // 7.0 WoW units/s × 100 cm/unit
@@ -57,12 +64,24 @@ public:
     float WalkSpeedFactor = 0.357f; // 2.5 / 7.0
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float BackpedalFactor = 0.6f; // 60% of forward speed
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     bool bIsWalking = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    bool bIsAutoRunning = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float SwimSpeedFactor = 0.67f; // 67% of run speed
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float FallDamageMinHeight = 1500.0f; // ~15 WoW yards
 
     /** Apply speeds received from the server entity */
     void ApplyServerSpeeds(float ServerRunSpeed, float ServerWalkSpeed);
 
-    /** Apply server spawn data and stabilize the camera until terrain collision exists locally. */
+    /** Apply server spawn data */
     void ApplyLoginSpawn(const FVector& SpawnPos, float OrientationRadians);
 
 private:
@@ -71,9 +90,17 @@ private:
     void OnJumpPressed();
     void OnJumpReleased();
     void OnZoom(const FInputActionValue& Value);
+    void OnToggleWalk();
+    void OnToggleAutoRun();
 
     // Camera orbit state
     float CameraYaw = 0.0f;
-    float CameraPitch = -20.0f; // slightly above
-    bool bIsRightMouseDown = false;
+    float CameraPitch = -20.0f;
+
+    // Fall tracking
+    float FallStartZ = 0.0f;
+    bool bIsFalling = false;
+
+    // Left mouse drag turns character
+    bool bLeftMouseTurning = false;
 };
