@@ -11,6 +11,10 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Formats/AdtTypes.h"
 #include "ProceduralMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "MeshDescription.h"
+#include "StaticMeshAttributes.h"
 #include "GameFramework/Actor.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWmo, Log, All);
@@ -76,13 +80,9 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     float ScaleVal = (Placement.Scale == 0) ? 1.0f : Placement.Scale / 1024.0f;
     WmoActor->SetActorScale3D(FVector(ScaleVal));
 
-    // Get the runtime material that supports texture parameters
-    UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
-    UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
-
     int32 GroupsLoaded = 0;
 
-    // Load each group
+    // Load each group as UStaticMesh with Nanite support
     for (uint32 GroupIdx = 0; GroupIdx < RootData.NumGroups; ++GroupIdx)
     {
         FString GroupPath = GetGroupPath(WmoPath, GroupIdx);
@@ -100,180 +100,14 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             continue;
         }
 
+        // Create UStaticMesh with Nanite for this group
+        UStaticMesh* GroupMesh = CreateStaticMeshFromWmoGroup(GroupData, RootData, WmoPath, GroupIdx, Mpq, Cache);
+        if (!GroupMesh) continue;
+
         FName CompName = *FString::Printf(TEXT("WmoGroup_%d"), GroupIdx);
-        UProceduralMeshComponent* MeshComp = NewObject<UProceduralMeshComponent>(WmoActor, CompName);
+        UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(WmoActor, CompName);
         MeshComp->SetupAttachment(RootComp);
-
-        const int32 NumVerts = GroupData.Vertices.Num();
-
-        // Convert WMO vertices from WoW model space to UE local space
-        TArray<FVector> Vertices;
-        TArray<FVector> Normals;
-        TArray<FVector2D> UVs;
-        TArray<FProcMeshTangent> Tangents;
-        TArray<FLinearColor> VertColors;
-
-        Vertices.SetNum(NumVerts);
-        Normals.SetNum(NumVerts);
-        Tangents.SetNum(NumVerts);
-
-        // UVs - use what we have or generate defaults
-        if (GroupData.TexCoords.Num() == NumVerts)
-        {
-            UVs = GroupData.TexCoords;
-        }
-        else
-        {
-            UVs.SetNumZeroed(NumVerts);
-        }
-
-        // Vertex colors
-        if (GroupData.VertexColors.Num() == NumVerts)
-        {
-            VertColors.SetNum(NumVerts);
-            for (int32 i = 0; i < NumVerts; ++i)
-            {
-                VertColors[i] = FLinearColor(GroupData.VertexColors[i]);
-            }
-        }
-
-        for (int32 i = 0; i < NumVerts; ++i)
-        {
-            // WoW Z-up RH → UE Z-up LH: negate X to fix E/W mirror + handedness
-            const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(-P.X, P.Y, P.Z) * FWowCoordinate::SCALE;
-
-            FVector N = (i < GroupData.Normals.Num())
-                ? FVector(-GroupData.Normals[i].X, GroupData.Normals[i].Y, GroupData.Normals[i].Z)
-                : FVector(0, 0, 1);
-            N.Normalize();
-            Normals[i] = N;
-
-            // Approximate tangent
-            FVector T = FVector::CrossProduct(N, FVector(0, 1, 0));
-            if (T.SizeSquared() < 0.001f)
-            {
-                T = FVector::CrossProduct(N, FVector(1, 0, 0));
-            }
-            T.Normalize();
-            Tangents[i] = FProcMeshTangent(T, false);
-        }
-
-        // Keep original winding order
-        TArray<int32> Indices;
-        Indices.SetNum(GroupData.Indices.Num());
-        for (int32 i = 0; i < GroupData.Indices.Num(); ++i)
-        {
-            Indices[i] = static_cast<int32>(GroupData.Indices[i]);
-        }
-
-        // If we have batches, create one section per batch for separate materials
-        if (GroupData.Batches.Num() > 0)
-        {
-            int32 SectionIdx = 0;
-            for (const FWmoGroupData::FBatch& Batch : GroupData.Batches)
-            {
-                if (Batch.IndexCount == 0) continue;
-
-                // Extract sub-mesh for this batch
-                TArray<FVector> BatchVerts;
-                TArray<FVector> BatchNormals;
-                TArray<FVector2D> BatchUVs;
-                TArray<FProcMeshTangent> BatchTangents;
-                TArray<FLinearColor> BatchColors;
-                TArray<int32> BatchIndices;
-
-                // Remap: extract the vertex range used by this batch
-                TMap<int32, int32> VertexRemap;
-                int32 NextVert = 0;
-
-                for (uint16 j = 0; j < Batch.IndexCount; ++j)
-                {
-                    int32 SrcIdx = Batch.IndexStart + j;
-                    if (SrcIdx >= Indices.Num()) break;
-
-                    int32 OrigVert = Indices[SrcIdx];
-                    int32* RemappedIdx = VertexRemap.Find(OrigVert);
-                    if (RemappedIdx)
-                    {
-                        BatchIndices.Add(*RemappedIdx);
-                    }
-                    else
-                    {
-                        int32 NewIdx = NextVert++;
-                        VertexRemap.Add(OrigVert, NewIdx);
-                        BatchIndices.Add(NewIdx);
-
-                        if (OrigVert < Vertices.Num())
-                        {
-                            BatchVerts.Add(Vertices[OrigVert]);
-                            BatchNormals.Add(Normals[OrigVert]);
-                            BatchUVs.Add(UVs[OrigVert]);
-                            BatchTangents.Add(Tangents[OrigVert]);
-                            if (VertColors.Num() > OrigVert)
-                            {
-                                BatchColors.Add(VertColors[OrigVert]);
-                            }
-                        }
-                    }
-                }
-
-                if (BatchVerts.Num() == 0 || BatchIndices.Num() == 0) continue;
-
-                MeshComp->CreateMeshSection_LinearColor(
-                    SectionIdx, BatchVerts, BatchIndices, BatchNormals,
-                    BatchUVs, BatchColors, BatchTangents, false);
-
-                // Apply textured material from WMO material data
-                if (Batch.MaterialIndex < RootData.Materials.Num() && Cache && BaseMat)
-                {
-                    const FWmoMaterial& WmoMat = RootData.Materials[Batch.MaterialIndex];
-                    UTexture2D* Tex = nullptr;
-                    if (!WmoMat.TexturePath1.IsEmpty())
-                    {
-                        Tex = Cache->FindTexture(WmoMat.TexturePath1);
-                        if (!Tex)
-                        {
-                            TArray<uint8> BlpRaw;
-                            if (Mpq->ReadFile(WmoMat.TexturePath1, BlpRaw))
-                            {
-                                FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
-                                if (BlpData.bIsValid)
-                                {
-                                    Tex = FWowTextureFactory::CreateTexture(BlpData, WmoMat.TexturePath1);
-                                    if (Tex) Cache->CacheTexture(WmoMat.TexturePath1, Tex);
-                                }
-                            }
-                        }
-                    }
-
-                    if (Tex)
-                    {
-                        UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, WmoActor);
-                        MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
-                        MeshComp->SetMaterial(SectionIdx, MID);
-                    }
-                    else if (FallbackMat)
-                    {
-                        MeshComp->SetMaterial(SectionIdx, FallbackMat);
-                    }
-                }
-
-                ++SectionIdx;
-            }
-        }
-        else
-        {
-            // No batches - single section for the whole group
-            MeshComp->CreateMeshSection_LinearColor(
-                0, Vertices, Indices, Normals, UVs, VertColors, Tangents, false);
-
-            if (FallbackMat)
-            {
-                MeshComp->SetMaterial(0, FallbackMat);
-            }
-        }
-
+        MeshComp->SetStaticMesh(GroupMesh);
         MeshComp->SetCastShadow(true);
         MeshComp->RegisterComponent();
         ++GroupsLoaded;
@@ -289,6 +123,186 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         *WmoPath, GroupsLoaded, RootData.NumGroups, *UEPos.ToString());
 
     return WmoActor;
+}
+
+UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
+    const FWmoGroupData& GroupData, const FWmoRootData& RootData,
+    const FString& WmoPath, int32 GroupIdx,
+    FMpqManager* Mpq, FWowAssetCache* Cache)
+{
+    if (GroupData.Vertices.Num() == 0 || GroupData.Indices.Num() == 0)
+    {
+        return nullptr;
+    }
+
+    UStaticMesh* SM = NewObject<UStaticMesh>();
+    SM->AddToRoot();
+
+    FMeshDescription MeshDesc;
+    FStaticMeshAttributes Attributes(MeshDesc);
+    Attributes.Register();
+
+    const int32 NumVerts = GroupData.Vertices.Num();
+
+    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
+    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
+    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+    TVertexInstanceAttributesRef<FVector4f> VertexInstanceColors = Attributes.GetVertexInstanceColors();
+
+    // Create vertices and instances
+    TArray<FVertexInstanceID> VertexInstanceIDs;
+    VertexInstanceIDs.SetNum(NumVerts);
+
+    // If we have batches, create one polygon group per batch for separate materials
+    int32 NumPolyGroups = FMath::Max(1, GroupData.Batches.Num());
+    TArray<FPolygonGroupID> PolyGroups;
+    for (int32 i = 0; i < NumPolyGroups; ++i)
+    {
+        PolyGroups.Add(MeshDesc.CreatePolygonGroup());
+    }
+
+    MeshDesc.ReserveNewVertices(NumVerts);
+    MeshDesc.ReserveNewVertexInstances(NumVerts);
+
+    for (int32 i = 0; i < NumVerts; ++i)
+    {
+        const FVector& P = GroupData.Vertices[i];
+        FVertexID VertID = MeshDesc.CreateVertex();
+        VertexPositions[VertID] = FVector3f(-P.X * FWowCoordinate::SCALE, P.Y * FWowCoordinate::SCALE, P.Z * FWowCoordinate::SCALE);
+
+        FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+        VertexInstanceIDs[i] = InstID;
+
+        FVector3f N = (i < GroupData.Normals.Num())
+            ? FVector3f(-GroupData.Normals[i].X, GroupData.Normals[i].Y, GroupData.Normals[i].Z)
+            : FVector3f(0, 0, 1);
+        N.Normalize();
+        VertexInstanceNormals[InstID] = N;
+
+        FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
+        if (T.SizeSquared() < 0.001f)
+        {
+            T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
+        }
+        T.Normalize();
+        VertexInstanceTangents[InstID] = T;
+        VertexInstanceBinormalSigns[InstID] = 1.0f;
+
+        FVector2f UV = (i < GroupData.TexCoords.Num())
+            ? FVector2f(GroupData.TexCoords[i].X, GroupData.TexCoords[i].Y)
+            : FVector2f(0, 0);
+        VertexInstanceUVs.Set(InstID, 0, UV);
+
+        if (i < GroupData.VertexColors.Num())
+        {
+            FLinearColor LC(GroupData.VertexColors[i]);
+            VertexInstanceColors[InstID] = FVector4f(LC.R, LC.G, LC.B, LC.A);
+        }
+    }
+
+    // Create triangles
+    if (GroupData.Batches.Num() > 0)
+    {
+        for (int32 BatchIdx = 0; BatchIdx < GroupData.Batches.Num(); ++BatchIdx)
+        {
+            const FWmoGroupData::FBatch& Batch = GroupData.Batches[BatchIdx];
+            for (uint16 j = 0; j + 2 < Batch.IndexCount; j += 3)
+            {
+                int32 Idx0 = Batch.IndexStart + j;
+                int32 Idx1 = Batch.IndexStart + j + 1;
+                int32 Idx2 = Batch.IndexStart + j + 2;
+                if (Idx2 >= GroupData.Indices.Num()) break;
+
+                TArray<FVertexInstanceID> TriVerts;
+                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx0]]);
+                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx1]]);
+                TriVerts.Add(VertexInstanceIDs[GroupData.Indices[Idx2]]);
+                MeshDesc.CreatePolygon(PolyGroups[BatchIdx], TriVerts);
+            }
+        }
+    }
+    else
+    {
+        int32 NumTris = GroupData.Indices.Num() / 3;
+        for (int32 i = 0; i < NumTris; ++i)
+        {
+            TArray<FVertexInstanceID> TriVerts;
+            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3]]);
+            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3 + 1]]);
+            TriVerts.Add(VertexInstanceIDs[GroupData.Indices[i * 3 + 2]]);
+            MeshDesc.CreatePolygon(PolyGroups[0], TriVerts);
+        }
+    }
+
+    // Build mesh
+    TArray<const FMeshDescription*> MeshDescs;
+    MeshDescs.Add(&MeshDesc);
+    UStaticMesh::FBuildMeshDescriptionsParams Params;
+    Params.bBuildSimpleCollision = false;
+    Params.bFastBuild = true;
+    SM->BuildFromMeshDescriptions(MeshDescs, Params);
+
+    // Enable Nanite if available
+    FMeshNaniteSettings NaniteSettings = SM->GetNaniteSettings();
+    NaniteSettings.bEnabled = true;
+    SM->SetNaniteSettings(NaniteSettings);
+
+    // Apply materials per batch
+    UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
+    UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+
+    if (GroupData.Batches.Num() > 0)
+    {
+        for (int32 BatchIdx = 0; BatchIdx < GroupData.Batches.Num(); ++BatchIdx)
+        {
+            const FWmoGroupData::FBatch& Batch = GroupData.Batches[BatchIdx];
+            if (Batch.MaterialIndex < RootData.Materials.Num() && Cache && BaseMat)
+            {
+                const FWmoMaterial& WmoMat = RootData.Materials[Batch.MaterialIndex];
+                UTexture2D* Tex = nullptr;
+                if (!WmoMat.TexturePath1.IsEmpty())
+                {
+                    Tex = Cache->FindTexture(WmoMat.TexturePath1);
+                    if (!Tex)
+                    {
+                        TArray<uint8> BlpRaw;
+                        if (Mpq->ReadFile(WmoMat.TexturePath1, BlpRaw))
+                        {
+                            FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
+                            if (BlpData.bIsValid)
+                            {
+                                Tex = FWowTextureFactory::CreateTexture(BlpData, WmoMat.TexturePath1);
+                                if (Tex) Cache->CacheTexture(WmoMat.TexturePath1, Tex);
+                            }
+                        }
+                    }
+                }
+
+                if (Tex)
+                {
+                    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
+                    MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
+                    SM->SetMaterial(BatchIdx, MID);
+                }
+                else if (FallbackMat)
+                {
+                    SM->SetMaterial(BatchIdx, FallbackMat);
+                }
+            }
+            else if (FallbackMat)
+            {
+                SM->SetMaterial(BatchIdx, FallbackMat);
+            }
+        }
+    }
+    else if (FallbackMat)
+    {
+        SM->SetMaterial(0, FallbackMat);
+    }
+
+    return SM;
 }
 
 uint32 FWowWmoRenderer::GetWmoGroupCount(const FString& WmoPath, FMpqManager* Mpq)

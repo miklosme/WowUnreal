@@ -3,11 +3,14 @@
 
 class FMpqManager;
 class FWowAssetCache;
+class UStaticMesh;
 struct FAdtWmoPlacement;
+struct FWmoGroupData;
+struct FWmoRootData;
 
 /**
- * Renders WMO (World Map Object) buildings using ProceduralMeshComponent.
- * Each WMO group becomes a separate ProceduralMeshComponent section.
+ * Renders WMO (World Map Object) buildings.
+ * Uses UStaticMesh with Nanite when supported, falling back to ProceduralMeshComponent.
  */
 class WOWWORLD_API FWowWmoRenderer
 {
@@ -22,4 +25,9 @@ public:
 private:
     /** Construct group filename from root WMO path and group index */
     static FString GetGroupPath(const FString& RootPath, int32 GroupIndex);
+
+    /** Create a UStaticMesh from WMO group geometry with Nanite support */
+    static UStaticMesh* CreateStaticMeshFromWmoGroup(const FWmoGroupData& GroupData,
+        const FWmoRootData& RootData, const FString& WmoPath, int32 GroupIdx,
+        FMpqManager* Mpq, FWowAssetCache* Cache);
 };

@@ -47,7 +47,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Wire placements into TerrainTile from MDDF/MODF
 - [x] BLP texture loading for terrain, doodads, WMOs
 - [?] HISMC instancing for repeated doodads (groups by M2 model, one HISMC per unique model per tile)
-- [ ] Nanite for WMO static meshes (optimization)
+- [?] Nanite for WMO static meshes (UStaticMesh via FMeshDescription with Nanite enabled)
 
 ## Phase 6: Networking ✅ DONE
 - [x] BigNumber (OpenSSL BIGNUM wrapper with LE/BE conversion)
