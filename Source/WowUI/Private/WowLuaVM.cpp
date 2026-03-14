@@ -1,4 +1,5 @@
 #include "WowLuaVM.h"
+#include "LuaApi/LuaApiRegistry.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLua, Log, All);
 
@@ -53,7 +54,11 @@ void FWowLuaVM::SandboxGlobals()
 
 void FWowLuaVM::RegisterWowApi()
 {
-    UE_LOG(LogWowLua, Log, TEXT("WoW API stub - Phase 8"));
+#if HAS_LUA
+    if (!L) return;
+    WowLuaApi::RegisterAll(L);
+    UE_LOG(LogWowLua, Log, TEXT("WoW Lua API registered"));
+#endif
 }
 
 bool FWowLuaVM::ExecuteString(const FString& Code, const FString& ChunkName)

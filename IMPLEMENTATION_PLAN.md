@@ -68,7 +68,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [?] XML frame parser (FrameXML, templates, Include/Script directives — 660 lines, full parser with anchors, layers, textures, scripts, backdrops)
 - [?] Frame manager (19 frame types → UMG widgets — CreateFrame with template inheritance, child recursion, widget creation)
 - [?] Anchor layout system + strata ordering (FWowAnchor 9-point system + EWowFrameStrata 8 levels implemented in frame types)
-- [ ] WoW Lua API (~50 core functions) — RegisterWowApi() is still a stub
+- [?] WoW Lua API (~50 core functions: globals, string/table/math aliases, unit stubs, client info, error handling)
 - [?] Event system (59 SMSG → WoW event mappings — FWowEventSystem with register/unregister/fire, needs Lua integration)
 - [?] TOC parser + addon loader with dependency resolution (FWowAddonLoader: ParseToc, DiscoverAddons, LoadAddon with XML+Lua execution)
 - [ ] SavedVariables persistence
