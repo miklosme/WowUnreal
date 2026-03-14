@@ -27,7 +27,7 @@ USTRUCT(BlueprintType)
 struct WOWNETWORK_API FWowCharacterInfo
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) uint64 Guid = 0;
+    UPROPERTY(BlueprintReadOnly) int64 Guid = 0;
     UPROPERTY(BlueprintReadOnly) FString Name;
     UPROPERTY(BlueprintReadOnly) uint8 Race = 0;
     UPROPERTY(BlueprintReadOnly) uint8 Class = 0;

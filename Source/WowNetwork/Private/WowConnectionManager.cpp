@@ -144,7 +144,7 @@ void UWowConnectionManager::RequestCharacterList()
     WorldSocket->SendCharEnum();
 }
 
-void UWowConnectionManager::EnterWorld(uint64 G)
+void UWowConnectionManager::EnterWorld(int64 G)
 {
     UE_LOG(LogWowNet, Log, TEXT("Enter world: GUID %llu"), G);
 

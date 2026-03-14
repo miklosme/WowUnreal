@@ -1,6 +1,6 @@
 #include "WowFrameXmlParser.h"
 #include "Mpq/MpqManager.h"
-#include "XmlParser/Public/XmlFile.h"
+#include "XmlParser.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowXml, Log, All);
 

@@ -43,7 +43,7 @@ void AWowFlyCamera::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 
 void AWowFlyCamera::Move(const FInputActionValue& Value)
 {
-    const FVector3f Input = Value.Get<FVector3f>();
+    const FVector Input = Value.Get<FVector>();
     const FRotator Rot = GetControlRotation();
     const FVector Fwd = FRotationMatrix(Rot).GetUnitAxis(EAxis::X);
     const FVector Right = FRotationMatrix(Rot).GetUnitAxis(EAxis::Y);

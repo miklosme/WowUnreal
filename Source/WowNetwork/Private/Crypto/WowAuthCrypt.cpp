@@ -1,8 +1,6 @@
 #include "Crypto/WowAuthCrypt.h"
 
-THIRD_PARTY_INCLUDES_START
-#include <openssl/hmac.h>
-THIRD_PARTY_INCLUDES_END
+#include "OpenSSLIncludes.h"
 
 // These are the seeds the SERVER uses.
 // From the CLIENT perspective:

@@ -19,7 +19,7 @@ public:
     UFUNCTION(BlueprintCallable) void Login(const FString& User, const FString& Pass, const FString& Server, int32 Port = 3724);
     UFUNCTION(BlueprintCallable) void SelectRealm(int32 Index);
     UFUNCTION(BlueprintCallable) void RequestCharacterList();
-    UFUNCTION(BlueprintCallable) void EnterWorld(uint64 Guid);
+    UFUNCTION(BlueprintCallable) void EnterWorld(int64 Guid);
     UFUNCTION(BlueprintCallable) void Disconnect();
     UFUNCTION(BlueprintCallable) EWowSessionState GetState() const { return State; }
 

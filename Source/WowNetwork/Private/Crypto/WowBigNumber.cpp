@@ -1,9 +1,6 @@
 #include "Crypto/WowBigNumber.h"
 
-THIRD_PARTY_INCLUDES_START
-#include <openssl/bn.h>
-#include <openssl/crypto.h>
-THIRD_PARTY_INCLUDES_END
+#include "OpenSSLIncludes.h"
 
 FWowBigNumber::FWowBigNumber()
 {

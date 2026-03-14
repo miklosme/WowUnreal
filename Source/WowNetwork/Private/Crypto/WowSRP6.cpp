@@ -1,8 +1,6 @@
 #include "Crypto/WowSRP6.h"
 
-THIRD_PARTY_INCLUDES_START
-#include <openssl/sha.h>
-THIRD_PARTY_INCLUDES_END
+#include "OpenSSLIncludes.h"
 
 TArray<uint8> FWowSRP6::SHA1Hash(const uint8* Data, int32 Len)
 {

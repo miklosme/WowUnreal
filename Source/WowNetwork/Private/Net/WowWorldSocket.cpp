@@ -5,9 +5,7 @@
 #include "IPAddress.h"
 #include "HAL/RunnableThread.h"
 
-THIRD_PARTY_INCLUDES_START
-#include <openssl/sha.h>
-THIRD_PARTY_INCLUDES_END
+#include "Crypto/OpenSSLIncludes.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 

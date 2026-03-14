@@ -31,14 +31,14 @@ bool UWowCredentialStore::SaveCredentials()
     TArray<TSharedPtr<FJsonValue>> Arr;
     for (auto& C : Creds)
     {
-        auto O = MakeShareable(new FJsonObject());
+        TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
         O->SetStringField(TEXT("alias"), C.Alias);
         O->SetStringField(TEXT("username"), C.Username);
         O->SetStringField(TEXT("server"), C.ServerAddress);
         O->SetNumberField(TEXT("port"), C.AuthPort);
         O->SetBoolField(TEXT("default"), C.bIsDefault);
         O->SetStringField(TEXT("password"), C.Password);
-        Arr.Add(MakeShareable(new FJsonValueObject(O)));
+        Arr.Add(MakeShared<FJsonValueObject>(O));
     }
     FString Out; auto W = TJsonWriterFactory<>::Create(&Out);
     FJsonSerializer::Serialize(Arr, W);

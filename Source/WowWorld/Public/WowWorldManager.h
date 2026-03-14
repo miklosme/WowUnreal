@@ -1,12 +1,12 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Mpq/MpqManager.h"
+#include "WowAssetCache.h"
+#include "Formats/WdtTypes.h"
 #include "WowWorldManager.generated.h"
 
-class FMpqManager;
-class FWowAssetCache;
 class AWowTerrainTile;
-struct FWdtData;
 
 UCLASS()
 class WOWWORLD_API AWowWorldManager : public AActor
