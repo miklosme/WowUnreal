@@ -30,7 +30,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] M2 parser (vertices, indices from `.skin`, textures, render passes, bones)
 - [x] WMO parser (root: materials, doodad sets, portals; groups: geometry, batches)
 - [x] Complete Tier 1 typed DBC wrappers from `specs/dbc-wrappers.md` (verified: builds, runtime loads 12/12 DBC tables with correct data)
-- [?] Add Tier 2 typed DBC wrappers from `specs/dbc-wrappers.md` (Spell, SpellVisual, SpellVisualKit, SoundEntries, LoadingScreens, GroundEffectTexture, EmotesText, Talent, TalentTab) — runtime loads 21/21 DBC tables
+- [x] Add Tier 2 typed DBC wrappers from `specs/dbc-wrappers.md` (Spell, SpellVisual, SpellVisualKit, SoundEntries, LoadingScreens, GroundEffectTexture, EmotesText, Talent, TalentTab) — verified March 14, 2026: build succeeds, runtime loads 21/21 DBC tables, screenshot `Saved/Screenshots/dbc_tier2_wrappers_verify.png`
 
 ## Phase 3: Terrain Rendering
 - [x] BLP → UTexture2D factory (DXT passthrough to GPU)
