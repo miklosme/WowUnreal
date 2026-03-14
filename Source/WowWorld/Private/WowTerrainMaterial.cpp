@@ -12,6 +12,7 @@
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
+#include "Materials/MaterialExpressionComponentMask.h"
 #include "Materials/MaterialExpressionDivide.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionConstant.h"
@@ -202,12 +203,15 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
         TEXT("Alpha1"), TEXT("Alpha2"), TEXT("Alpha3")
     };
     UMaterialExpressionTextureSampleParameter2D* AlphaSamplers[3];
+    UMaterialExpressionComponentMask* AlphaMasks[3];
 
     for (int32 i = 0; i < 3; ++i)
     {
         auto* Sampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
         Sampler->ParameterName = FName(AlphaParamNames[i]);
-        Sampler->SamplerType = SAMPLERTYPE_LinearGrayscale;
+        // Use a color sampler with the engine's default black texture; Metal rejects
+        // grayscale samplers when the default texture asset is authored as color.
+        Sampler->SamplerType = SAMPLERTYPE_Color;
         Sampler->Texture = BlackTex; // Default black = no blending
         Sampler->MaterialExpressionEditorX = -600;
         Sampler->MaterialExpressionEditorY = 800 + i * 200;
@@ -215,6 +219,17 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
         Sampler->Coordinates.Connect(0, AlphaUVDiv);
         Exprs.AddExpression(Sampler);
         AlphaSamplers[i] = Sampler;
+
+        auto* Mask = NewObject<UMaterialExpressionComponentMask>(CachedMat);
+        Mask->R = true;
+        Mask->G = false;
+        Mask->B = false;
+        Mask->A = false;
+        Mask->MaterialExpressionEditorX = -400;
+        Mask->MaterialExpressionEditorY = 800 + i * 200;
+        Mask->Input.Connect(0, Sampler);
+        Exprs.AddExpression(Mask);
+        AlphaMasks[i] = Mask;
     }
 
     // --- Lerp chain: blend layers using alpha maps ---
@@ -224,7 +239,7 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     Lerp1->MaterialExpressionEditorY = 0;
     Lerp1->A.Connect(0, GroundSamplers[0]); // Base RGB
     Lerp1->B.Connect(0, GroundSamplers[1]); // Layer1 RGB
-    Lerp1->Alpha.Connect(0, AlphaSamplers[0]); // Alpha1 R
+    Lerp1->Alpha.Connect(0, AlphaMasks[0]); // Alpha1 R
     Exprs.AddExpression(Lerp1);
 
     // Lerp2 = lerp(Lerp1, Layer2, Alpha2)
@@ -233,7 +248,7 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     Lerp2->MaterialExpressionEditorY = 100;
     Lerp2->A.Connect(0, Lerp1);
     Lerp2->B.Connect(0, GroundSamplers[2]); // Layer2 RGB
-    Lerp2->Alpha.Connect(0, AlphaSamplers[1]); // Alpha2 R
+    Lerp2->Alpha.Connect(0, AlphaMasks[1]); // Alpha2 R
     Exprs.AddExpression(Lerp2);
 
     // Lerp3 = lerp(Lerp2, Layer3, Alpha3)
@@ -242,7 +257,7 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     Lerp3->MaterialExpressionEditorY = 200;
     Lerp3->A.Connect(0, Lerp2);
     Lerp3->B.Connect(0, GroundSamplers[3]); // Layer3 RGB
-    Lerp3->Alpha.Connect(0, AlphaSamplers[2]); // Alpha3 R
+    Lerp3->Alpha.Connect(0, AlphaMasks[2]); // Alpha3 R
     Exprs.AddExpression(Lerp3);
 
     // --- Connect final lerp output to BaseColor ---
