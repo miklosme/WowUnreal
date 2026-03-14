@@ -144,7 +144,7 @@ The project needs proper UE `.umap` levels instead of running everything through
 - [ ] Implement gameplay/UI systems still only listed in `specs/overview.md` (combat, inventory, quests, talents, social, maps)
 
 ## Phase 13: Test Coverage
-- [ ] Add first-party automated tests for parsers, world streaming, networking, UI, and addon loading (the repo currently only contains vendored StormLib tests)
+- [?] Add first-party automated tests for parsers, world streaming, networking, UI, and addon loading — verified March 14, 2026: WowTests module with 13 UE5 automation tests covering coordinate conversion (3 tests: AdtToUE, TileRoundtrip, WowToUERoundtrip), entity system (3 tests: CreateAndLookup, FieldAccess, TypeMasks), MPQ manager (1 test: InitAndRead), and parsers (6 tests: DBC Map/AreaTable, BLP DXT, ADT Elwynn, M2 tree, WMO Goldshire); all 13 tests pass via `Automation RunTests WowUnreal`; data-driven tests gracefully skip when MPQ not available
 
 ## Test Server
 - Host: 127.0.0.1
