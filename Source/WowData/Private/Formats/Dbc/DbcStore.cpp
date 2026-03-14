@@ -131,6 +131,19 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbcAny(Mpq, {TEXT("DBFilesClient\\LightFloatParams.dbc"), TEXT("DBFilesClient\\LightFloatBand.dbc")}, Parser, LoadedPath))
+    {
+        LightFloatParamsDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, LightFloatParamsDbc.Num()); ++i)
+        {
+            const FLightFloatParamsDbcEntry& E = LightFloatParamsDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  LightFloatParams[%d]: ID=%d Entries=%d FirstTime=%d Source='%s'"),
+                i, E.ID, E.EntryCount, E.Times[0], *LoadedPath);
+        }
+    }
+
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\LiquidType.dbc"), Parser))
     {
         LiquidTypeDbc.Load(Parser);
@@ -327,6 +340,6 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
     }
 
     bLoaded = Loaded > 0;
-    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/21 DBC tables"), Loaded);
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/22 DBC tables"), Loaded);
     return bLoaded;
 }

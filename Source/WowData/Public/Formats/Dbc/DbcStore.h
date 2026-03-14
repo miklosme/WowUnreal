@@ -20,6 +20,7 @@
 #include "Formats/Dbc/GroundEffectTextureDbc.h"
 #include "Formats/Dbc/EmotesTextDbc.h"
 #include "Formats/Dbc/TalentDbc.h"
+#include "Formats/Dbc/LightFloatParamsDbc.h"
 #include "Formats/Dbc/TalentTabDbc.h"
 
 class FMpqManager;
@@ -36,6 +37,7 @@ public:
     FLightDbc& Lights() { return LightDbc; }
     FLightParamsDbc& LightParams() { return LightParamsDbc; }
     FLightIntParamsDbc& LightIntParams() { return LightIntParamsDbc; }
+    FLightFloatParamsDbc& LightFloatParams() { return LightFloatParamsDbc; }
     FLiquidTypeDbc& LiquidTypes() { return LiquidTypeDbc; }
     FAnimationDataDbc& AnimationData() { return AnimationDataDbc; }
     FChrRacesDbc& ChrRaces() { return ChrRacesDbc; }
@@ -58,6 +60,7 @@ public:
     const FLightDbc& Lights() const { return LightDbc; }
     const FLightParamsDbc& LightParams() const { return LightParamsDbc; }
     const FLightIntParamsDbc& LightIntParams() const { return LightIntParamsDbc; }
+    const FLightFloatParamsDbc& LightFloatParams() const { return LightFloatParamsDbc; }
     const FLiquidTypeDbc& LiquidTypes() const { return LiquidTypeDbc; }
     const FAnimationDataDbc& AnimationData() const { return AnimationDataDbc; }
     const FChrRacesDbc& ChrRaces() const { return ChrRacesDbc; }
@@ -83,6 +86,7 @@ private:
     FLightDbc LightDbc;
     FLightParamsDbc LightParamsDbc;
     FLightIntParamsDbc LightIntParamsDbc;
+    FLightFloatParamsDbc LightFloatParamsDbc;
     FLiquidTypeDbc LiquidTypeDbc;
     FAnimationDataDbc AnimationDataDbc;
     FChrRacesDbc ChrRacesDbc;

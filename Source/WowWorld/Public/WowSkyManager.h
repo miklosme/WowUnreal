@@ -7,11 +7,13 @@ class UDirectionalLightComponent;
 class USkyAtmosphereComponent;
 class USkyLightComponent;
 class UExponentialHeightFogComponent;
+class UStaticMeshComponent;
+class UMaterialInstanceDynamic;
 struct FLightDbcEntry;
 
 /**
  * Manages time-of-day sky rendering with sun/moon positioning,
- * sky colors, and fog driven by Light.dbc data with zone blending.
+ * sky gradient colors, fog, and clouds driven by Light.dbc data with zone blending.
  */
 UCLASS()
 class WOWWORLD_API AWowSkyManager : public AActor
@@ -34,7 +36,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Sky")
 	bool bFogEnabled = true;
 
-	/** Fog density */
+	/** Fog density (fallback when LightFloatParams not loaded) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Sky")
 	float FogDensity = 0.002f;
 
@@ -63,11 +65,30 @@ private:
 	UPROPERTY()
 	TObjectPtr<UExponentialHeightFogComponent> HeightFog;
 
+	/** Skydome mesh for gradient band rendering */
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> SkydomeMesh;
+
+	/** Cloud plane mesh */
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> CloudMesh;
+
+	/** Dynamic material for skydome gradient */
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> SkydomeMaterial;
+
+	/** Dynamic material for cloud layer */
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> CloudMaterial;
+
 	/** Cached light zone entries for the current map */
 	TArray<const FLightDbcEntry*> MapLights;
 
 	/** Whether we have DBC-driven light data loaded */
 	bool bHasDbcLights = false;
+
+	/** Whether LightFloatParams loaded */
+	bool bHasFloatParams = false;
 
 	// ── Light property indices in LightIntParams ──
 	// Each Light.dbc paramID maps to 18 sequential LightIntParams rows
@@ -86,11 +107,27 @@ private:
 		LP_MAX = 18
 	};
 
+	// Float param property indices (LightFloatParams rows per paramID)
+	enum ELightFloatProperty : uint8
+	{
+		FP_FogDistance = 0,
+		FP_FogMultiplier = 1,
+		FP_CelestialGlowThrough = 2,
+		FP_CloudDensity = 3,
+		FP_MAX = 6
+	};
+
 	/** Interpolate a LightIntParams color band at the current time */
 	FLinearColor InterpolateDbcColor(uint32 ParamID, ELightProperty Property) const;
 
+	/** Interpolate a LightFloatParams value at the current time */
+	float InterpolateDbcFloat(uint32 ParamID, ELightFloatProperty Property) const;
+
 	/** Blend colors from all nearby light zones weighted by distance */
 	FLinearColor BlendZoneColor(ELightProperty Property, const FVector& PlayerPos) const;
+
+	/** Blend float params from all nearby light zones */
+	float BlendZoneFloat(ELightFloatProperty Property, const FVector& PlayerPos) const;
 
 	/** Update sun/moon position based on time */
 	void UpdateSunPosition();
@@ -100,6 +137,18 @@ private:
 
 	/** Update fog based on time */
 	void UpdateFog();
+
+	/** Update skydome gradient colors */
+	void UpdateSkydome();
+
+	/** Update cloud layer */
+	void UpdateClouds();
+
+	/** Create the skydome hemisphere mesh */
+	void CreateSkydomeMesh();
+
+	/** Create the cloud plane mesh */
+	void CreateCloudMesh();
 
 	/** Fallback interpolation (used when DBC data not available) */
 	FLinearColor GetSkyColorFallback() const;
