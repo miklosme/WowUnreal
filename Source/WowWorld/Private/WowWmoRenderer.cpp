@@ -136,13 +136,14 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WMO vertices are in model-local noggit3-like space
-            // NoggitToUE: UE.X = -Ng.Z*SCALE, UE.Y = Ng.X*SCALE, UE.Z = Ng.Y*SCALE
+            // WMO file vertices are (X=east, Y=south, Z=up)
+            // Convert to noggit3 (X=east, Y=up, Z=south): (fX, fZ, -fY)
+            // Then NoggitToUE: UE = (-NgZ, NgX, NgY) = (fY, fX, fZ)
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(-P.Z, P.X, P.Y) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(P.Y, P.X, P.Z) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(-GroupData.Normals[i].Z, GroupData.Normals[i].X, GroupData.Normals[i].Y)
+                ? FVector(GroupData.Normals[i].Y, GroupData.Normals[i].X, GroupData.Normals[i].Z)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;
@@ -157,7 +158,7 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             Tangents[i] = FProcMeshTangent(T, false);
         }
 
-        // Convert indices from uint16 to int32
+        // Convert indices from uint16 to int32 (keep original winding)
         TArray<int32> Indices;
         Indices.SetNum(GroupData.Indices.Num());
         for (int32 i = 0; i < GroupData.Indices.Num(); ++i)

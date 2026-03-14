@@ -106,10 +106,10 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
     for (int32 i = 0; i < NumVerts; ++i)
     {
         const FM2Vertex& V = Data.Vertices[i];
-        // M2 model vertices are in model-local noggit3-like space
-        // NoggitToUE: UE.X = -Ng.Z*SCALE, UE.Y = Ng.X*SCALE, UE.Z = Ng.Y*SCALE
-        Vertices[i] = FVector(-V.Position.Z, V.Position.X, V.Position.Y) * FWowCoordinate::SCALE;
-        Normals[i] = FVector(-V.Normal.Z, V.Normal.X, V.Normal.Y);
+        // M2 model file vertices are (X=east, Y=south, Z=up) - same as WMO
+        // Convert: UE = (fY, fX, fZ) * SCALE
+        Vertices[i] = FVector(V.Position.Y, V.Position.X, V.Position.Z) * FWowCoordinate::SCALE;
+        Normals[i] = FVector(V.Normal.Y, V.Normal.X, V.Normal.Z);
         Normals[i].Normalize();
         UVs[i] = V.TexCoord;
 
@@ -124,7 +124,7 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
         Tangents[i] = FProcMeshTangent(T, false);
     }
 
-    // Convert indices from uint16 to int32
+    // Convert indices from uint16 to int32 (keep original winding)
     TArray<int32> Indices;
     Indices.SetNum(Data.Indices.Num());
     for (int32 i = 0; i < Data.Indices.Num(); ++i)
