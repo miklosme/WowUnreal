@@ -1243,7 +1243,7 @@ void FWowPacketHandler::HandleWho(FPacketReader& R)
     for (uint32 i = 0; i < DisplayCount; ++i)
     {
         FString Name = R.ReadCString();
-        FString GuildName = R.ReadCString();
+        FString PlayerGuild = R.ReadCString();
 
         if (!R.CanRead(16)) break; // level + class + race + zone
         uint32 Level = R.ReadU32();
@@ -1252,6 +1252,212 @@ void FWowPacketHandler::HandleWho(FPacketReader& R)
         uint32 ZoneId = R.ReadU32();
 
         UE_LOG(LogWowPacket, Verbose, TEXT("  %s <%s> level %d class=%d race=%d zone=%d"),
-               *Name, *GuildName, Level, ClassId, RaceId, ZoneId);
+               *Name, *PlayerGuild, Level, ClassId, RaceId, ZoneId);
     }
+}
+
+// ── SMSG_QUESTGIVER_STATUS ───────────────────────────────────────────────
+// uint64 guid, uint8 status
+
+void FWowPacketHandler::HandleQuestgiverStatus(FPacketReader& R)
+{
+    if (!R.CanRead(9)) return;
+
+    uint64 Guid = R.ReadU64();
+    uint8 Status = R.ReadU8();
+
+    const TCHAR* StatusMsg = TEXT("Unknown");
+    switch (Status)
+    {
+    case 0: StatusMsg = TEXT("None"); break;
+    case 1: StatusMsg = TEXT("Unavailable"); break;
+    case 2: StatusMsg = TEXT("Chat"); break;
+    case 3: StatusMsg = TEXT("Incomplete"); break;
+    case 4: StatusMsg = TEXT("Reward Rep"); break;
+    case 5: StatusMsg = TEXT("Available Rep"); break;
+    case 6: StatusMsg = TEXT("Available"); break;
+    case 7: StatusMsg = TEXT("Reward2"); break;
+    case 8: StatusMsg = TEXT("Reward"); break;
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_STATUS: guid=%llu status=%d (%s)"), Guid, Status, StatusMsg);
+}
+
+// ── SMSG_QUESTGIVER_QUEST_DETAILS ────────────────────────────────────────
+// uint64 guid, uint32 questId, title (null-term string), details string
+
+void FWowPacketHandler::HandleQuestgiverQuestDetails(FPacketReader& R)
+{
+    if (!R.CanRead(12)) return;
+
+    uint64 Guid = R.ReadU64();
+    uint32 QuestId = R.ReadU32();
+
+    FString Title = R.ReadCString();
+    FString Details = R.ReadCString();
+
+    UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_QUEST_DETAILS: guid=%llu quest=%u title=\"%s\""),
+           Guid, QuestId, *Title);
+}
+
+// ── SMSG_QUESTGIVER_OFFER_REWARD ─────────────────────────────────────────
+// uint64 guid, uint32 questId, title string
+
+void FWowPacketHandler::HandleQuestgiverOfferReward(FPacketReader& R)
+{
+    if (!R.CanRead(12)) return;
+
+    uint64 Guid = R.ReadU64();
+    uint32 QuestId = R.ReadU32();
+
+    FString Title = R.ReadCString();
+
+    UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_OFFER_REWARD: guid=%llu quest=%u title=\"%s\""),
+           Guid, QuestId, *Title);
+}
+
+// ── SMSG_QUEST_UPDATE_ADD_KILL ───────────────────────────────────────────
+// uint32 questId, uint32 entry, uint32 count, uint32 required, uint64 guid
+
+void FWowPacketHandler::HandleQuestUpdateAddKill(FPacketReader& R)
+{
+    if (!R.CanRead(24)) return;
+
+    uint32 QuestId = R.ReadU32();
+    uint32 Entry = R.ReadU32();
+    uint32 Count = R.ReadU32();
+    uint32 Required = R.ReadU32();
+    uint64 Guid = R.ReadU64();
+
+    // Update quest log
+    for (FWowQuestLogEntry& Quest : QuestLog)
+    {
+        if (Quest.QuestId == QuestId)
+        {
+            bool bFoundObjective = false;
+            for (FWowQuestObjective& Obj : Quest.Objectives)
+            {
+                if (Obj.CreatureOrGOId == Entry)
+                {
+                    Obj.Count = Count;
+                    Obj.Required = Required;
+                    bFoundObjective = true;
+                    break;
+                }
+            }
+
+            if (!bFoundObjective)
+            {
+                FWowQuestObjective NewObj;
+                NewObj.CreatureOrGOId = Entry;
+                NewObj.Count = Count;
+                NewObj.Required = Required;
+                Quest.Objectives.Add(NewObj);
+            }
+            break;
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("QUEST_UPDATE_ADD_KILL: quest=%u entry=%u count=%u/%u"),
+           QuestId, Entry, Count, Required);
+}
+
+// ── SMSG_QUEST_UPDATE_COMPLETE ───────────────────────────────────────────
+// uint32 questId
+
+void FWowPacketHandler::HandleQuestUpdateComplete(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 QuestId = R.ReadU32();
+
+    // Update quest log
+    for (FWowQuestLogEntry& Quest : QuestLog)
+    {
+        if (Quest.QuestId == QuestId)
+        {
+            Quest.State = 1; // Complete
+            break;
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("QUEST_UPDATE_COMPLETE: quest=%u"), QuestId);
+    OnQuestComplete.Broadcast(QuestId);
+}
+
+// ── SMSG_TALENTS_INFO ────────────────────────────────────────────────────
+// uint8 talentGroupCount, uint8 activeTalentGroup, then for each group:
+// uint32 pointsSpent[3], uint8 talentCount, then for each talent: uint32 talentId + uint8 rank
+
+void FWowPacketHandler::HandleTalentsInfo(FPacketReader& R)
+{
+    if (!R.CanRead(2)) return;
+
+    uint8 TalentGroupCount = R.ReadU8();
+    uint8 ActiveTalentGroup = R.ReadU8();
+
+    Talents.Empty();
+
+    for (int32 Group = 0; Group < TalentGroupCount; ++Group)
+    {
+        // Points spent in each tree (3 trees total)
+        if (!R.CanRead(12)) return;
+        uint32 PointsSpent[3];
+        PointsSpent[0] = R.ReadU32();
+        PointsSpent[1] = R.ReadU32();
+        PointsSpent[2] = R.ReadU32();
+
+        if (!R.CanRead(1)) return;
+        uint8 TalentCount = R.ReadU8();
+
+        for (int32 i = 0; i < TalentCount; ++i)
+        {
+            if (!R.CanRead(5)) break;
+
+            uint32 TalentId = R.ReadU32();
+            uint8 Rank = R.ReadU8();
+
+            // Only store active talent group for now
+            if (Group == ActiveTalentGroup)
+            {
+                FWowTalentInfo Talent;
+                Talent.TalentId = TalentId;
+                Talent.Rank = Rank;
+                Talents.Add(Talent);
+            }
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("TALENTS_INFO: %d groups, active=%d, %d talents"),
+           TalentGroupCount, ActiveTalentGroup, Talents.Num());
+    OnTalentsUpdated.Broadcast();
+}
+
+// ── SMSG_LEARNED_SPELL ───────────────────────────────────────────────────
+// uint32 spellId, uint16 unknown
+
+void FWowPacketHandler::HandleLearnedSpell(FPacketReader& R)
+{
+    if (!R.CanRead(6)) return;
+
+    uint32 SpellId = R.ReadU32();
+    uint16 Unknown = R.ReadU16();
+
+    KnownSpells.Add(SpellId);
+
+    UE_LOG(LogWowPacket, Log, TEXT("LEARNED_SPELL: spell=%u"), SpellId);
+}
+
+// ── SMSG_REMOVED_SPELL ───────────────────────────────────────────────────
+// uint32 spellId
+
+void FWowPacketHandler::HandleRemovedSpell(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 SpellId = R.ReadU32();
+
+    KnownSpells.Remove(SpellId);
+
+    UE_LOG(LogWowPacket, Log, TEXT("REMOVED_SPELL: spell=%u"), SpellId);
 }
