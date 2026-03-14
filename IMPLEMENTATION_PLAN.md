@@ -3,13 +3,17 @@
 ## Overview
 Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data files, renders zones, supports the full native WoW UI (Lua + XML + addons), and connects to AzerothCore servers.
 
-## Architecture
-7 modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features).
+## Audit Status
+Audit updated on March 14, 2026 after a source scan plus `./run_test.sh build`.
+Current status: the project builds and launches as a world viewer, but several phases that were previously marked complete are only partially implemented and have been reopened below.
 
-## Phase 1: Project Cleanup & Foundation ✅ DONE
+## Architecture
+7 current modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features).
+
+## Phase 1: Project Cleanup & Foundation ✅ COMPLETE
 - [x] Plan created
 - [x] Delete template Variant code and Content
-- [x] Update .uproject, Target.cs, Build.cs files
+- [x] Update `.uproject`, `Target.cs`, `Build.cs` files
 - [x] Create WowUnreal game classes (GameInstance, GameMode, FlyCamera, PlayerController)
 - [x] Create all 7 module directories with Build.cs and module registration
 - [x] Integrate StormLib (ThirdParty) for MPQ reading
@@ -20,66 +24,88 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Implement coordinate conversion utilities
 - [x] Create type headers for ADT, WDT, M2, WMO with stub parsers
 
-## Phase 2: Format Parsers ✅ DONE
+## Phase 2: Format Parsers
 - [x] ADT parser (MHDR, MCIN, MCNK chunks, heights, normals, layers, alpha maps, doodad/WMO refs)
 - [x] WDT parser (tile existence grid, MPHD flags)
-- [x] M2 parser (vertices, indices from .skin, textures, render passes, bones)
+- [x] M2 parser (vertices, indices from `.skin`, textures, render passes, bones)
 - [x] WMO parser (root: materials, doodad sets, portals; groups: geometry, batches)
-- [x] DBC table loading (Map, AreaTable, Light, LightParams)
+- [ ] Complete Tier 1 typed DBC wrappers from `specs/dbc-wrappers.md` (only Map/AreaTable/Light/LightParams exist; missing LightIntParams, LiquidType, AnimationData, ChrRaces, CharSections, CreatureDisplayInfo, CreatureModelData, ItemDisplayInfo)
+- [ ] Add Tier 2 typed DBC wrappers from `specs/dbc-wrappers.md` (Spell, SpellVisual, SpellVisualKit, SoundEntries, LoadingScreens, GroundEffectTexture, EmotesText, Talent, TalentTab)
 
-## Phase 3: Terrain Rendering ✅ DONE
+## Phase 3: Terrain Rendering
 - [x] BLP → UTexture2D factory (DXT passthrough to GPU)
-- [x] Master terrain splat material (4 layers + 3 alpha maps)
+- [x] Master terrain splat material
 - [x] Terrain mesh builder (145-vertex chunks → ProceduralMesh)
 - [x] TerrainTile actor (256 chunk meshes + materials)
 - [x] World manager with WDT loading and tile streaming
-- [x] Single tile test rendering (verified: builds, smoke test passes, logs confirm tile loading, screenshots show textured terrain)
+- [x] Single tile test rendering (build/run audit still loads and renders terrain tiles)
+- [ ] Fix terrain material compile/fallback warnings on Metal (`M_WowTerrain` falls back to the default material during `./run_test.sh build`)
 
-## Phase 4: World Streaming ✅ DONE (integrated into Phase 3)
+## Phase 4: World Streaming
 - [x] Camera-based tile streaming (load/unload with hysteresis)
 - [x] WDT-driven tile existence
-- [x] Async tile loader (background thread with TFuture, game-thread finalization)
-- [x] Multi-tile fly-through test (verified: logs show 50 tile load events across tiles 30-34/46-50, screenshots confirm rendering)
+- [x] Async tile loader (background thread with `TFuture`, game-thread finalization)
+- [x] Multi-tile viewer streaming works during runtime audit
+- [ ] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions
+- [ ] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent`
 
-## Phase 5: Static Objects ✅ DONE
-- [x] M2 doodad loading and ProceduralMesh creation
+## Phase 5: Static Objects
+- [x] M2 doodad loading and mesh creation
 - [x] WMO root+group loading and per-group mesh creation
 - [x] Wire placements into TerrainTile from MDDF/MODF
 - [x] BLP texture loading for terrain, doodads, WMOs
 - [x] HISMC instancing for repeated doodads (groups by M2 model, one HISMC per unique model per tile)
-- [x] Nanite for WMO static meshes (UStaticMesh via FMeshDescription with Nanite enabled)
+- [x] Nanite for WMO static meshes (UStaticMesh via `FMeshDescription` with Nanite enabled)
+- [ ] Complete `specs/static-mesh.md`: migrate terrain, water, WDL, and legacy fallback paths off `UProceduralMeshComponent`
+- [ ] Improve WMO placement fidelity beyond yaw-only rotation
 
-## Phase 6: Networking ✅ DONE
+## Phase 6: Networking
 - [x] BigNumber (OpenSSL BIGNUM wrapper with LE/BE conversion)
 - [x] SRP6 client (challenge/proof/session key/M2 verification)
 - [x] ARC4-drop1024 + AuthCrypt (HMAC-SHA1 key derivation)
 - [x] Auth socket (TCP, full handshake, realm list)
-- [x] World socket (TCP, encrypted packet framing, char enum)
+- [x] World socket handshake, encrypted packet framing, and character enumeration
 - [x] Connection manager state machine with delegate wiring
+- [ ] Implement the packet handler/entity system from `specs/networking.md` (`SMSG_LOGIN_VERIFY_WORLD`, `SMSG_UPDATE_OBJECT`, `SMSG_COMPRESSED_UPDATE_OBJECT`, `SMSG_DESTROY_OBJECT`, movement, chat, spells, action buttons)
+- [ ] Add world-state data structures (`WowPacketHandler`, `WowEntityManager`, `WowEntity`, `WowUpdateFields`, handler files)
+- [ ] Add gameplay CMSG flows beyond login/char enum (movement, chat, combat/spells, heartbeat)
 
-## Phase 7: Client Features ✅ DONE
+## Phase 7: Client Features
 - [x] Credential storage (multi-account JSON)
-- [x] Autologin (-autologin flag + UGameInstanceSubsystem)
+- [x] Autologin (`-autologin` flag + `UGameInstanceSubsystem`)
 - [x] Screenshot manager (viewport capture)
-- [x] HUD (tile coords, FPS, load status — AHUD canvas overlay with WorldManager stats)
+- [x] HUD (tile coords, FPS, load status)
+- [ ] Replace the viewer fly camera with gameplay movement and chase camera from `specs/movement.md`
+- [ ] Add targeting, interaction, and server-synced movement state
 
-## Phase 8: WoW UI System ✅ DONE
-- [x] Lua 5.1 VM with sandboxed globals (FWowLuaVM with io/os/debug/require removed)
-- [x] XML frame parser (FrameXML, templates, Include/Script directives — 660 lines, full parser with anchors, layers, textures, scripts, backdrops)
-- [x] Frame manager (19 frame types → UMG widgets — CreateFrame with template inheritance, child recursion, widget creation)
-- [x] Anchor layout system + strata ordering (FWowAnchor 9-point system + EWowFrameStrata 8 levels implemented in frame types)
-- [x] WoW Lua API (~88 functions: globals, string/table/math aliases, unit stubs, client info, error handling)
-- [x] Event system (48 SMSG → WoW event mappings — FWowEventSystem with register/unregister/fire, Lua integration)
-- [x] TOC parser + addon loader with dependency resolution (FWowAddonLoader: ParseToc, DiscoverAddons, LoadAddon with XML+Lua execution)
-- [x] SavedVariables persistence (Lua table serializer, WTF directory layout, load-before-addon/save-on-shutdown)
+## Phase 8: WoW UI System
+- [x] Lua 5.1 VM with basic sandboxed globals
+- [x] XML parsing for FrameXML files, includes, scripts, and frame definitions
+- [x] SavedVariables persistence (Lua table serializer, WTF-style directory layout)
+- [ ] Apply template inheritance and frame creation from parsed XML into runtime widgets
+- [ ] Complete widget mapping and anchor/layout/strata behavior in `FWowFrameManager`
+- [ ] Replace hardcoded Lua API stubs with real implementations (`Source/WowUI/Private/LuaApi/LuaStubs.cpp`)
+- [ ] Wire event dispatch to Lua `OnEvent`/`SetScript` handlers (`FWowEventSystem::FireEvent` currently only logs)
+- [ ] Add the frame methods and WoW UI API surface needed by FrameXML/addons (`CreateFrame`, `SetPoint`, `RegisterEvent`, `CreateTexture`, `CreateFontString`, unit/chat/item/spell/action APIs)
+- [ ] Implement addon discovery/load-order resolution for Blizzard/default addons and user addons
+- [ ] Load FrameXML/UIParent/default Blizzard UI during game startup
+- [ ] Add Lua sandbox memory limits and execution timeout
 
-## Phase 9: Polish ✅ DONE
-- [x] Terrain LOD + WDL distant terrain (WDL parser, 17x17 mesh per tile, distance-based streaming)
-- [x] Water rendering (MH2O parser, per-chunk liquid meshes, existence bitmap filtering)
-- [x] Sky/fog from DBC Light tables (SkyManager with time-of-day, sun/moon, height fog, dawn/dusk colors)
-- [x] Skeletal mesh + animation pipeline (M2 bone hierarchy + animation sequence parsing, static mesh builder)
-- [x] Memory budget enforcement (cache stats, stale entry purging, budget tracking in HUD)
-- [x] Runtime Virtual Textures for terrain (URuntimeVirtualTexture + volume component in WorldManager, terrain meshes write to RVT, material graph RVT output node)
+## Phase 9: World Polish
+- [ ] Complete `specs/water.md` (animated liquid materials, depth/transparency, liquid-type handling, ocean plane, WMO liquid)
+- [ ] Complete `specs/sky-atmosphere.md` using Light.dbc + LightParams + LightInt/FloatParams with zone blending
+- [ ] Complete `specs/m2-animation.md` (`USkeleton`/`USkeletalMesh`/`UAnimSequence`, playback, animated doodads)
+- [x] Memory budget tracking in asset cache / HUD
+- [x] Runtime Virtual Textures for terrain
+
+## Phase 10: Character / Audio / Gameplay
+- [ ] Implement character rendering + equipment system from `specs/character.md`
+- [ ] Implement audio system from `specs/audio.md`
+- [ ] Implement login, character select, and character creation screens from `specs/overview.md`
+- [ ] Implement gameplay/UI systems still only listed in `specs/overview.md` (combat, inventory, quests, talents, social, maps)
+
+## Phase 11: Test Coverage
+- [ ] Add first-party automated tests for parsers, world streaming, networking, UI, and addon loading (the repo currently only contains vendored StormLib tests)
 
 ## Test Server
 - Host: 127.0.0.1
