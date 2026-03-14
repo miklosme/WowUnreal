@@ -92,19 +92,31 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Add Lua sandbox memory limits and execution timeout — custom `lua_newstate` allocator with configurable memory limit (default 128 MB, denies alloc when exceeded), instruction count hook fires every 1000 instructions with configurable limit (default 10M, raises luaL_error), counter resets per `ExecuteString`/`ExecuteBuffer` call; builds — verified March 14, 2026: code review confirms custom allocator, instruction hook, counter reset; build succeeds
 
 ## Phase 9: World Polish
-- [?] Complete `specs/water.md` (animated liquid materials, depth/transparency, liquid-type handling, ocean plane, WMO liquid) — MH2O parsing, water/lava/slime materials with animated noise+depth, ocean plane, existence bitmap, WMO MLIQ liquid parsing and mesh creation with tile visibility flags; builds and smoke-tests
-- [?] Complete `specs/sky-atmosphere.md` using Light.dbc + LightParams + LightIntParams with zone blending — DBC-driven sky colors via InterpolateDbcColor (time-interpolated BGRA from LightIntParams), zone blending by distance (BlendZoneColor with falloff radii), sun/moon positioning, fog color from DBC, fallback hardcoded colors when DBC not loaded; builds and smoke-tests
+- [x] Complete `specs/water.md` (animated liquid materials, depth/transparency, liquid-type handling, ocean plane, WMO liquid) — MH2O parsing, water/lava/slime materials with animated noise+depth, ocean plane, existence bitmap, WMO MLIQ liquid parsing and mesh creation with tile visibility flags; builds and smoke-tests — verified March 14, 2026: code review confirms all spec requirements met (MH2O parsing with existence bitmap, water/lava/slime materials with animation, ocean plane, WMO MLIQ with tile visibility flags), build succeeds
+- [ ] Complete `specs/sky-atmosphere.md` using Light.dbc + LightParams + LightIntParams with zone blending — verification March 14, 2026 FAILED: sun/moon positioning, fog color, zone blending, and fallback colors work, but sky gradient bands (LP_SkyTopColor/MiddleColor/Band1/Band2/SmogColor) are parsed but never rendered to any sky material/skydome; cloud layers not implemented; LightFloatParams.dbc not parsed (fog distances hardcoded); wrapping bug at line 244 (`if (HighIdx == 0) HighIdx = 0;` is a no-op). ~70% complete, needs sky gradient rendering, cloud layers, and LightFloatParams
 - [ ] Complete `specs/m2-animation.md` (`USkeleton`/`USkeletalMesh`/`UAnimSequence`, playback, animated doodads)
 - [x] Memory budget tracking in asset cache / HUD
 - [x] Runtime Virtual Textures for terrain
 
-## Phase 10: Character / Audio / Gameplay
+## Phase 10: Bug Fixes & Stability
+- [ ] Fix UStaticMesh memory leaks: every runtime-created UStaticMesh calls AddToRoot() but RemoveFromRoot() is never called on unload — affects terrain (WowTerrainTile.cpp:149), water (WowWaterRenderer.cpp:72), WMO groups (WowWmoRenderer.cpp:289), WMO liquid (WowWmoRenderer.cpp:241), doodads (WowDoodadManager.cpp:208), WDL tiles (WowWorldManager.cpp:1030), LOD1 tiles (WowWorldManager.cpp:1265). Add cleanup in tile/object destruction paths.
+- [ ] Fix FinalPreExposure black screen: renderer hits `FinalPreExposure > 0.0f` ensure causing black rendering. PostProcessVolume and DefaultEngine.ini mitigations are in place but not fully effective. Verify fix works after async tile loading changes, adjust AutoExposureBias if needed.
+- [ ] Add thread safety to MpqManager::Initialize(): Archives array is modified without holding ArchiveLock during init, causing race with background ReadFile() calls. Add FScopeLock in Initialize() and shutdown fence.
+- [ ] Add FCriticalSection to WowAuthSocket: unlike WowWorldSocket which has SocketLock, auth socket has no lock protecting socket access — Disconnect() from game thread can crash RecvBytes() on network thread (WowAuthSocket.cpp:560-585)
+- [ ] Add read timeouts to blocking socket recv: both auth (WowAuthSocket.cpp:560) and world (WowWorldSocket.cpp:612) sockets spin-sleep forever if server stops sending. Add 30s cumulative timeout with disconnect.
+- [ ] Fix Lua context use-after-free: FWowLuaContext* stored as light userdata in Lua registry (LuaApiRegistry.cpp:28-48) — if C++ context is destroyed while Lua holds reference, any callback crashes. Ensure VM shutdown before context destruction.
+- [ ] Add bounds checking to binary parsers: ADT MCVT chunk size not validated (AdtParser.cpp:359), WDL height memcpy without length check (WdlParser.cpp:91-93), M2 skin index bounds (M2Parser.cpp:414), BLP mip pointer validation (BlpParser.cpp:79-92), ADT MCAL alpha offset (AdtParser.cpp:204-205)
+- [ ] Fix sky atmosphere incomplete rendering: sky gradient bands parsed but never rendered to material, cloud layers not implemented, LightFloatParams.dbc not parsed (fog distances hardcoded), wrapping no-op bug at WowSkyManager line 244
+- [ ] Fix credential store: passwords stored plaintext in JSON (WowCredentialStore.cpp:23,40), JSON parsing crashes on missing fields — use TryGetStringField() and consider platform keychain
+- [ ] Add packet validation: no opcode range validation in dispatch (WowPacketHandler.cpp:30-43), chat messages sent without 255-byte length limit, missing session key validation before world connect
+
+## Phase 11: Character / Audio / Gameplay
 - [ ] Implement character rendering + equipment system from `specs/character.md`
 - [ ] Implement audio system from `specs/audio.md`
 - [ ] Implement login, character select, and character creation screens from `specs/overview.md`
 - [ ] Implement gameplay/UI systems still only listed in `specs/overview.md` (combat, inventory, quests, talents, social, maps)
 
-## Phase 11: Test Coverage
+## Phase 12: Test Coverage
 - [ ] Add first-party automated tests for parsers, world streaming, networking, UI, and addon loading (the repo currently only contains vendored StormLib tests)
 
 ## Test Server
