@@ -23,6 +23,7 @@ static constexpr uint32 WMO_MONR = MakeFourCC('R','N','O','M');
 static constexpr uint32 WMO_MOTV = MakeFourCC('V','T','O','M');
 static constexpr uint32 WMO_MOBA = MakeFourCC('A','B','O','M');
 static constexpr uint32 WMO_MOCV = MakeFourCC('V','C','O','M');
+static constexpr uint32 WMO_MLIQ = MakeFourCC('Q','I','L','M');
 
 namespace
 {
@@ -475,6 +476,50 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
                     const uint8 A = ReadU8(Base, Off, DataSize);
                     Result.VertexColors[i] = FColor(R, G, B, A);
                 }
+            }
+        }
+
+        else if (ChunkMagic == WMO_MLIQ)
+        {
+            // MLIQ: liquid data — 30-byte header + vertex map + tile flags
+            if (ChunkSize >= 30)
+            {
+                uint32 Off = ChunkStart;
+                Result.Liquid.XVerts = ReadU32(Base, Off, DataSize);
+                Result.Liquid.YVerts = ReadU32(Base, Off, DataSize);
+                uint32 XTiles = ReadU32(Base, Off, DataSize); (void)XTiles;
+                uint32 YTiles = ReadU32(Base, Off, DataSize); (void)YTiles;
+                float PosX = ReadFloat(Base, Off, DataSize);
+                float PosY = ReadFloat(Base, Off, DataSize);
+                float PosZ = ReadFloat(Base, Off, DataSize);
+                Result.Liquid.Position = FVector(PosX, PosY, PosZ);
+                Result.Liquid.MaterialId = ReadU16(Base, Off, DataSize);
+
+                // Read vertex data: XVerts * YVerts vertices, 8 bytes each
+                uint32 NumVerts = Result.Liquid.XVerts * Result.Liquid.YVerts;
+                Result.Liquid.Vertices.SetNumUninitialized(NumVerts);
+                for (uint32 i = 0; i < NumVerts; i++)
+                {
+                    FWmoLiquidVertex& V = Result.Liquid.Vertices[i];
+                    V.Flow1   = ReadU8(Base, Off, DataSize);
+                    V.Flow2   = ReadU8(Base, Off, DataSize);
+                    V.FlowPct = ReadU8(Base, Off, DataSize);
+                    V.Filler  = ReadU8(Base, Off, DataSize);
+                    V.Height  = ReadFloat(Base, Off, DataSize);
+                }
+
+                // Read tile flags: (XVerts-1) * (YVerts-1) bytes
+                uint32 NumTiles = (Result.Liquid.XVerts > 0 ? Result.Liquid.XVerts - 1 : 0)
+                                * (Result.Liquid.YVerts > 0 ? Result.Liquid.YVerts - 1 : 0);
+                Result.Liquid.TileFlags.SetNumUninitialized(NumTiles);
+                for (uint32 i = 0; i < NumTiles; i++)
+                {
+                    Result.Liquid.TileFlags[i] = ReadU8(Base, Off, DataSize);
+                }
+
+                UE_LOG(LogWmo, Log, TEXT("  MLIQ: %ux%u verts, %u tiles, mat=%u, pos=(%.1f,%.1f,%.1f)"),
+                    Result.Liquid.XVerts, Result.Liquid.YVerts, NumTiles,
+                    Result.Liquid.MaterialId, PosX, PosY, PosZ);
             }
         }
 

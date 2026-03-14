@@ -1,4 +1,5 @@
 #include "WowWmoRenderer.h"
+#include "WowWaterMaterial.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
 #include "Formats/WmoParser.h"
@@ -110,6 +111,156 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         MeshComp->SetCastShadow(true);
         MeshComp->RegisterComponent();
         ++GroupsLoaded;
+
+        // Create liquid mesh for this group if MLIQ data exists
+        if (GroupData.Liquid.HasLiquid())
+        {
+            const FWmoLiquidData& Liq = GroupData.Liquid;
+            uint32 XTiles = Liq.XVerts - 1;
+            uint32 YTiles = Liq.YVerts - 1;
+
+            TArray<FVector3f> LiqVerts;
+            TArray<FVector2f> LiqUVs;
+            TArray<FVector4f> LiqColors;
+            TArray<int32> LiqIndices;
+            LiqVerts.Reserve(Liq.XVerts * Liq.YVerts);
+            LiqUVs.Reserve(Liq.XVerts * Liq.YVerts);
+            LiqColors.Reserve(Liq.XVerts * Liq.YVerts);
+
+            int32 Category = Liq.GetLiquidCategory();
+
+            for (uint32 y = 0; y < Liq.YVerts; y++)
+            {
+                for (uint32 x = 0; x < Liq.XVerts; x++)
+                {
+                    uint32 Idx = y * Liq.XVerts + x;
+                    float Height = (Idx < (uint32)Liq.Vertices.Num()) ? Liq.Vertices[Idx].Height : 0.0f;
+
+                    // WMO liquid positions are in WMO local space
+                    // pos.x + UNITSIZE * x, height, pos.z - UNITSIZE * y (noggit3 convention)
+                    // UNITSIZE for WMO MLIQ is typically 1/8 of a chunk = 4.1667 units
+                    constexpr float LIQUID_UNIT = 4.1667f;
+                    float WmoX = Liq.Position.X + LIQUID_UNIT * x;
+                    float WmoY = Height;
+                    float WmoZ = Liq.Position.Z - LIQUID_UNIT * y;
+
+                    // WMO local coords use same axis convention as general WoW
+                    LiqVerts.Add(FVector3f(WmoX, WmoZ, WmoY));
+
+                    float U = (float)x / FMath::Max(1u, Liq.XVerts - 1);
+                    float V = (float)y / FMath::Max(1u, Liq.YVerts - 1);
+                    LiqUVs.Add(FVector2f(U, V));
+
+                    // Depth opacity from flow data
+                    float DepthAlpha = 0.7f;
+                    if (Idx < (uint32)Liq.Vertices.Num())
+                    {
+                        DepthAlpha = FMath::Lerp(0.3f, 0.9f, Liq.Vertices[Idx].Flow1 / 255.0f);
+                    }
+                    if (Category == 2 || Category == 3) DepthAlpha = 1.0f;
+
+                    FVector4f VC;
+                    switch (Category)
+                    {
+                    case 0: case 1: VC = FVector4f(0.1f, 0.3f, 0.6f, DepthAlpha); break;
+                    case 2: VC = FVector4f(1.0f, 0.4f, 0.1f, 1.0f); break;
+                    case 3: VC = FVector4f(0.2f, 0.7f, 0.1f, 1.0f); break;
+                    default: VC = FVector4f(0.1f, 0.3f, 0.6f, DepthAlpha); break;
+                    }
+                    LiqColors.Add(VC);
+                }
+            }
+
+            // Build triangles, respecting tile visibility flags
+            for (uint32 y = 0; y < YTiles; y++)
+            {
+                for (uint32 x = 0; x < XTiles; x++)
+                {
+                    uint32 TileIdx = y * XTiles + x;
+                    if (TileIdx < (uint32)Liq.TileFlags.Num())
+                    {
+                        // Bit 3 (0x08) means tile is invisible
+                        if (Liq.TileFlags[TileIdx] & 0x08) continue;
+                    }
+
+                    int32 TL = y * Liq.XVerts + x;
+                    int32 TR = TL + 1;
+                    int32 BL = TL + Liq.XVerts;
+                    int32 BR = BL + 1;
+
+                    LiqIndices.Add(TL); LiqIndices.Add(BL); LiqIndices.Add(TR);
+                    LiqIndices.Add(TR); LiqIndices.Add(BL); LiqIndices.Add(BR);
+                }
+            }
+
+            if (LiqIndices.Num() > 0)
+            {
+                // Build liquid static mesh via FMeshDescription
+                FMeshDescription LiqMeshDesc;
+                FStaticMeshAttributes LiqAttrs(LiqMeshDesc);
+                LiqAttrs.Register();
+
+                auto LiqVertPos = LiqAttrs.GetVertexPositions();
+                auto LiqInstNormals = LiqAttrs.GetVertexInstanceNormals();
+                auto LiqInstTangents = LiqAttrs.GetVertexInstanceTangents();
+                auto LiqInstBinSigns = LiqAttrs.GetVertexInstanceBinormalSigns();
+                auto LiqInstUVs = LiqAttrs.GetVertexInstanceUVs();
+                auto LiqInstColors = LiqAttrs.GetVertexInstanceColors();
+
+                FPolygonGroupID LiqPolyGroup = LiqMeshDesc.CreatePolygonGroup();
+                LiqMeshDesc.ReserveNewVertices(LiqVerts.Num());
+                LiqMeshDesc.ReserveNewVertexInstances(LiqVerts.Num());
+                LiqMeshDesc.ReserveNewPolygons(LiqIndices.Num() / 3);
+
+                TArray<FVertexInstanceID> LiqInstIDs;
+                LiqInstIDs.SetNum(LiqVerts.Num());
+
+                for (int32 v = 0; v < LiqVerts.Num(); v++)
+                {
+                    FVertexID VID = LiqMeshDesc.CreateVertex();
+                    LiqVertPos[VID] = LiqVerts[v];
+                    FVertexInstanceID IID = LiqMeshDesc.CreateVertexInstance(VID);
+                    LiqInstIDs[v] = IID;
+                    LiqInstNormals[IID] = FVector3f(0, 0, 1);
+                    LiqInstTangents[IID] = FVector3f(1, 0, 0);
+                    LiqInstBinSigns[IID] = 1.0f;
+                    LiqInstUVs.Set(IID, 0, (v < LiqUVs.Num()) ? LiqUVs[v] : FVector2f(0, 0));
+                    LiqInstColors[IID] = (v < LiqColors.Num()) ? LiqColors[v] : FVector4f(1, 1, 1, 0.7f);
+                }
+
+                for (int32 t = 0; t < LiqIndices.Num(); t += 3)
+                {
+                    TArray<FVertexInstanceID> Tri;
+                    Tri.Add(LiqInstIDs[LiqIndices[t]]);
+                    Tri.Add(LiqInstIDs[LiqIndices[t + 1]]);
+                    Tri.Add(LiqInstIDs[LiqIndices[t + 2]]);
+                    LiqMeshDesc.CreatePolygon(LiqPolyGroup, Tri);
+                }
+
+                UStaticMesh* LiqSM = NewObject<UStaticMesh>();
+                LiqSM->AddToRoot();
+                TArray<const FMeshDescription*> LiqDescs;
+                LiqDescs.Add(&LiqMeshDesc);
+                UStaticMesh::FBuildMeshDescriptionsParams LiqBuild;
+                LiqBuild.bBuildSimpleCollision = false;
+                LiqBuild.bFastBuild = true;
+                LiqSM->BuildFromMeshDescriptions(LiqDescs, LiqBuild);
+
+                UMaterial* LiqMat = FWowWaterMaterial::GetMaterialForCategory(Category);
+                if (LiqMat) LiqSM->SetMaterial(0, LiqMat);
+
+                FName LiqCompName = *FString::Printf(TEXT("WmoLiquid_%d"), GroupIdx);
+                UStaticMeshComponent* LiqComp = NewObject<UStaticMeshComponent>(WmoActor, LiqCompName);
+                LiqComp->SetupAttachment(RootComp);
+                LiqComp->SetStaticMesh(LiqSM);
+                LiqComp->SetCastShadow(false);
+                LiqComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                LiqComp->RegisterComponent();
+
+                UE_LOG(LogWowWmo, Log, TEXT("  Created WMO liquid mesh for group %d (%d tris, cat=%d)"),
+                    GroupIdx, LiqIndices.Num() / 3, Category);
+            }
+        }
     }
 
     if (GroupsLoaded == 0)
