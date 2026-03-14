@@ -142,10 +142,10 @@ namespace
         for (int32 i = 0; i < 145; ++i)
         {
             float H = R.ReadF32();
-            // Sanity check: heights should be small deltas, typically -200 to +200
-            if (H > 10000.0f || H < -10000.0f)
+            // MCVT heights are small deltas relative to chunk base, typically -50 to +50
+            if (!FMath::IsFinite(H) || H > 500.0f || H < -500.0f)
             {
-                H = 0.0f; // Clamp garbage values
+                H = 0.0f;
             }
             Chunk.Heights[i] = H;
         }
@@ -305,9 +305,10 @@ namespace
 
     void ParseMCNK(FBinaryReader& R, uint32 McnkSize, bool bBigAlpha, FAdtChunkData& Chunk)
     {
-        // mcnkDataStart is the position right after the MCNK chunk header (magic+size).
-        // All sub-chunk offsets within the MCNK header are relative to this position.
-        const int32 McnkDataStart = R.Pos;
+        // MCNK sub-chunk offsets are relative to the MCNK chunk START (including magic+size).
+        // R.Pos is right after reading the MCNK magic+size (8 bytes).
+        // Subtract 8 to get the start of the MCNK chunk.
+        const int32 McnkDataStart = R.Pos - 8;
         const int32 McnkDataEnd   = McnkDataStart + static_cast<int32>(McnkSize);
 
         // ── Read the 128-byte MCNK header ───────────────────────────────────
@@ -363,12 +364,20 @@ namespace
         const bool bDoNotFixAlpha = (Flags & MCNK_FLAG_DO_NOT_FIX_ALPHA) != 0;
 
         // ── MCVT (heights) ──────────────────────────────────────────────────
-        if (OfsHeight > 0 && McnkDataStart + OfsHeight + 8 < R.Size)
+        if (OfsHeight > 0 && McnkDataStart + OfsHeight + 8 + 145*4 <= R.Size)
         {
             R.Seek(McnkDataStart + OfsHeight);
             uint32 SubMagic, SubSize;
             ReadChunkHeader(R, SubMagic, SubSize);
-            ParseMCVT(R, Chunk);
+            if (SubMagic == MAGIC_MCVT && SubSize >= 145 * 4)
+            {
+                ParseMCVT(R, Chunk);
+            }
+            else
+            {
+                UE_LOG(LogAdt, Warning, TEXT("MCVT magic mismatch or bad size for chunk %d,%d (magic=0x%08X, size=%u)"),
+                    Ix, Iy, SubMagic, SubSize);
+            }
         }
 
         // ── MCNR (normals) ─────────────────────────────────────────────────

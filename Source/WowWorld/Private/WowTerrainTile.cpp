@@ -55,6 +55,8 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     AllTangents.Reserve(256 * 145);
 
     int32 VertexOffset = 0;
+    int32 ChunksWithHeights = 0;
+    int32 ChunksSkipped = 0;
 
     for (int32 i = 0; i < 256; ++i)
     {
@@ -62,7 +64,18 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMesh(Chunk, TX, TY);
 
         if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0)
+        {
+            ChunksSkipped++;
             continue;
+        }
+
+        // Check if this chunk has valid height variation
+        bool bHasHeights = false;
+        for (int32 h = 0; h < 145; h++)
+        {
+            if (Chunk.Heights[h] != 0.0f) { bHasHeights = true; break; }
+        }
+        if (bHasHeights) ChunksWithHeights++;
 
         // Append vertices
         AllVertices.Append(MeshData.Vertices);
@@ -125,9 +138,9 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         }
         FVector WorldMin = GetActorLocation() + MinV;
         FVector WorldMax = GetActorLocation() + MaxV;
-        UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d verts, %d tris. Local[%s to %s] World[%s to %s]"),
-            TX, TY, AllVertices.Num(), AllIndices.Num() / 3,
-            *MinV.ToString(), *MaxV.ToString(), *WorldMin.ToString(), *WorldMax.ToString());
+        UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d verts, %d tris, %d/%d chunks have heights, %d skipped. World[%s to %s]"),
+            TX, TY, AllVertices.Num(), AllIndices.Num() / 3, ChunksWithHeights, 256 - ChunksSkipped, ChunksSkipped,
+            *WorldMin.ToString(), *WorldMax.ToString());
     }
 
     // TODO: Doodads temporarily disabled - too many ProceduralMesh components crash Metal
