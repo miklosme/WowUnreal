@@ -31,6 +31,14 @@ public:
     FMpqManager* GetMpqManager() const { return MpqManager.Get(); }
     FWowAssetCache* GetAssetCache() const { return AssetCache.Get(); }
 
+    /** HUD info accessors */
+    int32 GetLoadedTileCount() const { return LoadedTiles.Num(); }
+    int32 GetPendingTileCount() const { return PendingTileKeys.Num(); }
+    FIntPoint GetCameraTile() const { return LastCameraTile; }
+    int32 GetActiveDoodadCount() const { return ActiveDoodadCount; }
+    int32 GetActiveWmoGroupCount() const { return ActiveWmoGroupCount; }
+    const FString& GetMapName() const { return MapName; }
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW")
     FString MapName = TEXT("Azeroth");
 

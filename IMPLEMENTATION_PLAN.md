@@ -61,7 +61,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Credential storage (multi-account JSON)
 - [x] Autologin (-autologin flag + UGameInstanceSubsystem)
 - [x] Screenshot manager (viewport capture)
-- [ ] HUD (tile coords, FPS, load status)
+- [?] HUD (tile coords, FPS, load status — AHUD canvas overlay with WorldManager stats)
 
 ## Phase 8: WoW UI System
 - [ ] Lua 5.1 VM with sandboxed globals

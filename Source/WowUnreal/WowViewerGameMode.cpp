@@ -1,6 +1,7 @@
 #include "WowViewerGameMode.h"
 #include "WowFlyCamera.h"
 #include "WowViewerPlayerController.h"
+#include "WowDebugHUD.h"
 #include "WowWorldManager.h"
 #include "Engine/World.h"
 #include "Engine/DirectionalLight.h"
@@ -14,6 +15,7 @@ AWowViewerGameMode::AWowViewerGameMode()
 {
     DefaultPawnClass = AWowFlyCamera::StaticClass();
     PlayerControllerClass = AWowViewerPlayerController::StaticClass();
+    HUDClass = AWowDebugHUD::StaticClass();
 }
 
 void AWowViewerGameMode::BeginPlay()
