@@ -1,5 +1,5 @@
 #include "WowViewerGameMode.h"
-#include "WowPlayerCharacter.h"
+#include "WowFlyCamera.h"
 #include "WowGameplayController.h"
 #include "WowDebugHUD.h"
 #include "WowAutoLogin.h"
@@ -13,7 +13,7 @@
 
 AWowViewerGameMode::AWowViewerGameMode()
 {
-    DefaultPawnClass = AWowPlayerCharacter::StaticClass();
+    DefaultPawnClass = AWowFlyCamera::StaticClass();
     PlayerControllerClass = AWowGameplayController::StaticClass();
     HUDClass = AWowDebugHUD::StaticClass();
 }

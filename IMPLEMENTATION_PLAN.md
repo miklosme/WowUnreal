@@ -10,8 +10,8 @@ Current status: the project builds and launches as a world viewer, but several p
 ## Architecture
 7 current modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features).
 
-## P0: Replace 3rd-person character pawn with free-flying camera pawn
-- [ ] Terrain has no collision so ACharacter falls forever, blocking all screenshot validation. Swap to a spectator/fly-cam pawn as the default during development. Defer chase-cam character to Phase 11 when collision is in place.
+## P0: Replace 3rd-person character pawn with free-flying camera pawn ✅ COMPLETE
+- [x] Terrain has no collision so ACharacter falls forever, blocking all screenshot validation. Swapped default pawn to AWowFlyCamera (spectator/fly-cam) in WowViewerGameMode. AWowPlayerCharacter deferred to Phase 11 when terrain collision is in place.
 
 ## Phase 1: Project Cleanup & Foundation ✅ COMPLETE
 - [x] Plan created
