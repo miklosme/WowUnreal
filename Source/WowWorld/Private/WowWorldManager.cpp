@@ -510,8 +510,6 @@ void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
     {
         if (Pair.Value)
         {
-            UStaticMeshComponent* SMC = Pair.Value->FindComponentByClass<UStaticMeshComponent>();
-            if (SMC && SMC->GetStaticMesh()) SMC->GetStaticMesh()->RemoveFromRoot();
             Pair.Value->Destroy();
         }
     }
@@ -916,11 +914,6 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
         if (Found && *Found)
         {
             // Release the UStaticMesh from root before destroying actor
-            UStaticMeshComponent* SMC = (*Found)->FindComponentByClass<UStaticMeshComponent>();
-            if (SMC && SMC->GetStaticMesh())
-            {
-                SMC->GetStaticMesh()->RemoveFromRoot();
-            }
             (*Found)->Destroy();
         }
         WdlTiles.Remove(Key);
@@ -1027,7 +1020,6 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
 
     // Build UStaticMesh from FMeshDescription
     UStaticMesh* SM = NewObject<UStaticMesh>();
-    SM->AddToRoot();
 
     FMeshDescription MeshDesc;
     FStaticMeshAttributes Attributes(MeshDesc);
@@ -1099,7 +1091,7 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     FActorSpawnParameters SpawnParams;
     SpawnParams.Name = *FString::Printf(TEXT("WdlTile_%d_%d"), TX, TY);
     AActor* WdlActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-    if (!WdlActor) { SM->RemoveFromRoot(); return; }
+    if (!WdlActor) { return; }
 
     UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(WdlActor, TEXT("WdlMesh"));
     MeshComp->SetStaticMesh(SM);
@@ -1262,7 +1254,6 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     if (TotalChunks > 0)
     {
         UStaticMesh* SM = NewObject<UStaticMesh>();
-        SM->AddToRoot();
 
         TArray<const FMeshDescription*> MeshDescs;
         MeshDescs.Add(&MeshDesc);

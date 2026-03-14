@@ -30,7 +30,6 @@ USkeleton* FWowSkeletalMeshBuilder::CreateSkeleton(const FM2Data& Data, const FS
 	}
 
 	USkeleton* Skeleton = NewObject<USkeleton>();
-	Skeleton->AddToRoot();
 
 	FReferenceSkeleton RefSkel;
 	FReferenceSkeletonModifier SkelMod(RefSkel, Skeleton);
@@ -88,7 +87,6 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	const int32 NumBones = Data.Bones.Num();
 
 	USkeletalMesh* SkelMesh = NewObject<USkeletalMesh>();
-	SkelMesh->AddToRoot();
 	SkelMesh->SetSkeleton(Skeleton);
 	SkelMesh->SetRefSkeleton(Skeleton->GetReferenceSkeleton());
 
@@ -102,7 +100,6 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	if (!MeshDescPtr)
 	{
 		UE_LOG(LogWowSkelMesh, Error, TEXT("Failed to create mesh description for '%s'"), *ModelName);
-		SkelMesh->RemoveFromRoot();
 		return nullptr;
 	}
 	FMeshDescription& MeshDesc = *MeshDescPtr;
@@ -290,7 +287,6 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 		FString AnimName = FString::Printf(TEXT("%s_Anim%d_%d"), *ModelName, AnimData.AnimationId, AnimData.SubAnimationId);
 
 		UAnimSequence* AnimSeq = NewObject<UAnimSequence>();
-		AnimSeq->AddToRoot();
 		AnimSeq->SetSkeleton(Skeleton);
 
 		const float DurationSec = AnimData.Duration / 1000.0f;

@@ -146,7 +146,6 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     {
         // Build UStaticMesh from the mesh description
         UStaticMesh* SM = NewObject<UStaticMesh>();
-        SM->AddToRoot();
 
         TArray<const FMeshDescription*> MeshDescs;
         MeshDescs.Add(&MeshDesc);

@@ -238,7 +238,6 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                 }
 
                 UStaticMesh* LiqSM = NewObject<UStaticMesh>();
-                LiqSM->AddToRoot();
                 TArray<const FMeshDescription*> LiqDescs;
                 LiqDescs.Add(&LiqMeshDesc);
                 UStaticMesh::FBuildMeshDescriptionsParams LiqBuild;
@@ -286,7 +285,6 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     }
 
     UStaticMesh* SM = NewObject<UStaticMesh>();
-    SM->AddToRoot();
 
     FMeshDescription MeshDesc;
     FStaticMeshAttributes Attributes(MeshDesc);

@@ -242,7 +242,6 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     }
 
     UStaticMesh* StaticMesh = NewObject<UStaticMesh>();
-    StaticMesh->AddToRoot(); // Prevent GC
 
     FMeshDescription MeshDesc;
     FStaticMeshAttributes Attributes(MeshDesc);

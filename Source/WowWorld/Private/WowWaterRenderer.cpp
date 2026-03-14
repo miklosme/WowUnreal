@@ -69,7 +69,6 @@ static UStaticMesh* BuildLiquidStaticMesh(
 	}
 
 	UStaticMesh* SM = NewObject<UStaticMesh>();
-	SM->AddToRoot();
 
 	TArray<const FMeshDescription*> MeshDescs;
 	MeshDescs.Add(&MeshDesc);
