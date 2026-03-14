@@ -127,7 +127,7 @@ The full world terrain map is too heavy and slow for testing isolated features. 
 
 ## Phase 12: Character / Audio / Gameplay (use character test scene)
 - [?] Implement character rendering + equipment system: added M2 attachment point + submesh parsing to M2Parser, created WowCharacterBuilder (race/gender model loading via ChrRaces.dbc, creature display ID loading), WowCharacterTexture (skin texture from CharSections.dbc), WowEquipmentManager (weapon M2 loading and bone attachment); character test scene spawns Human M/F + Orc M models; builds and renders March 14, 2026
-- [ ] Implement audio system from `specs/audio.md`
+- [?] Implement audio system: added ZoneMusicDbc, SoundAmbienceDbc DBC wrappers; extended AreaTableDbc with AmbienceID/ZoneMusicID/IntroMusicID fields; created WowAudioManager with A/B crossfade music playback, zone-based music switching via AreaTable→ZoneMusic→SoundEntries DBC chain, WAV PCM loading via RawPCMData, MP3 via FSharedBuffer/UpdatePayload; integrated into default scene; builds and runs without crash March 14, 2026
 - [ ] Implement login, character select, and character creation screens from `specs/overview.md`
 - [ ] Implement gameplay/UI systems still only listed in `specs/overview.md` (combat, inventory, quests, talents, social, maps)
 

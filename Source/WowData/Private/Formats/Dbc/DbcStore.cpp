@@ -339,7 +339,19 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\ZoneMusic.dbc"), Parser))
+    {
+        ZoneMusicDbc.Load(Parser);
+        ++Loaded;
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SoundAmbience.dbc"), Parser))
+    {
+        SoundAmbienceDbc.Load(Parser);
+        ++Loaded;
+    }
+
     bLoaded = Loaded > 0;
-    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/22 DBC tables"), Loaded);
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/24 DBC tables"), Loaded);
     return bLoaded;
 }

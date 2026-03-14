@@ -22,6 +22,8 @@
 #include "Formats/Dbc/TalentDbc.h"
 #include "Formats/Dbc/LightFloatParamsDbc.h"
 #include "Formats/Dbc/TalentTabDbc.h"
+#include "Formats/Dbc/ZoneMusicDbc.h"
+#include "Formats/Dbc/SoundAmbienceDbc.h"
 
 class FMpqManager;
 
@@ -54,6 +56,8 @@ public:
     FEmotesTextDbc& EmotesText() { return EmotesTextDbc; }
     FTalentDbc& Talents() { return TalentDbc; }
     FTalentTabDbc& TalentTabs() { return TalentTabDbc; }
+    FZoneMusicDbc& ZoneMusic() { return ZoneMusicDbc; }
+    FSoundAmbienceDbc& SoundAmbience() { return SoundAmbienceDbc; }
 
     const FMapDbc& Maps() const { return MapDbc; }
     const FAreaTableDbc& AreaTable() const { return AreaTableDbc; }
@@ -77,6 +81,8 @@ public:
     const FEmotesTextDbc& EmotesText() const { return EmotesTextDbc; }
     const FTalentDbc& Talents() const { return TalentDbc; }
     const FTalentTabDbc& TalentTabs() const { return TalentTabDbc; }
+    const FZoneMusicDbc& ZoneMusic() const { return ZoneMusicDbc; }
+    const FSoundAmbienceDbc& SoundAmbience() const { return SoundAmbienceDbc; }
 
     bool IsLoaded() const { return bLoaded; }
 
@@ -103,5 +109,7 @@ private:
     FEmotesTextDbc EmotesTextDbc;
     FTalentDbc TalentDbc;
     FTalentTabDbc TalentTabDbc;
+    FZoneMusicDbc ZoneMusicDbc;
+    FSoundAmbienceDbc SoundAmbienceDbc;
     bool bLoaded = false;
 };

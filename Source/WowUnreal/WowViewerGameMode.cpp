@@ -18,6 +18,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
 #include "WowCharacterBuilder.h"
+#include "WowAudioManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
@@ -152,6 +153,19 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
 
     // World manager (full streaming)
     AWowWorldManager* WorldManager = SpawnWorldManager(World);
+
+    // Spawn audio manager
+    if (WorldManager && WorldManager->GetMpqManager())
+    {
+        FActorSpawnParameters AudioParams;
+        AudioParams.Name = FName(TEXT("WowAudioManager"));
+        AWowAudioManager* AudioMgr = World->SpawnActor<AWowAudioManager>(
+            AWowAudioManager::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, AudioParams);
+        if (AudioMgr)
+        {
+            AudioMgr->SetMpqManager(WorldManager->GetMpqManager());
+        }
+    }
 
     // Load UI
     if (WorldManager && WorldManager->GetMpqManager())

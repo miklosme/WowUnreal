@@ -15,6 +15,9 @@ bool FAreaTableDbc::Load(const FDbcParser& Parser)
         E.ParentAreaID = Parser.GetUInt(i, 2);
         E.ExploreFlag  = Parser.GetUInt(i, 3);
         E.Flags        = Parser.GetUInt(i, 4);
+        E.AmbienceID   = Parser.GetUInt(i, 7);
+        E.ZoneMusicID  = Parser.GetUInt(i, 8);
+        E.IntroMusicID = Parser.GetUInt(i, 9);
         E.AreaLevel    = static_cast<int32>(Parser.GetUInt(i, 10));
         E.Name         = Parser.GetString(i, 11);
         E.Team         = Parser.GetUInt(i, 28);
