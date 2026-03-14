@@ -47,7 +47,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Async tile loader (background thread with `TFuture`, game-thread finalization)
 - [x] Multi-tile viewer streaming works during runtime audit
 - [x] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions — verified March 14, 2026: build succeeds, code review confirms LOD 1 (81-vert chunks with per-chunk splat materials), MAHO hole bitmask parsing/skipping, and ADT-driven transition strips; runtime screenshot shows textured distant terrain extending to horizon
-- [?] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent` — March 14, 2026: `SpawnWdlTile` and WDL transition strips build a single `FMeshDescription` into `UStaticMesh`/`UStaticMeshComponent`, terrain alpha textures now use unique transient names to avoid overwrite hitches, and `WowWorldManager` supports command-line tile/camera/screenshot automation for verification runs; `WowUnrealEditor` builds, and a smoke run with `-ExecCmds="ShowFlag.Translucency 0"` exited cleanly after saving `Saved/Screenshots/wdl_staticmesh_verify_current2.png` (log: `Saved/Logs/wdl_staticmesh_verify_current2.log`). Awaiting independent verification because the default Metal translucency path is still a separate runtime issue.
+- [x] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent` — verified March 14, 2026: code review confirms `SpawnWdlTile` builds `FMeshDescription` into `UStaticMesh`/`UStaticMeshComponent` with zero `ProceduralMeshComponent` in WDL code; `WowUnrealEditor` builds (0 errors), runtime screenshot `wdl_staticmesh_verify_current2.png` shows distant terrain geometry rendering correctly
 
 ## Phase 5: Static Objects
 - [x] M2 doodad loading and mesh creation
@@ -56,8 +56,8 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] BLP texture loading for terrain, doodads, WMOs
 - [x] HISMC instancing for repeated doodads (groups by M2 model, one HISMC per unique model per tile)
 - [x] Nanite for WMO static meshes (UStaticMesh via `FMeshDescription` with Nanite enabled)
-- [ ] Complete `specs/static-mesh.md`: migrate terrain, water, WDL, and legacy fallback paths off `UProceduralMeshComponent`
-- [ ] Improve WMO placement fidelity beyond yaw-only rotation
+- [?] Complete `specs/static-mesh.md`: migrate terrain, water, WDL, and legacy fallback paths off `UProceduralMeshComponent` — March 14, 2026: all world rendering migrated to UStaticMesh/UStaticMeshComponent. Terrain LOD0 (256 polygon groups per tile), LOD1, water, WDL, and doodad legacy paths all use FMeshDescription→UStaticMesh. ProceduralMeshComponent module dependency removed from WowWorld.Build.cs. Build succeeds, runtime log confirms 25 tiles loaded with textured terrain, water meshes, LOD1 tiles, and 100 WMO groups active. Black screenshot due to pre-existing Metal translucency render crash (separate issue)
+- [?] Improve WMO placement fidelity beyond yaw-only rotation — March 14, 2026: WMO spawning now uses WowRotationToUE(Rx, Ry, Rz) for full 3-axis rotation instead of yaw-only. Build succeeds, runtime spawns WMOs (farms, walls, blacksmith) with full rotation. Awaiting visual verification
 
 ## Phase 6: Networking
 - [x] BigNumber (OpenSSL BIGNUM wrapper with LE/BE conversion)
