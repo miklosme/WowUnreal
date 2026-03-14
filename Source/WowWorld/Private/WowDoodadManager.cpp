@@ -108,9 +108,9 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
     for (int32 i = 0; i < NumVerts; ++i)
     {
         const FM2Vertex& V = Data.Vertices[i];
-        // WoW model files are RH Z-up. Keep as-is, fix handedness with winding only.
-        Vertices[i] = FVector(V.Position.X, V.Position.Y, V.Position.Z) * FWowCoordinate::SCALE;
-        Normals[i] = FVector(V.Normal.X, V.Normal.Y, V.Normal.Z);
+        // file→UE: (fileY, -fileX, fileZ) matching WowGodot's approach
+        Vertices[i] = FVector(V.Position.Y, -V.Position.X, V.Position.Z) * FWowCoordinate::SCALE;
+        Normals[i] = FVector(V.Normal.Y, -V.Normal.X, V.Normal.Z);
         Normals[i].Normalize();
         UVs[i] = V.TexCoord;
 
@@ -125,14 +125,12 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
         Tangents[i] = FProcMeshTangent(T, false);
     }
 
-    // Convert indices, reverse winding (negate X flips handedness)
+    // No winding reversal (cyclic permutation has det=+1)
     TArray<int32> Indices;
     Indices.SetNum(Data.Indices.Num());
-    for (int32 i = 0; i + 2 < Data.Indices.Num(); i += 3)
+    for (int32 i = 0; i < Data.Indices.Num(); ++i)
     {
-        Indices[i]     = static_cast<int32>(Data.Indices[i]);
-        Indices[i + 1] = static_cast<int32>(Data.Indices[i + 2]);
-        Indices[i + 2] = static_cast<int32>(Data.Indices[i + 1]);
+        Indices[i] = static_cast<int32>(Data.Indices[i]);
     }
 
     TArray<FLinearColor> EmptyColors;
@@ -233,12 +231,14 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             continue;
         }
 
-        // MDDF positions are in noggit3 space (X=east, Y=up, Z=south)
-        FVector UEPos = FWowCoordinate::NoggitToUE(
-            Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+        // MDDF positions: same MAP_ORIGIN conversion as MODF
+        float WowX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+        float WowY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+        float WowZ = Placement.Position.Y;
+        FVector UEPos = FVector(WowX, -WowY, WowZ) * FWowCoordinate::SCALE;
 
-        // Rotation: same convention as WMO
-        FRotator UERot = FRotator(-Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
+        // Rotation: (rotX, rotY-90, -rotZ) matching WowGodot
+        FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
 
         // Scale
         float ScaleVal = Placement.GetScaleFloat();

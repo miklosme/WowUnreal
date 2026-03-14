@@ -336,9 +336,11 @@ void AWowWorldManager::UpdateObjectStreaming()
             const FString& M2Path = Tile->DoodadPaths[Placement.NameIndex];
             if (M2Path.IsEmpty()) continue;
 
-            // Distance check using noggit->UE position
-            FVector UEPos = FWowCoordinate::NoggitToUE(
-                Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+            // Distance check: MDDF positions need MAP_ORIGIN conversion
+            float WX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+            float WY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+            float WZ = Placement.Position.Y;
+            FVector UEPos = FVector(WX, -WY, WZ) * FWowCoordinate::SCALE;
             float DistSq = FVector::DistSquared(CamLoc, UEPos);
             if (DistSq > DoodadRadiusSq) continue;
 
@@ -391,9 +393,11 @@ void AWowWorldManager::UpdateObjectStreaming()
             const FString& WmoPath = Tile->WmoPaths[Placement.NameIndex];
             if (WmoPath.IsEmpty()) continue;
 
-            // Distance check
-            FVector UEPos = FWowCoordinate::NoggitToUE(
-                Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+            // Distance check: MODF positions need MAP_ORIGIN conversion
+            float WX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+            float WY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+            float WZ = Placement.Position.Y;
+            FVector UEPos = FVector(WX, -WY, WZ) * FWowCoordinate::SCALE;
             float DistSq = FVector::DistSquared(CamLoc, UEPos);
             if (DistSq > WmoRadiusSq) continue;
 

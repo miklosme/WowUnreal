@@ -64,13 +64,17 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     WmoActor->SetRootComponent(RootComp);
     RootComp->RegisterComponent();
 
-    // MODF positions are in noggit3 space (X=east, Y=up, Z=south)
-    FVector UEPos = FWowCoordinate::NoggitToUE(
-        Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
-    // WoW rotation (degrees): rotY is yaw around Y-up axis.
-    // In UE Z-up: Yaw = rotY, but negated due to X negation + axis swap
-    // Pitch = rotX, Roll = rotZ
-    FRotator UERot = FRotator(-Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
+    // MODF positions are in "map coordinate" space (like WowGodot):
+    // wow_x = MAP_ORIGIN - pos[0], wow_y = MAP_ORIGIN - pos[2], wow_z = pos[1]
+    float WowX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+    float WowY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+    float WowZ = Placement.Position.Y;
+    // Convert WoW world (X=north, Y=west, Z=up) to UE (X=forward, Y=right, Z=up)
+    FVector UEPos = FVector(WowX, -WowY, WowZ) * FWowCoordinate::SCALE;
+
+    // Rotation: from WowGodot — (rotX, rotY-90, -rotZ) as YXZ euler
+    // UE uses Pitch(Y), Yaw(Z), Roll(X) but FRotator is (Pitch, Yaw, Roll)
+    FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
 
     WmoActor->SetActorLocation(UEPos);
     WmoActor->SetActorRotation(UERot);
@@ -142,14 +146,13 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WoW model files are RH Z-up (X, Y, Z)
-            // UE is LH Z-up. Keep vertices as-is, fix handedness with winding reversal only.
-            // No axis negation = no mirroring.
+            // WoW file vertices → Godot: wow_to_godot(x,y,z)=(y,z,-x), then negate Z → (y,z,x)
+            // Godot(Y-up) → UE(Z-up): UE = (godotX, -godotZ, godotY) = (fileY, -fileX, fileZ)
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(P.X, P.Y, P.Z) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(P.Y, -P.X, P.Z) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(GroupData.Normals[i].X, GroupData.Normals[i].Y, GroupData.Normals[i].Z)
+                ? FVector(GroupData.Normals[i].Y, -GroupData.Normals[i].X, GroupData.Normals[i].Z)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;
@@ -164,14 +167,12 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             Tangents[i] = FProcMeshTangent(T, false);
         }
 
-        // Convert indices from uint16 to int32, reverse winding (negate X flips handedness)
+        // Convert indices - no winding reversal needed (cyclic permutation has det=+1)
         TArray<int32> Indices;
         Indices.SetNum(GroupData.Indices.Num());
-        for (int32 i = 0; i + 2 < GroupData.Indices.Num(); i += 3)
+        for (int32 i = 0; i < GroupData.Indices.Num(); ++i)
         {
-            Indices[i]     = static_cast<int32>(GroupData.Indices[i]);
-            Indices[i + 1] = static_cast<int32>(GroupData.Indices[i + 2]);
-            Indices[i + 2] = static_cast<int32>(GroupData.Indices[i + 1]);
+            Indices[i] = static_cast<int32>(GroupData.Indices[i]);
         }
 
         // If we have batches, create one section per batch for separate materials
