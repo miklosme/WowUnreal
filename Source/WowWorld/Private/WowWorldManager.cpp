@@ -171,6 +171,21 @@ void AWowWorldManager::Tick(float DT)
 
     UpdateStreaming();
     UpdateObjectStreaming();
+
+    // Periodically purge stale cache entries and check budget
+    static int32 CachePurgeCounter = 0;
+    if (AssetCache && (++CachePurgeCounter % 20 == 0)) // every ~10 seconds at 0.5s tick
+    {
+        AssetCache->PurgeStaleEntries();
+        if (AssetCache->IsOverBudget())
+        {
+            FWowCacheStats Stats = AssetCache->GetStats();
+            UE_LOG(LogWowWorld, Warning, TEXT("Asset cache over budget: %lld MB (budget: %lld MB, %d textures, %d meshes)"),
+                Stats.TotalEstimatedMemory() / (1024 * 1024),
+                AssetCache->MemoryBudget / (1024 * 1024),
+                Stats.TextureCount, Stats.MeshCount);
+        }
+    }
 }
 
 void AWowWorldManager::LoadTile(int32 TX, int32 TY)

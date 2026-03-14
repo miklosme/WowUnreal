@@ -1,5 +1,6 @@
 #include "WowDebugHUD.h"
 #include "WowWorldManager.h"
+#include "WowAssetCache.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -45,6 +46,18 @@ void AWowDebugHUD::DrawHUD()
             WorldMgr->GetLoadedTileCount(), WorldMgr->GetPendingTileCount()));
         DrawTextLine(Y, FString::Printf(TEXT("Doodads: %d  WMO groups: %d"),
             WorldMgr->GetActiveDoodadCount(), WorldMgr->GetActiveWmoGroupCount()));
+
+        // Asset cache memory stats
+        FWowAssetCache* Cache = WorldMgr->GetAssetCache();
+        if (Cache)
+        {
+            FWowCacheStats CStats = Cache->GetStats();
+            int64 MB = CStats.TotalEstimatedMemory() / (1024 * 1024);
+            int64 BudgetMB = Cache->MemoryBudget / (1024 * 1024);
+            FLinearColor MemColor = Cache->IsOverBudget() ? FLinearColor::Red : FLinearColor::White;
+            DrawTextLine(Y, FString::Printf(TEXT("Cache: %lld MB / %lld MB (%d tex, %d mesh)"),
+                MB, BudgetMB, CStats.TextureCount, CStats.MeshCount), MemColor);
+        }
     }
     else
     {

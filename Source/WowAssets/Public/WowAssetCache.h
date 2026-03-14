@@ -2,6 +2,16 @@
 #include "CoreMinimal.h"
 class UTexture2D;
 class UStaticMesh;
+
+struct WOWASSETS_API FWowCacheStats
+{
+    int32 TextureCount = 0;
+    int32 MeshCount = 0;
+    int64 EstimatedTextureMemory = 0;
+    int64 EstimatedMeshMemory = 0;
+    int64 TotalEstimatedMemory() const { return EstimatedTextureMemory + EstimatedMeshMemory; }
+};
+
 class WOWASSETS_API FWowAssetCache
 {
 public:
@@ -10,8 +20,24 @@ public:
     void CacheMesh(const FString& Path, UStaticMesh* Mesh);
     UStaticMesh* FindMesh(const FString& Path) const;
     void Clear();
+
+    /** Remove entries whose weak pointers are no longer valid */
+    void PurgeStaleEntries();
+
+    /** Get current cache statistics */
+    FWowCacheStats GetStats() const;
+
+    /** Memory budget in bytes (default 512MB). 0 = unlimited. */
+    int64 MemoryBudget = 512 * 1024 * 1024;
+
+    /** Check if over budget and log warning */
+    bool IsOverBudget() const;
+
 private:
     mutable FCriticalSection Lock;
     TMap<FString, TWeakObjectPtr<UTexture2D>> Textures;
     TMap<FString, TWeakObjectPtr<UStaticMesh>> Meshes;
+
+    static int64 EstimateTextureMemory(UTexture2D* Tex);
+    static int64 EstimateMeshMemory(UStaticMesh* Mesh);
 };
