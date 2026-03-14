@@ -1,4 +1,8 @@
 #include "LuaApiRegistry.h"
+#include "WowEntityManager.h"
+#include "WowEntity.h"
+#include "WowConnectionManager.h"
+#include "WowUpdateFields.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -23,6 +27,29 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowLuaStub, Verbose, All);
 #define STUB_RETURN_NONE(name) \
     static int L_##name(lua_State* L) { return 0; }
 
+// Helper: resolve "player"/"target" unit strings to entity
+static FWowEntity* ResolveUnit(lua_State* L, int ArgIdx = 1)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (!Ctx || !Ctx->EntityManager) return nullptr;
+
+    const char* unit = luaL_optstring(L, ArgIdx, "player");
+
+    if (strcmp(unit, "player") == 0)
+    {
+        return Ctx->EntityManager->GetLocalPlayer();
+    }
+    if (strcmp(unit, "target") == 0 && Ctx->ConnectionManager)
+    {
+        int64 TargetGuid = Ctx->ConnectionManager->GetTargetGuid();
+        if (TargetGuid != 0)
+        {
+            return Ctx->EntityManager->Find(static_cast<uint64>(TargetGuid));
+        }
+    }
+    return nullptr;
+}
+
 // ─── Instance / Group ───────────────────────────────────────────────────────────
 STUB_RETURN_FALSE(IsInInstance)
 STUB_RETURN_ZERO(GetNumPartyMembers)
@@ -45,12 +72,13 @@ static int L_GetPlayerMapPosition(lua_State* L)
     return 2;
 }
 
-// ─── Unit API stubs ─────────────────────────────────────────────────────────────
+// ─── Unit API ─────────────────────────────────────────────────────────────────
 static int L_UnitName(lua_State* L)
 {
+    // TODO: name lookup requires NameCache (SMSG_NAME_QUERY_RESPONSE)
     const char* unit = luaL_optstring(L, 1, "player");
     if (strcmp(unit, "player") == 0)
-        lua_pushstring(L, "WowTestUser");
+        lua_pushstring(L, "Player");
     else
         lua_pushnil(L);
     return 1;
@@ -58,36 +86,57 @@ static int L_UnitName(lua_State* L)
 
 static int L_UnitLevel(lua_State* L)
 {
-    lua_pushnumber(L, 80);
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushnumber(L, Entity->GetLevel());
+    else
+        lua_pushnumber(L, 0);
     return 1;
 }
 
 static int L_UnitHealth(lua_State* L)
 {
-    lua_pushnumber(L, 100);
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushnumber(L, Entity->GetHealth());
+    else
+        lua_pushnumber(L, 0);
     return 1;
 }
 
 static int L_UnitHealthMax(lua_State* L)
 {
-    lua_pushnumber(L, 100);
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushnumber(L, Entity->GetMaxHealth());
+    else
+        lua_pushnumber(L, 0);
     return 1;
 }
 
 static int L_UnitPower(lua_State* L)
 {
-    lua_pushnumber(L, 100);
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushnumber(L, static_cast<int32>(Entity->GetField(UnitField::POWER1)));
+    else
+        lua_pushnumber(L, 0);
     return 1;
 }
 
 static int L_UnitPowerMax(lua_State* L)
 {
-    lua_pushnumber(L, 100);
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushnumber(L, static_cast<int32>(Entity->GetField(UnitField::MAXPOWER1)));
+    else
+        lua_pushnumber(L, 0);
     return 1;
 }
 
 static int L_UnitClass(lua_State* L)
 {
+    // TODO: resolve from entity class field + ChrClasses.dbc
     lua_pushstring(L, "Warrior");
     lua_pushstring(L, "WARRIOR");
     return 2;
@@ -95,24 +144,60 @@ static int L_UnitClass(lua_State* L)
 
 static int L_UnitRace(lua_State* L)
 {
+    // TODO: resolve from entity race field + ChrRaces.dbc
     lua_pushstring(L, "Human");
     lua_pushstring(L, "Human");
     return 2;
 }
 
-STUB_RETURN_FALSE(UnitIsDead)
-STUB_RETURN_TRUE(UnitIsPlayer)
+static int L_UnitIsDead(lua_State* L)
+{
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushboolean(L, Entity->GetHealth() <= 0 ? 1 : 0);
+    else
+        lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int L_UnitIsPlayer(lua_State* L)
+{
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushboolean(L, Entity->IsPlayer() ? 1 : 0);
+    else
+        lua_pushboolean(L, 0);
+    return 1;
+}
 
 static int L_UnitExists(lua_State* L)
 {
     const char* unit = luaL_optstring(L, 1, "player");
-    lua_pushboolean(L, strcmp(unit, "player") == 0 ? 1 : 0);
+    if (strcmp(unit, "player") == 0)
+    {
+        lua_pushboolean(L, 1);
+    }
+    else
+    {
+        FWowEntity* Entity = ResolveUnit(L);
+        lua_pushboolean(L, Entity ? 1 : 0);
+    }
     return 1;
 }
 
 static int L_UnitGUID(lua_State* L)
 {
-    lua_pushstring(L, "0x0000000000000001");
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+    {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "0x%016llX", static_cast<unsigned long long>(Entity->Guid));
+        lua_pushstring(L, buf);
+    }
+    else
+    {
+        lua_pushstring(L, "0x0000000000000000");
+    }
     return 1;
 }
 
@@ -141,18 +226,35 @@ static int L_GetRealmName(lua_State* L)
 // ─── Screen / resolution ────────────────────────────────────────────────────────
 static int L_GetScreenWidth(lua_State* L)
 {
+    // TODO: read from GEngine->GameViewport
     lua_pushnumber(L, 1920);
     return 1;
 }
 
 static int L_GetScreenHeight(lua_State* L)
 {
+    // TODO: read from GEngine->GameViewport
     lua_pushnumber(L, 1080);
     return 1;
 }
 
-// ─── Chat stubs ─────────────────────────────────────────────────────────────────
-STUB_RETURN_NONE(SendChatMessage)
+// ─── Chat ─────────────────────────────────────────────────────────────────────
+static int L_SendChatMessage(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        const char* msg = luaL_optstring(L, 1, "");
+        const char* chatType = luaL_optstring(L, 2, "SAY");
+        int32 Type = 1; // SAY
+        if (strcmp(chatType, "YELL") == 0) Type = 6;
+        else if (strcmp(chatType, "PARTY") == 0) Type = 2;
+        else if (strcmp(chatType, "GUILD") == 0) Type = 4;
+        Ctx->ConnectionManager->SendChatMessage(FString(msg), Type);
+    }
+    return 0;
+}
+
 STUB_RETURN_ZERO(GetNumLanguages)
 STUB_RETURN_EMPTY(GetDefaultLanguage)
 
@@ -178,11 +280,50 @@ static int L_GetContainerNumSlots(lua_State* L)
     return 1;
 }
 
-// ─── Misc stubs ─────────────────────────────────────────────────────────────────
-STUB_RETURN_NONE(TargetUnit)
-STUB_RETURN_NONE(ClearTarget)
-STUB_RETURN_FALSE(IsLoggedIn)
-STUB_RETURN_ZERO(GetFramerate)
+// ─── Target ─────────────────────────────────────────────────────────────────────
+static int L_TargetUnit(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager)
+    {
+        const char* unit = luaL_optstring(L, 1, "");
+        // TODO: resolve unit name to GUID
+    }
+    return 0;
+}
+
+static int L_ClearTarget(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        Ctx->ConnectionManager->SendSetSelection(0);
+    }
+    return 0;
+}
+
+// ─── Misc ─────────────────────────────────────────────────────────────────────
+static int L_IsLoggedIn(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        lua_pushboolean(L, Ctx->ConnectionManager->GetState() == EWowSessionState::WorldInGame ? 1 : 0);
+    }
+    else
+    {
+        lua_pushboolean(L, 0);
+    }
+    return 1;
+}
+
+static int L_GetFramerate(lua_State* L)
+{
+    float DeltaTime = FApp::GetDeltaTime();
+    lua_pushnumber(L, DeltaTime > 0.0f ? 1.0f / DeltaTime : 0.0f);
+    return 1;
+}
+
 STUB_RETURN_NONE(SetCVar)
 STUB_RETURN_NIL(GetCVar)
 STUB_RETURN_FALSE(GetCVarBool)
@@ -290,7 +431,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "SetBinding", L_SetBinding);
     lua_register(L, "SaveBindings", L_SaveBindings);
 
-    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua stubs (~50 functions)"));
+    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua API (~50 functions, entity-backed unit API)"));
 }
 
 #else
