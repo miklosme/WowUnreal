@@ -180,22 +180,22 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             int32 Center = InnerIndex(QX, QY);
 
             // 4 triangles in fan pattern around center vertex
-            // CCW winding when viewed from above = UE front face
-            Result.Indices.Add(TopLeft);
-            Result.Indices.Add(TopRight);
-            Result.Indices.Add(Center);
-
-            Result.Indices.Add(TopRight);
-            Result.Indices.Add(BottomRight);
-            Result.Indices.Add(Center);
-
-            Result.Indices.Add(BottomRight);
-            Result.Indices.Add(BottomLeft);
-            Result.Indices.Add(Center);
-
-            Result.Indices.Add(BottomLeft);
+            // CW winding when viewed from above = front face UP in UE's LH system
             Result.Indices.Add(TopLeft);
             Result.Indices.Add(Center);
+            Result.Indices.Add(TopRight);
+
+            Result.Indices.Add(TopRight);
+            Result.Indices.Add(Center);
+            Result.Indices.Add(BottomRight);
+
+            Result.Indices.Add(BottomRight);
+            Result.Indices.Add(Center);
+            Result.Indices.Add(BottomLeft);
+
+            Result.Indices.Add(BottomLeft);
+            Result.Indices.Add(Center);
+            Result.Indices.Add(TopLeft);
         }
     }
 
