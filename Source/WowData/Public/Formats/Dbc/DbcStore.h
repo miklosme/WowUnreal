@@ -12,6 +12,15 @@
 #include "Formats/Dbc/CreatureDisplayInfoDbc.h"
 #include "Formats/Dbc/CreatureModelDataDbc.h"
 #include "Formats/Dbc/ItemDisplayInfoDbc.h"
+#include "Formats/Dbc/SpellDbc.h"
+#include "Formats/Dbc/SpellVisualDbc.h"
+#include "Formats/Dbc/SpellVisualKitDbc.h"
+#include "Formats/Dbc/SoundEntriesDbc.h"
+#include "Formats/Dbc/LoadingScreensDbc.h"
+#include "Formats/Dbc/GroundEffectTextureDbc.h"
+#include "Formats/Dbc/EmotesTextDbc.h"
+#include "Formats/Dbc/TalentDbc.h"
+#include "Formats/Dbc/TalentTabDbc.h"
 
 class FMpqManager;
 
@@ -34,6 +43,15 @@ public:
     FCreatureDisplayInfoDbc& CreatureDisplayInfo() { return CreatureDisplayInfoDbc; }
     FCreatureModelDataDbc& CreatureModelData() { return CreatureModelDataDbc; }
     FItemDisplayInfoDbc& ItemDisplayInfo() { return ItemDisplayInfoDbc; }
+    FSpellDbc& Spells() { return SpellDbc; }
+    FSpellVisualDbc& SpellVisuals() { return SpellVisualDbc; }
+    FSpellVisualKitDbc& SpellVisualKits() { return SpellVisualKitDbc; }
+    FSoundEntriesDbc& SoundEntries() { return SoundEntriesDbc; }
+    FLoadingScreensDbc& LoadingScreens() { return LoadingScreensDbc; }
+    FGroundEffectTextureDbc& GroundEffectTextures() { return GroundEffectTextureDbc; }
+    FEmotesTextDbc& EmotesText() { return EmotesTextDbc; }
+    FTalentDbc& Talents() { return TalentDbc; }
+    FTalentTabDbc& TalentTabs() { return TalentTabDbc; }
 
     const FMapDbc& Maps() const { return MapDbc; }
     const FAreaTableDbc& AreaTable() const { return AreaTableDbc; }
@@ -47,6 +65,15 @@ public:
     const FCreatureDisplayInfoDbc& CreatureDisplayInfo() const { return CreatureDisplayInfoDbc; }
     const FCreatureModelDataDbc& CreatureModelData() const { return CreatureModelDataDbc; }
     const FItemDisplayInfoDbc& ItemDisplayInfo() const { return ItemDisplayInfoDbc; }
+    const FSpellDbc& Spells() const { return SpellDbc; }
+    const FSpellVisualDbc& SpellVisuals() const { return SpellVisualDbc; }
+    const FSpellVisualKitDbc& SpellVisualKits() const { return SpellVisualKitDbc; }
+    const FSoundEntriesDbc& SoundEntries() const { return SoundEntriesDbc; }
+    const FLoadingScreensDbc& LoadingScreens() const { return LoadingScreensDbc; }
+    const FGroundEffectTextureDbc& GroundEffectTextures() const { return GroundEffectTextureDbc; }
+    const FEmotesTextDbc& EmotesText() const { return EmotesTextDbc; }
+    const FTalentDbc& Talents() const { return TalentDbc; }
+    const FTalentTabDbc& TalentTabs() const { return TalentTabDbc; }
 
     bool IsLoaded() const { return bLoaded; }
 
@@ -63,5 +90,14 @@ private:
     FCreatureDisplayInfoDbc CreatureDisplayInfoDbc;
     FCreatureModelDataDbc CreatureModelDataDbc;
     FItemDisplayInfoDbc ItemDisplayInfoDbc;
+    FSpellDbc SpellDbc;
+    FSpellVisualDbc SpellVisualDbc;
+    FSpellVisualKitDbc SpellVisualKitDbc;
+    FSoundEntriesDbc SoundEntriesDbc;
+    FLoadingScreensDbc LoadingScreensDbc;
+    FGroundEffectTextureDbc GroundEffectTextureDbc;
+    FEmotesTextDbc EmotesTextDbc;
+    FTalentDbc TalentDbc;
+    FTalentTabDbc TalentTabDbc;
     bool bLoaded = false;
 };

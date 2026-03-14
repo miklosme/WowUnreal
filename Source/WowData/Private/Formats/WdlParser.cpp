@@ -1,19 +1,22 @@
 #include "Formats/WdlParser.h"
 DEFINE_LOG_CATEGORY_STATIC(LogWdl, Log, All);
 
-static constexpr uint32 MakeFourCC(char A, char B, char C, char D)
+namespace
+{
+constexpr uint32 MakeFourCC(char A, char B, char C, char D)
 {
 	return (uint32)A | ((uint32)B << 8) | ((uint32)C << 16) | ((uint32)D << 24);
 }
 
 // On-disk reversed FourCCs
-static constexpr uint32 CHUNK_MVER = MakeFourCC('R', 'E', 'V', 'M');
-static constexpr uint32 CHUNK_MWMO = MakeFourCC('O', 'M', 'W', 'M');
-static constexpr uint32 CHUNK_MWID = MakeFourCC('D', 'I', 'W', 'M');
-static constexpr uint32 CHUNK_MODF = MakeFourCC('F', 'D', 'O', 'M');
-static constexpr uint32 CHUNK_MAOF = MakeFourCC('F', 'O', 'A', 'M');
-static constexpr uint32 CHUNK_MARE = MakeFourCC('E', 'R', 'A', 'M');
-static constexpr uint32 CHUNK_MAHO = MakeFourCC('O', 'H', 'A', 'M');
+constexpr uint32 CHUNK_MVER = MakeFourCC('R', 'E', 'V', 'M');
+constexpr uint32 CHUNK_MWMO = MakeFourCC('O', 'M', 'W', 'M');
+constexpr uint32 CHUNK_MWID = MakeFourCC('D', 'I', 'W', 'M');
+constexpr uint32 CHUNK_MODF = MakeFourCC('F', 'D', 'O', 'M');
+constexpr uint32 CHUNK_MAOF = MakeFourCC('F', 'O', 'A', 'M');
+constexpr uint32 CHUNK_MARE = MakeFourCC('E', 'R', 'A', 'M');
+constexpr uint32 CHUNK_MAHO = MakeFourCC('O', 'H', 'A', 'M');
+}
 
 FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 {

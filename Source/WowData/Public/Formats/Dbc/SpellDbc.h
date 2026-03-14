@@ -1,0 +1,70 @@
+#pragma once
+#include "CoreMinimal.h"
+#include "Formats/DbcParser.h"
+
+struct FSpellDbcEntry
+{
+    uint32 ID;
+    uint32 Category;
+    uint32 Dispel;
+    uint32 Mechanic;
+    uint32 Attributes;
+    uint32 AttributesEx;
+    uint32 AttributesEx2;
+    uint32 AttributesEx3;
+    uint32 AttributesEx4;
+    uint32 AttributesEx5;
+    uint32 AttributesEx6;
+    uint32 AttributesEx7;
+    uint64 Stances;
+    uint64 StancesNot;
+    uint32 Targets;
+    uint32 TargetCreatureType;
+    uint32 RequiresSpellFocus;
+    uint32 FacingCasterFlags;
+    uint32 CasterAuraState;
+    uint32 TargetAuraState;
+    uint32 CastingTimeIndex;
+    uint32 RecoveryTime;
+    uint32 CategoryRecoveryTime;
+    uint32 MaxLevel;
+    uint32 BaseLevel;
+    uint32 SpellLevel;
+    uint32 DurationIndex;
+    uint32 PowerType;
+    uint32 ManaCost;
+    uint32 RangeIndex;
+    float Speed;
+    uint32 StackAmount;
+    uint32 Effect[3];
+    int32 EffectBasePoints[3];
+    uint32 EffectImplicitTargetA[3];
+    uint32 EffectImplicitTargetB[3];
+    uint32 EffectApplyAuraName[3];
+    int32 EffectMiscValue[3];
+    uint32 EffectTriggerSpell[3];
+    uint32 SpellVisual[2];
+    uint32 SpellIconID;
+    uint32 ActiveIconID;
+    FString SpellName;
+    FString Rank;
+    FString Description;
+    FString ToolTip;
+    uint32 ManaCostPercentage;
+    uint32 SpellFamilyName;
+    uint32 DmgClass;
+    uint32 SchoolMask;
+};
+
+class WOWDATA_API FSpellDbc
+{
+public:
+    bool Load(const FDbcParser& Parser);
+    const FSpellDbcEntry* GetById(uint32 ID) const;
+    const TArray<FSpellDbcEntry>& GetAll() const { return Entries; }
+    int32 Num() const { return Entries.Num(); }
+
+private:
+    TArray<FSpellDbcEntry> Entries;
+    TMap<uint32, int32> IdIndex;
+};

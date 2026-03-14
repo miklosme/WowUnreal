@@ -222,7 +222,111 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    // --- Tier 2 DBC tables ---
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\Spell.dbc"), Parser))
+    {
+        SpellDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, SpellDbc.Num()); ++i)
+        {
+            const FSpellDbcEntry& E = SpellDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  Spell[%d]: ID=%d Name='%s' School=%d Level=%d"),
+                i, E.ID, *E.SpellName, E.SchoolMask, E.SpellLevel);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellVisual.dbc"), Parser))
+    {
+        SpellVisualDbc.Load(Parser);
+        ++Loaded;
+
+        UE_LOG(LogDbcStore, Log, TEXT("  SpellVisual: %d records"), SpellVisualDbc.Num());
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellVisualKit.dbc"), Parser))
+    {
+        SpellVisualKitDbc.Load(Parser);
+        ++Loaded;
+
+        UE_LOG(LogDbcStore, Log, TEXT("  SpellVisualKit: %d records"), SpellVisualKitDbc.Num());
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SoundEntries.dbc"), Parser))
+    {
+        SoundEntriesDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, SoundEntriesDbc.Num()); ++i)
+        {
+            const FSoundEntriesDbcEntry& E = SoundEntriesDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  SoundEntries[%d]: ID=%d Name='%s' Type=%d"),
+                i, E.ID, *E.Name, E.SoundType);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\LoadingScreens.dbc"), Parser))
+    {
+        LoadingScreensDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, LoadingScreensDbc.Num()); ++i)
+        {
+            const FLoadingScreensDbcEntry& E = LoadingScreensDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  LoadingScreens[%d]: ID=%d Name='%s' File='%s'"),
+                i, E.ID, *E.Name, *E.FileName);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\GroundEffectTexture.dbc"), Parser))
+    {
+        GroundEffectTextureDbc.Load(Parser);
+        ++Loaded;
+
+        UE_LOG(LogDbcStore, Log, TEXT("  GroundEffectTexture: %d records"), GroundEffectTextureDbc.Num());
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\EmotesText.dbc"), Parser))
+    {
+        EmotesTextDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, EmotesTextDbc.Num()); ++i)
+        {
+            const FEmotesTextDbcEntry& E = EmotesTextDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  EmotesText[%d]: ID=%d Name='%s' EmoteID=%d"),
+                i, E.ID, *E.Name, E.EmoteID);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\Talent.dbc"), Parser))
+    {
+        TalentDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, TalentDbc.Num()); ++i)
+        {
+            const FTalentDbcEntry& E = TalentDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  Talent[%d]: ID=%d Tab=%d Row=%d Col=%d Rank0=%d"),
+                i, E.TalentID, E.TalentTab, E.Row, E.Col, E.RankID[0]);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\TalentTab.dbc"), Parser))
+    {
+        TalentTabDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, TalentTabDbc.Num()); ++i)
+        {
+            const FTalentTabDbcEntry& E = TalentTabDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  TalentTab[%d]: ID=%d Name='%s' ClassMask=%d Page=%d"),
+                i, E.TalentTabID, *E.Name, E.ClassMask, E.TabPage);
+        }
+    }
+
     bLoaded = Loaded > 0;
-    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/12 DBC tables"), Loaded);
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/21 DBC tables"), Loaded);
     return bLoaded;
 }

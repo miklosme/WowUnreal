@@ -2,10 +2,12 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWmo, Log, All);
 
+namespace
+{
 // Helper to build a FourCC uint32 from a 4-char string literal.
 // WoW chunk magics are stored reversed in the file, e.g. "MOHD" is stored as 'D','H','O','M'.
 // We define the expected uint32 value as it appears when read as a little-endian uint32.
-static constexpr uint32 MakeFourCC(char A, char B, char C, char D)
+constexpr uint32 MakeFourCC(char A, char B, char C, char D)
 {
     return static_cast<uint32>(A)
         | (static_cast<uint32>(B) << 8)
@@ -14,29 +16,27 @@ static constexpr uint32 MakeFourCC(char A, char B, char C, char D)
 }
 
 // Root chunks — REVERSED order, as stored on disk (little-endian uint32 read)
-static constexpr uint32 CHUNK_MVER = MakeFourCC('R','E','V','M');
-static constexpr uint32 CHUNK_MOHD = MakeFourCC('D','H','O','M');
-static constexpr uint32 CHUNK_MOTX = MakeFourCC('X','T','O','M');
-static constexpr uint32 CHUNK_MOMT = MakeFourCC('T','M','O','M');
-static constexpr uint32 CHUNK_MOGN = MakeFourCC('N','G','O','M');
-static constexpr uint32 CHUNK_MOGI = MakeFourCC('I','G','O','M');
-static constexpr uint32 CHUNK_MODS = MakeFourCC('S','D','O','M');
-static constexpr uint32 CHUNK_MODN = MakeFourCC('N','D','O','M');
-static constexpr uint32 CHUNK_MODD = MakeFourCC('D','D','O','M');
+constexpr uint32 CHUNK_MVER = MakeFourCC('R','E','V','M');
+constexpr uint32 CHUNK_MOHD = MakeFourCC('D','H','O','M');
+constexpr uint32 CHUNK_MOTX = MakeFourCC('X','T','O','M');
+constexpr uint32 CHUNK_MOMT = MakeFourCC('T','M','O','M');
+constexpr uint32 CHUNK_MOGN = MakeFourCC('N','G','O','M');
+constexpr uint32 CHUNK_MOGI = MakeFourCC('I','G','O','M');
+constexpr uint32 CHUNK_MODS = MakeFourCC('S','D','O','M');
+constexpr uint32 CHUNK_MODN = MakeFourCC('N','D','O','M');
+constexpr uint32 CHUNK_MODD = MakeFourCC('D','D','O','M');
 
 // Group chunks — REVERSED order, as stored on disk (little-endian uint32 read)
-static constexpr uint32 CHUNK_MOGP = MakeFourCC('P','G','O','M');
-static constexpr uint32 CHUNK_MOPY = MakeFourCC('Y','P','O','M');
-static constexpr uint32 CHUNK_MOVI = MakeFourCC('I','V','O','M');
-static constexpr uint32 CHUNK_MOVT = MakeFourCC('T','V','O','M');
-static constexpr uint32 CHUNK_MONR = MakeFourCC('R','N','O','M');
-static constexpr uint32 CHUNK_MOTV = MakeFourCC('V','T','O','M');
-static constexpr uint32 CHUNK_MOBA = MakeFourCC('A','B','O','M');
-static constexpr uint32 CHUNK_MOCV = MakeFourCC('V','C','O','M');
+constexpr uint32 CHUNK_MOGP = MakeFourCC('P','G','O','M');
+constexpr uint32 CHUNK_MOPY = MakeFourCC('Y','P','O','M');
+constexpr uint32 CHUNK_MOVI = MakeFourCC('I','V','O','M');
+constexpr uint32 CHUNK_MOVT = MakeFourCC('T','V','O','M');
+constexpr uint32 CHUNK_MONR = MakeFourCC('R','N','O','M');
+constexpr uint32 CHUNK_MOTV = MakeFourCC('V','T','O','M');
+constexpr uint32 CHUNK_MOBA = MakeFourCC('A','B','O','M');
+constexpr uint32 CHUNK_MOCV = MakeFourCC('V','C','O','M');
 
 // Safe read helpers
-namespace
-{
     template<typename T>
     FORCEINLINE T ReadVal(const uint8* Base, uint32& Offset, uint32 DataSize)
     {
