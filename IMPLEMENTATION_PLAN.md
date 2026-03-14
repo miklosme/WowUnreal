@@ -116,14 +116,26 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Fix WMO building rotation/placement: corrected WowRotationToUE in WowCoordinate.h from FRotator(RX, -RZ, RY) to FRotator(RY - 90.0f, RX, -RZ) — adds critical -90° pitch offset and fixes axis mapping per noggit3 from_model_rotation reference; builds and renders March 14, 2026
 - [x] Add collision to terrain meshes: enabled complex-as-simple collision on terrain UStaticMesh via BodySetup->CollisionTraceFlag = CTF_UseComplexAsSimple, bAllowCpuAccess = true, SetCollisionEnabled(QueryAndPhysics), SetCollisionObjectType(WorldStatic), SetCollisionResponseToAllChannels(Block); builds and renders March 14, 2026
 
-## Phase 11: Test Scenes
-The full world terrain map is too heavy and slow for testing isolated features. Each major system needs a lightweight dedicated test scene.
-- [x] Create a character/animation test scene: `-testscene=character` — spawns flat ground plane with collision, directional light, MPQ-only world manager (no terrain loading); validated with screenshot March 14, 2026
-- [x] Create a UI test scene: `-testscene=ui` — spawns ground plane, directional light, MPQ-only world manager, boots Lua VM + FrameXML via UIManager->LoadUI; validated with build March 14, 2026
-- [x] Create a single-tile terrain test scene: `-testscene=terrain` — loads 3x3 tile grid around startup tile with sky manager, disables streaming so no further tiles load; validated with screenshot March 14, 2026
-- [x] Create a WMO test scene: `-testscene=wmo` — loads 3x3 tile grid with WMOs, directional light, disables streaming; validated with build March 14, 2026
-- [ ] Create a networking test scene: no-render headless level that connects to the test server — for testing auth handshake, world login, packet handling, and entity updates without any rendering overhead
-- [x] Add a scene selector or launch arg (`-testscene=X`): implemented in WowViewerGameMode::BeginPlay with 5 modes (default, character, terrain, wmo, ui); WowWorldManager::BeginPlay checks `-testscene=` to skip terrain or disable streaming; validated with build + runtime March 14, 2026
+## Phase 11: Maps & Test Scenes
+The project needs proper UE `.umap` levels instead of running everything through one GameMode with command-line switches. Each map gets its own GameMode subclass that only spawns what's needed.
+
+### Production Map
+- [ ] Create `WowWorld` map (`Content/Maps/WowWorld.umap`): the main game map — full terrain streaming, sky manager, networking, UI, audio. Set as `GameDefaultMap` in DefaultEngine.ini. Uses the full `AWowViewerGameMode`.
+
+### Test Maps
+- [ ] Create `TerrainTest` map (`Content/Maps/TerrainTest.umap`): loads a 3x3 tile grid around a fixed ADT (e.g. Elwynn 32,48), sky manager, no UI, no networking, no streaming beyond the initial tiles. For testing terrain textures, splat materials, water, doodad/WMO placement.
+- [ ] Create `CharacterTest` map (`Content/Maps/CharacterTest.umap`): flat ground plane with collision, fixed directional light, spawns test character models (Human M/F, Orc M). For testing M2 skeletal mesh, animations, equipment attachment. No terrain streaming.
+- [ ] Create `AnimationTest` map (`Content/Maps/AnimationTest.umap`): flat ground with collision, fixed light, spawns a single M2 model with animation controls (play/pause/scrub). For developing and debugging USkeleton/UAnimSequence playback.
+- [ ] Create `MobTest` map (`Content/Maps/MobTest.umap`): flat ground with collision, spawns creature models from CreatureDisplayInfo.dbc, networking enabled to receive SMSG_UPDATE_OBJECT entity spawns. For testing NPC rendering and entity sync.
+- [ ] Create `WmoTest` map (`Content/Maps/WmoTest.umap`): empty level that loads a single WMO (e.g. Goldshire inn or Stormwind gate). For testing WMO rotation, portal culling, interior lighting, and liquid in isolation.
+- [ ] Create `UITest` map (`Content/Maps/UITest.umap`): minimal ground plane, boots Lua VM + FrameXML + addons. No terrain, no networking. For testing frame layout, event dispatch, Lua API, and addon compatibility.
+- [ ] Create `NetworkTest` map (`Content/Maps/NetworkTest.umap`): headless-friendly level, connects to test server, logs packet traffic. No rendering. For testing auth, world login, packet handling, entity updates.
+- [ ] Create `StreamingTest` map (`Content/Maps/StreamingTest.umap`): full terrain streaming with fly camera, performance HUD, memory budget overlay. No UI, no networking. For profiling tile load/unload, LOD transitions, WDL distant terrain.
+
+### Infrastructure
+- [ ] Create a base `AWowTestGameMode` that sets up MpqManager + fly camera but no UI/networking — test maps inherit from this
+- [ ] Add map selector to run scripts: `./run_terrain.sh`, `./run_character.sh`, etc. each pass the correct map path via command line
+- [ ] Update DefaultEngine.ini `GameDefaultMap` to point to `WowWorld` map once it exists
 
 ## Phase 12: Character / Audio / Gameplay (use character test scene)
 - [x] Implement character rendering + equipment system: added M2 attachment point + submesh parsing to M2Parser, created WowCharacterBuilder (race/gender model loading via ChrRaces.dbc, creature display ID loading), WowCharacterTexture (skin texture from CharSections.dbc), WowEquipmentManager (weapon M2 loading and bone attachment); character test scene spawns Human M/F + Orc M models; builds and renders March 14, 2026

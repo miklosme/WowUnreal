@@ -641,6 +641,7 @@ void AWowWorldManager::LoadTile(int32 TX, int32 TY)
     // Spawn terrain tile actor
     FActorSpawnParameters SpawnParams;
     SpawnParams.Name = *FString::Printf(TEXT("TerrainTile_%d_%d"), TX, TY);
+    SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
     AWowTerrainTile* Tile = GetWorld()->SpawnActor<AWowTerrainTile>(AWowTerrainTile::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
     if (Tile)
     {
@@ -713,6 +714,7 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
 
     FActorSpawnParameters SpawnParams;
     SpawnParams.Name = *FString::Printf(TEXT("TerrainTile_%d_%d"), TX, TY);
+    SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
     AWowTerrainTile* Tile = GetWorld()->SpawnActor<AWowTerrainTile>(AWowTerrainTile::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
     if (Tile)
     {
@@ -1097,6 +1099,7 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     // Spawn actor with UStaticMeshComponent
     FActorSpawnParameters SpawnParams;
     SpawnParams.Name = *FString::Printf(TEXT("WdlTile_%d_%d"), TX, TY);
+    SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
     AActor* WdlActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
     if (!WdlActor) { return; }
 
@@ -1188,6 +1191,7 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
 
     FActorSpawnParameters SpawnParams;
     SpawnParams.Name = *FString::Printf(TEXT("Lod1Tile_%d_%d"), TX, TY);
+    SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
     AActor* Lod1Actor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), TileCenter, FRotator::ZeroRotator, SpawnParams);
     if (!Lod1Actor) return;
 
