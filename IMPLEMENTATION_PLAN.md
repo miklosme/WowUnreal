@@ -83,7 +83,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] XML parsing for FrameXML files, includes, scripts, and frame definitions
 - [x] SavedVariables persistence (Lua table serializer, WTF-style directory layout)
 - [?] Apply template inheritance and frame creation from parsed XML into runtime widgets — ResolveInherits() parses comma-separated template names, MergeTemplate() merges attributes/layers/scripts/children with override semantics, ApplyAnchors() maps WoW 9-point anchors to UMG canvas slots; builds
-- [ ] Complete widget mapping and anchor/layout/strata behavior in `FWowFrameManager`
+- [?] Complete widget mapping and anchor/layout/strata behavior in `FWowFrameManager` — strata z-ordering (1000 per level + frameLevel), 9-point anchor system, two-anchor stretch, setAllPoints fill, widget type mapping (Button, EditBox, StatusBar, Slider, Frame→Canvas); builds
 - [ ] Replace hardcoded Lua API stubs with real implementations (`Source/WowUI/Private/LuaApi/LuaStubs.cpp`)
 - [ ] Wire event dispatch to Lua `OnEvent`/`SetScript` handlers (`FWowEventSystem::FireEvent` currently only logs)
 - [ ] Add the frame methods and WoW UI API surface needed by FrameXML/addons (`CreateFrame`, `SetPoint`, `RegisterEvent`, `CreateTexture`, `CreateFontString`, unit/chat/item/spell/action APIs)

@@ -297,7 +297,14 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def)
 	}
 
 	// Add to root canvas
-	Canvas->AddChildToCanvas(Widget);
+	UCanvasPanelSlot* Slot = Canvas->AddChildToCanvas(Widget);
+
+	// Apply strata z-ordering (1000 per strata level + frame level offset)
+	if (Slot)
+	{
+		int32 ZOrder = static_cast<int32>(Def.Strata) * 1000 + Def.FrameLevel;
+		Slot->SetZOrder(ZOrder);
+	}
 
 	// Apply anchor positioning
 	ApplyAnchors(Widget, Def);
