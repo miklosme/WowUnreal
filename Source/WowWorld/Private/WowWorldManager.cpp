@@ -9,6 +9,10 @@
 #include "Formats/WdlTypes.h"
 #include "ProceduralMeshComponent.h"
 #include "Coord/WowCoordinate.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "MeshDescription.h"
+#include "StaticMeshAttributes.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -218,152 +222,87 @@ void ComputeSectionNormals(const TArray<FVector>& Vertices, const TArray<int32>&
     }
 }
 
-int32 AddWdlTransitionSection(
-    UProceduralMeshComponent* Mesh,
-    int32 SectionIndex,
+void BuildWdlTransitionGeometry(
     const FWdlTileData& TileData,
     int32 TX,
     int32 TY,
     uint8 Edge,
     const TArray<float>& OuterHeights,
-    UMaterialInterface* Material)
+    TArray<FVector>& OutVertices,
+    TArray<int32>& OutIndices,
+    TArray<FVector2D>& OutUVs)
 {
-    if (!Mesh || OuterHeights.Num() != WdlTransitionSamples)
-    {
-        return SectionIndex;
-    }
+    if (OuterHeights.Num() != WdlTransitionSamples) return;
 
-    TArray<FVector> Vertices;
-    TArray<int32> Indices;
-    TArray<FVector> Normals;
-    TArray<FVector2D> UVs;
-    TArray<FLinearColor> Colors;
-    TArray<FProcMeshTangent> Tangents;
-
-    Vertices.Reserve(WdlTransitionSamples * 2);
-    UVs.Reserve(WdlTransitionSamples * 2);
-    Indices.Reserve((WdlTransitionSamples - 1) * 6);
+    const int32 BaseVertex = OutVertices.Num();
 
     const float TileNgX = TX * FWowCoordinate::TILE_SIZE;
     const float TileNgZ = TY * FWowCoordinate::TILE_SIZE;
     const float FineStep = FWowCoordinate::UNIT_SIZE;
     const float CoarseStep = FWowCoordinate::CHUNK_SIZE;
 
+    // Outer row
     for (int32 SampleIndex = 0; SampleIndex < WdlTransitionSamples; ++SampleIndex)
     {
         const float Offset = SampleIndex * FineStep;
+        float OuterX = TileNgX, OuterZ = TileNgZ;
 
-        float OuterX = TileNgX;
-        float OuterZ = TileNgZ;
-        float InnerX = TileNgX;
-        float InnerZ = TileNgZ;
+        switch (Edge)
+        {
+        case WdlTransition_North: OuterX += Offset; break;
+        case WdlTransition_South: OuterX += Offset; OuterZ += FWowCoordinate::TILE_SIZE; break;
+        case WdlTransition_West:  OuterZ += Offset; break;
+        case WdlTransition_East:  OuterX += FWowCoordinate::TILE_SIZE; OuterZ += Offset; break;
+        default: return;
+        }
+
+        FVector V = FWowCoordinate::AdtToUE(OuterX, OuterHeights[SampleIndex], OuterZ);
+        V.Z -= WdlTransitionDepthOffset;
+        OutVertices.Add(V);
+        OutUVs.Add(FVector2D(static_cast<float>(SampleIndex) / (WdlTransitionSamples - 1), 0.0f));
+    }
+
+    // Inner row
+    for (int32 SampleIndex = 0; SampleIndex < WdlTransitionSamples; ++SampleIndex)
+    {
+        const float Offset = SampleIndex * FineStep;
+        float InnerX = TileNgX, InnerZ = TileNgZ;
         float InnerHeight = 0.0f;
 
         switch (Edge)
         {
         case WdlTransition_North:
-            OuterX += Offset;
-            InnerX += Offset;
-            InnerZ += CoarseStep;
-            InnerHeight = SampleWdlRowHeight(TileData, 1, SampleIndex);
-            break;
+            InnerX += Offset; InnerZ += CoarseStep;
+            InnerHeight = SampleWdlRowHeight(TileData, 1, SampleIndex); break;
         case WdlTransition_South:
-            OuterX += Offset;
-            OuterZ += FWowCoordinate::TILE_SIZE;
-            InnerX += Offset;
-            InnerZ += FWowCoordinate::TILE_SIZE - CoarseStep;
-            InnerHeight = SampleWdlRowHeight(TileData, 15, SampleIndex);
-            break;
+            InnerX += Offset; InnerZ += FWowCoordinate::TILE_SIZE - CoarseStep;
+            InnerHeight = SampleWdlRowHeight(TileData, 15, SampleIndex); break;
         case WdlTransition_West:
-            OuterZ += Offset;
-            InnerX += CoarseStep;
-            InnerZ += Offset;
-            InnerHeight = SampleWdlColumnHeight(TileData, 1, SampleIndex);
-            break;
+            InnerX += CoarseStep; InnerZ += Offset;
+            InnerHeight = SampleWdlColumnHeight(TileData, 1, SampleIndex); break;
         case WdlTransition_East:
-            OuterX += FWowCoordinate::TILE_SIZE;
-            OuterZ += Offset;
-            InnerX += FWowCoordinate::TILE_SIZE - CoarseStep;
-            InnerZ += Offset;
-            InnerHeight = SampleWdlColumnHeight(TileData, 15, SampleIndex);
-            break;
-        default:
-            return SectionIndex;
+            InnerX += FWowCoordinate::TILE_SIZE - CoarseStep; InnerZ += Offset;
+            InnerHeight = SampleWdlColumnHeight(TileData, 15, SampleIndex); break;
+        default: return;
         }
 
-        FVector OuterVertex = FWowCoordinate::AdtToUE(OuterX, OuterHeights[SampleIndex], OuterZ);
-        FVector InnerVertex = FWowCoordinate::AdtToUE(InnerX, InnerHeight, InnerZ);
-        OuterVertex.Z -= WdlTransitionDepthOffset;
-        InnerVertex.Z -= WdlTransitionDepthOffset;
-
-        Vertices.Add(OuterVertex);
-        UVs.Add(FVector2D(static_cast<float>(SampleIndex) / (WdlTransitionSamples - 1), 0.0f));
+        FVector V = FWowCoordinate::AdtToUE(InnerX, InnerHeight, InnerZ);
+        V.Z -= WdlTransitionDepthOffset;
+        OutVertices.Add(V);
+        OutUVs.Add(FVector2D(static_cast<float>(SampleIndex) / (WdlTransitionSamples - 1), 1.0f));
     }
 
-    for (int32 SampleIndex = 0; SampleIndex < WdlTransitionSamples; ++SampleIndex)
-    {
-        const float Offset = SampleIndex * FineStep;
-
-        float InnerX = TileNgX;
-        float InnerZ = TileNgZ;
-        float InnerHeight = 0.0f;
-
-        switch (Edge)
-        {
-        case WdlTransition_North:
-            InnerX += Offset;
-            InnerZ += CoarseStep;
-            InnerHeight = SampleWdlRowHeight(TileData, 1, SampleIndex);
-            break;
-        case WdlTransition_South:
-            InnerX += Offset;
-            InnerZ += FWowCoordinate::TILE_SIZE - CoarseStep;
-            InnerHeight = SampleWdlRowHeight(TileData, 15, SampleIndex);
-            break;
-        case WdlTransition_West:
-            InnerX += CoarseStep;
-            InnerZ += Offset;
-            InnerHeight = SampleWdlColumnHeight(TileData, 1, SampleIndex);
-            break;
-        case WdlTransition_East:
-            InnerX += FWowCoordinate::TILE_SIZE - CoarseStep;
-            InnerZ += Offset;
-            InnerHeight = SampleWdlColumnHeight(TileData, 15, SampleIndex);
-            break;
-        default:
-            return SectionIndex;
-        }
-
-        FVector InnerVertex = FWowCoordinate::AdtToUE(InnerX, InnerHeight, InnerZ);
-        InnerVertex.Z -= WdlTransitionDepthOffset;
-        Vertices.Add(InnerVertex);
-        UVs.Add(FVector2D(static_cast<float>(SampleIndex) / (WdlTransitionSamples - 1), 1.0f));
-    }
-
+    // Triangles
     for (int32 SampleIndex = 0; SampleIndex < WdlTransitionSamples - 1; ++SampleIndex)
     {
-        const int32 TopLeft = SampleIndex;
-        const int32 TopRight = SampleIndex + 1;
-        const int32 BottomLeft = WdlTransitionSamples + SampleIndex;
-        const int32 BottomRight = BottomLeft + 1;
+        const int32 TL = BaseVertex + SampleIndex;
+        const int32 TR = BaseVertex + SampleIndex + 1;
+        const int32 BL = BaseVertex + WdlTransitionSamples + SampleIndex;
+        const int32 BR = BL + 1;
 
-        Indices.Add(TopLeft);
-        Indices.Add(BottomLeft);
-        Indices.Add(TopRight);
-
-        Indices.Add(TopRight);
-        Indices.Add(BottomLeft);
-        Indices.Add(BottomRight);
+        OutIndices.Add(TL); OutIndices.Add(BL); OutIndices.Add(TR);
+        OutIndices.Add(TR); OutIndices.Add(BL); OutIndices.Add(BR);
     }
-
-    ComputeSectionNormals(Vertices, Indices, Normals);
-    Mesh->CreateMeshSection_LinearColor(SectionIndex, Vertices, Indices, Normals, UVs, Colors, Tangents, false);
-    if (Material)
-    {
-        Mesh->SetMaterial(SectionIndex, Material);
-    }
-
-    return SectionIndex + 1;
 }
 }
 
@@ -495,10 +434,15 @@ void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
     }
     LoadedTiles.Empty();
 
-    // Destroy WDL tiles
+    // Destroy WDL tiles and release their static meshes
     for (auto& Pair : WdlTiles)
     {
-        if (Pair.Value) Pair.Value->Destroy();
+        if (Pair.Value)
+        {
+            UStaticMeshComponent* SMC = Pair.Value->FindComponentByClass<UStaticMeshComponent>();
+            if (SMC && SMC->GetStaticMesh()) SMC->GetStaticMesh()->RemoveFromRoot();
+            Pair.Value->Destroy();
+        }
     }
     WdlTiles.Empty();
 
@@ -854,7 +798,16 @@ void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
     for (int64 Key : ToUnload)
     {
         TObjectPtr<AActor>* Found = WdlTiles.Find(Key);
-        if (Found && *Found) (*Found)->Destroy();
+        if (Found && *Found)
+        {
+            // Release the UStaticMesh from root before destroying actor
+            UStaticMeshComponent* SMC = (*Found)->FindComponentByClass<UStaticMeshComponent>();
+            if (SMC && SMC->GetStaticMesh())
+            {
+                SMC->GetStaticMesh()->RemoveFromRoot();
+            }
+            (*Found)->Destroy();
+        }
         WdlTiles.Remove(Key);
     }
 }
@@ -868,17 +821,12 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     // Build a 17x17 mesh from WDL heights
     TArray<FVector> Vertices;
     TArray<int32> Indices;
-    TArray<FVector> Normals;
     TArray<FVector2D> UVs;
 
     Vertices.Reserve(17 * 17);
     UVs.Reserve(17 * 17);
 
-    // WDL height_17 covers the full tile in a 17x17 grid
-    // Each step = TILE_SIZE / 16
     float StepSize = FWowCoordinate::TILE_SIZE / 16.0f;
-
-    // Tile origin in ADT space: NgX = TX * TILE_SIZE, NgZ = TY * TILE_SIZE
     float TileNgX = TX * FWowCoordinate::TILE_SIZE;
     float TileNgZ = TY * FWowCoordinate::TILE_SIZE;
 
@@ -889,46 +837,72 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
             float NgX = TileNgX + Col * StepSize;
             float NgZ = TileNgZ + Row * StepSize;
             float NgY = (float)TileData.Height17[Row][Col];
-
-            FVector UEPos = FWowCoordinate::AdtToUE(NgX, NgY, NgZ);
-
-            Vertices.Add(UEPos);
+            Vertices.Add(FWowCoordinate::AdtToUE(NgX, NgY, NgZ));
             UVs.Add(FVector2D((float)Col / 16.0f, (float)Row / 16.0f));
         }
     }
 
-    // Build triangle indices (two triangles per quad)
     Indices.Reserve(16 * 16 * 6);
     for (int32 Row = 0; Row < 16; Row++)
     {
         for (int32 Col = 0; Col < 16; Col++)
         {
-            // Skip holes from MAHO data
-            if (TileData.IsHole(Col, Row))
-                continue;
-
+            if (TileData.IsHole(Col, Row)) continue;
             int32 TL = Row * 17 + Col;
             int32 TR = TL + 1;
             int32 BL = TL + 17;
             int32 BR = BL + 1;
-
-            Indices.Add(TL);
-            Indices.Add(BL);
-            Indices.Add(TR);
-
-            Indices.Add(TR);
-            Indices.Add(BL);
-            Indices.Add(BR);
+            Indices.Add(TL); Indices.Add(BL); Indices.Add(TR);
+            Indices.Add(TR); Indices.Add(BL); Indices.Add(BR);
         }
     }
 
-    // Compute flat normals per vertex (simple average of adjacent face normals)
+    // Append transition strip geometry into the same vertex/index arrays
+    int32 TransitionSectionCount = 0;
+    const uint8 TransitionEdges = DetermineWdlTransitionEdges(WdtData.Get(), LastCameraTile, LoadRadius, Lod1Radius, TX, TY);
+    if (TransitionEdges != 0)
+    {
+        FAdtData TransitionAdtData;
+        if (LoadTileAdtForTransition(MpqManager.Get(), MapName, WdtData ? WdtData->bUseBigAlpha : false, TX, TY, TransitionAdtData))
+        {
+            TArray<float> EdgeHeights;
+            if ((TransitionEdges & WdlTransition_North) != 0)
+            {
+                BuildNorthEdgeHeights(TransitionAdtData, EdgeHeights);
+                BuildWdlTransitionGeometry(TileData, TX, TY, WdlTransition_North, EdgeHeights, Vertices, Indices, UVs);
+                TransitionSectionCount++;
+            }
+            if ((TransitionEdges & WdlTransition_South) != 0)
+            {
+                BuildSouthEdgeHeights(TransitionAdtData, EdgeHeights);
+                BuildWdlTransitionGeometry(TileData, TX, TY, WdlTransition_South, EdgeHeights, Vertices, Indices, UVs);
+                TransitionSectionCount++;
+            }
+            if ((TransitionEdges & WdlTransition_West) != 0)
+            {
+                BuildWestEdgeHeights(TransitionAdtData, EdgeHeights);
+                BuildWdlTransitionGeometry(TileData, TX, TY, WdlTransition_West, EdgeHeights, Vertices, Indices, UVs);
+                TransitionSectionCount++;
+            }
+            if ((TransitionEdges & WdlTransition_East) != 0)
+            {
+                BuildEastEdgeHeights(TransitionAdtData, EdgeHeights);
+                BuildWdlTransitionGeometry(TileData, TX, TY, WdlTransition_East, EdgeHeights, Vertices, Indices, UVs);
+                TransitionSectionCount++;
+            }
+        }
+    }
+
+    if (Indices.Num() == 0) return;
+
+    // Compute normals
+    TArray<FVector> Normals;
     Normals.SetNumZeroed(Vertices.Num());
     for (int32 i = 0; i < Indices.Num(); i += 3)
     {
-        FVector& V0 = Vertices[Indices[i]];
-        FVector& V1 = Vertices[Indices[i + 1]];
-        FVector& V2 = Vertices[Indices[i + 2]];
+        const FVector& V0 = Vertices[Indices[i]];
+        const FVector& V1 = Vertices[Indices[i + 1]];
+        const FVector& V2 = Vertices[Indices[i + 2]];
         FVector FaceNormal = FVector::CrossProduct(V1 - V0, V2 - V0).GetSafeNormal();
         Normals[Indices[i]] += FaceNormal;
         Normals[Indices[i + 1]] += FaceNormal;
@@ -936,82 +910,99 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     }
     for (FVector& N : Normals) N = N.GetSafeNormal();
 
-    // Spawn actor with ProceduralMeshComponent
-    FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = *FString::Printf(TEXT("WdlTile_%d_%d"), TX, TY);
-    AActor* WdlActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-    if (!WdlActor) return;
+    // Build UStaticMesh from FMeshDescription
+    UStaticMesh* SM = NewObject<UStaticMesh>();
+    SM->AddToRoot();
 
-    UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(WdlActor, TEXT("WdlMesh"));
-    Mesh->RegisterComponent();
-    WdlActor->SetRootComponent(Mesh);
+    FMeshDescription MeshDesc;
+    FStaticMeshAttributes Attributes(MeshDesc);
+    Attributes.Register();
 
-    TArray<FVector2D> EmptyUV2;
-    TArray<FLinearColor> EmptyColors;
-    TArray<FProcMeshTangent> EmptyTangents;
+    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
+    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
+    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
 
-    Mesh->CreateMeshSection_LinearColor(0, Vertices, Indices, Normals, UVs, EmptyColors, EmptyTangents, false);
+    FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+    MeshDesc.ReserveNewVertices(Vertices.Num());
+    MeshDesc.ReserveNewVertexInstances(Vertices.Num());
+    MeshDesc.ReserveNewPolygons(Indices.Num() / 3);
+
+    TArray<FVertexInstanceID> VertexInstanceIDs;
+    VertexInstanceIDs.SetNum(Vertices.Num());
+
+    for (int32 i = 0; i < Vertices.Num(); ++i)
+    {
+        const FVector& P = Vertices[i];
+        FVertexID VertID = MeshDesc.CreateVertex();
+        VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
+
+        FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+        VertexInstanceIDs[i] = InstID;
+
+        FVector3f N = (i < Normals.Num()) ? FVector3f(Normals[i]) : FVector3f(0, 0, 1);
+        N.Normalize();
+        VertexInstanceNormals[InstID] = N;
+
+        FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
+        if (T.SizeSquared() < 0.001f) T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
+        T.Normalize();
+        VertexInstanceTangents[InstID] = T;
+        VertexInstanceBinormalSigns[InstID] = 1.0f;
+
+        FVector2f UV = (i < UVs.Num()) ? FVector2f(UVs[i]) : FVector2f(0, 0);
+        VertexInstanceUVs.Set(InstID, 0, UV);
+    }
+
+    for (int32 i = 0; i < Indices.Num(); i += 3)
+    {
+        TArray<FVertexInstanceID> TriVerts;
+        TriVerts.Add(VertexInstanceIDs[Indices[i]]);
+        TriVerts.Add(VertexInstanceIDs[Indices[i + 1]]);
+        TriVerts.Add(VertexInstanceIDs[Indices[i + 2]]);
+        MeshDesc.CreatePolygon(PolyGroup, TriVerts);
+    }
+
+    TArray<const FMeshDescription*> MeshDescs;
+    MeshDescs.Add(&MeshDesc);
+    UStaticMesh::FBuildMeshDescriptionsParams Params;
+    Params.bBuildSimpleCollision = false;
+    Params.bFastBuild = true;
+    SM->BuildFromMeshDescriptions(MeshDescs, Params);
 
     // Simple green-brown material for distant terrain
     UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
-        UMaterial::GetDefaultMaterial(MD_Surface), WdlActor);
+        UMaterial::GetDefaultMaterial(MD_Surface), SM);
     if (Mat)
     {
         Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
-        Mesh->SetMaterial(0, Mat);
+        SM->SetMaterial(0, Mat);
     }
 
-    // Disable collision and shadow for distant terrain
-    Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    Mesh->SetCastShadow(false);
+    // Spawn actor with UStaticMeshComponent
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Name = *FString::Printf(TEXT("WdlTile_%d_%d"), TX, TY);
+    AActor* WdlActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+    if (!WdlActor) { SM->RemoveFromRoot(); return; }
 
-    const uint8 TransitionEdges = DetermineWdlTransitionEdges(WdtData.Get(), LastCameraTile, LoadRadius, Lod1Radius, TX, TY);
-    if (TransitionEdges != 0)
-    {
-        FAdtData TransitionAdtData;
-        if (LoadTileAdtForTransition(MpqManager.Get(), MapName, WdtData ? WdtData->bUseBigAlpha : false, TX, TY, TransitionAdtData))
-        {
-            int32 TransitionSectionIndex = 1;
-            int32 TransitionSectionCount = 0;
-            TArray<float> EdgeHeights;
-            UMaterialInterface* TransitionMaterial = Mat ? static_cast<UMaterialInterface*>(Mat) : static_cast<UMaterialInterface*>(UMaterial::GetDefaultMaterial(MD_Surface));
-
-            if ((TransitionEdges & WdlTransition_North) != 0)
-            {
-                BuildNorthEdgeHeights(TransitionAdtData, EdgeHeights);
-                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_North, EdgeHeights, TransitionMaterial);
-                TransitionSectionCount++;
-            }
-            if ((TransitionEdges & WdlTransition_South) != 0)
-            {
-                BuildSouthEdgeHeights(TransitionAdtData, EdgeHeights);
-                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_South, EdgeHeights, TransitionMaterial);
-                TransitionSectionCount++;
-            }
-            if ((TransitionEdges & WdlTransition_West) != 0)
-            {
-                BuildWestEdgeHeights(TransitionAdtData, EdgeHeights);
-                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_West, EdgeHeights, TransitionMaterial);
-                TransitionSectionCount++;
-            }
-            if ((TransitionEdges & WdlTransition_East) != 0)
-            {
-                BuildEastEdgeHeights(TransitionAdtData, EdgeHeights);
-                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_East, EdgeHeights, TransitionMaterial);
-                TransitionSectionCount++;
-            }
-
-            UE_LOG(LogWowWorld, Log, TEXT("Spawned WDL tile %d,%d with %d transition strip sections"), TX, TY, TransitionSectionCount);
-        }
-        else
-        {
-            UE_LOG(LogWowWorld, Warning, TEXT("Failed to load ADT border data for WDL transition tile %d,%d"), TX, TY);
-        }
-    }
+    UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(WdlActor, TEXT("WdlMesh"));
+    MeshComp->SetStaticMesh(SM);
+    MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    MeshComp->SetCastShadow(false);
+    MeshComp->RegisterComponent();
+    WdlActor->SetRootComponent(MeshComp);
 
     WdlTiles.Add(TileKey(TX, TY), WdlActor);
 
-    UE_LOG(LogWowWorld, Verbose, TEXT("Spawned WDL tile %d,%d (%d verts)"), TX, TY, Vertices.Num());
+    if (TransitionSectionCount > 0)
+    {
+        UE_LOG(LogWowWorld, Log, TEXT("Spawned WDL tile %d,%d with %d transition strips (%d verts, UStaticMesh)"), TX, TY, TransitionSectionCount, Vertices.Num());
+    }
+    else
+    {
+        UE_LOG(LogWowWorld, Verbose, TEXT("Spawned WDL tile %d,%d (%d verts, UStaticMesh)"), TX, TY, Vertices.Num());
+    }
 }
 
 void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)

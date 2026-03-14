@@ -47,7 +47,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Async tile loader (background thread with `TFuture`, game-thread finalization)
 - [x] Multi-tile viewer streaming works during runtime audit
 - [x] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions — verified March 14, 2026: build succeeds, code review confirms LOD 1 (81-vert chunks with per-chunk splat materials), MAHO hole bitmask parsing/skipping, and ADT-driven transition strips; runtime screenshot shows textured distant terrain extending to horizon
-- [ ] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent`
+- [?] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent` — updated March 14, 2026: migrated `SpawnWdlTile` and transition strips from `UProceduralMeshComponent` to `UStaticMesh`/`UStaticMeshComponent` via `FMeshDescription`; build succeeds, runtime spawns 155 WDL tiles as UStaticMesh with transition strips, zero errors
 
 ## Phase 5: Static Objects
 - [x] M2 doodad loading and mesh creation
