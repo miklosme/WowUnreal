@@ -284,3 +284,25 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
     return WmoActor;
 }
+
+uint32 FWowWmoRenderer::GetWmoGroupCount(const FString& WmoPath, FMpqManager* Mpq)
+{
+    if (!Mpq || WmoPath.IsEmpty())
+    {
+        return 0;
+    }
+
+    TArray<uint8> RootRaw;
+    if (!Mpq->ReadFile(WmoPath, RootRaw))
+    {
+        return 0;
+    }
+
+    FWmoRootData RootData = FWmoParser::ParseRoot(RootRaw);
+    if (!RootData.bIsValid)
+    {
+        return 0;
+    }
+
+    return RootData.NumGroups;
+}

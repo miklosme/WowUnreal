@@ -38,25 +38,18 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
-    // Merge all 256 chunks into a SINGLE mesh to eliminate gaps
-    TArray<FVector> AllVertices;
-    TArray<int32> AllIndices;
-    TArray<FVector> AllNormals;
-    TArray<FVector2D> AllUVs;
-    TArray<FLinearColor> AllColors;
-    TArray<FProcMeshTangent> AllTangents;
+    // Create a single ProceduralMeshComponent with one section per chunk.
+    // Each section gets its own material instance with BLP textures.
+    UProceduralMeshComponent* MeshComp = NewObject<UProceduralMeshComponent>(this, TEXT("TerrainMesh"));
+    MeshComp->SetupAttachment(RootScene);
+    MeshComp->RegisterComponent();
+    MeshComp->SetCastShadow(false);
+    MeshComp->bUseComplexAsSimpleCollision = false;
 
-    // Reserve space: 256 chunks * 145 verts, 256 * 768 indices
-    AllVertices.Reserve(256 * 145);
-    AllIndices.Reserve(256 * 768);
-    AllNormals.Reserve(256 * 145);
-    AllUVs.Reserve(256 * 145);
-    AllColors.Reserve(256 * 145);
-    AllTangents.Reserve(256 * 145);
-
-    int32 VertexOffset = 0;
+    int32 SectionIndex = 0;
     int32 ChunksWithHeights = 0;
     int32 ChunksSkipped = 0;
+    int32 ChunksTextured = 0;
 
     for (int32 i = 0; i < 256; ++i)
     {
@@ -77,104 +70,67 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         }
         if (bHasHeights) ChunksWithHeights++;
 
-        // Append vertices
-        AllVertices.Append(MeshData.Vertices);
-        AllNormals.Append(MeshData.Normals);
-        AllUVs.Append(MeshData.UVs);
+        // Build vertex colors and tangents for this chunk
+        TArray<FLinearColor> Colors;
+        TArray<FProcMeshTangent> Tangents;
+        Colors.Reserve(MeshData.Vertices.Num());
+        Tangents.Reserve(MeshData.Normals.Num());
 
-        // Vertex colors
         for (const FColor& C : MeshData.VertexColors)
         {
-            AllColors.Add(FLinearColor(C));
+            Colors.Add(FLinearColor(C));
         }
 
-        // Tangents
         for (const FVector& N : MeshData.Normals)
         {
             FVector T = FVector::CrossProduct(N, FVector(0, 1, 0));
             if (T.SizeSquared() < 0.001f)
                 T = FVector::CrossProduct(N, FVector(1, 0, 0));
             T.Normalize();
-            AllTangents.Add(FProcMeshTangent(T, false));
+            Tangents.Add(FProcMeshTangent(T, false));
         }
 
-        // Offset indices for merged buffer
-        for (int32 Idx : MeshData.Indices)
-        {
-            AllIndices.Add(Idx + VertexOffset);
-        }
-
-        VertexOffset += MeshData.Vertices.Num();
-    }
-
-    if (AllVertices.Num() > 0)
-    {
-        // Create single merged mesh component
-        UProceduralMeshComponent* MeshComp = NewObject<UProceduralMeshComponent>(this, TEXT("TerrainMesh"));
-        MeshComp->SetupAttachment(RootScene);
-        MeshComp->RegisterComponent();
-
+        // Create mesh section for this chunk
         MeshComp->CreateMeshSection_LinearColor(
-            0, AllVertices, AllIndices, AllNormals, AllUVs, AllColors, AllTangents, false);
+            SectionIndex, MeshData.Vertices, MeshData.Indices,
+            MeshData.Normals, MeshData.UVs, Colors, Tangents, false);
 
-        // Apply material
-        if (DefaultMat)
+        // Create a textured material for this chunk from BLP data
+        UMaterialInstanceDynamic* ChunkMat = FWowTerrainMaterial::CreateChunkMaterial(
+            Chunk, Data, Mpq, Cache, this);
+
+        if (ChunkMat)
         {
-            MeshComp->SetMaterial(0, DefaultMat);
+            MeshComp->SetMaterial(SectionIndex, ChunkMat);
+            ChunksTextured++;
+        }
+        else if (DefaultMat)
+        {
+            MeshComp->SetMaterial(SectionIndex, DefaultMat);
         }
 
-        MeshComp->SetCastShadow(false);
-        MeshComp->bUseComplexAsSimpleCollision = false;
-        // Render both sides to avoid backface culling gaps
-        MeshComp->SetRenderCustomDepth(false);
-        ChunkMeshes.Add(MeshComp);
-
-        // Log bounds for gap debugging
-        FVector MinV(FLT_MAX), MaxV(-FLT_MAX);
-        for (const FVector& V : AllVertices)
-        {
-            MinV.X = FMath::Min(MinV.X, V.X); MinV.Y = FMath::Min(MinV.Y, V.Y); MinV.Z = FMath::Min(MinV.Z, V.Z);
-            MaxV.X = FMath::Max(MaxV.X, V.X); MaxV.Y = FMath::Max(MaxV.Y, V.Y); MaxV.Z = FMath::Max(MaxV.Z, V.Z);
-        }
-        FVector WorldMin = GetActorLocation() + MinV;
-        FVector WorldMax = GetActorLocation() + MaxV;
-        UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d verts, %d tris, %d/%d chunks have heights, %d skipped. World[%s to %s]"),
-            TX, TY, AllVertices.Num(), AllIndices.Num() / 3, ChunksWithHeights, 256 - ChunksSkipped, ChunksSkipped,
-            *WorldMin.ToString(), *WorldMax.ToString());
+        SectionIndex++;
     }
 
-    // TODO: Doodads temporarily disabled - too many ProceduralMesh components crash Metal
-    // Need to batch into HISMC or use runtime StaticMesh
-    // FWowDoodadManager::SpawnDoodads(this, Data.DoodadPlacements, Data.DoodadPaths, Mpq, Cache);
-
-    // TODO: WMOs temporarily disabled - too many ProceduralMesh components crash Metal
-    // Need to batch group meshes or use runtime StaticMesh
-    int32 WmosSpawned = 0;
-    if (false) // DISABLED
-    for (const FAdtWmoPlacement& WmoPlacement : Data.WmoPlacements)
+    if (SectionIndex > 0)
     {
-        // Skip WMOs already spawned by another tile
-        if (SpawnedWmoIds)
-        {
-            if (SpawnedWmoIds->Contains(WmoPlacement.UniqueId))
-                continue;
-            SpawnedWmoIds->Add(WmoPlacement.UniqueId);
-        }
-
-        if (WmoPlacement.NameIndex >= 0 && WmoPlacement.NameIndex < Data.WmoPaths.Num())
-        {
-            const FString& WmoPath = Data.WmoPaths[WmoPlacement.NameIndex];
-            if (!WmoPath.IsEmpty())
-            {
-                AActor* WmoActor = FWowWmoRenderer::SpawnWmo(GetWorld(), WmoPath, WmoPlacement, Mpq, Cache);
-                if (WmoActor)
-                {
-                    WmoActor->AttachToActor(this, FAttachmentTransformRules::KeepWorldTransform);
-                    ++WmosSpawned;
-                }
-            }
-        }
+        ChunkMeshes.Add(MeshComp);
+        UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d sections, %d textured, %d/%d have heights, %d skipped"),
+            TX, TY, SectionIndex, ChunksTextured, ChunksWithHeights, 256 - ChunksSkipped, ChunksSkipped);
+    }
+    else
+    {
+        MeshComp->DestroyComponent();
     }
 
-    UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d WMOs spawned"), TX, TY, WmosSpawned);
+    // Store placement data for distance-based streaming (spawned by AWowWorldManager::Tick)
+    DoodadPlacements = Data.DoodadPlacements;
+    DoodadPaths = Data.DoodadPaths;
+    WmoPlacements = Data.WmoPlacements;
+    WmoPaths = Data.WmoPaths;
+    CachedMpq = Mpq;
+    CachedCache = Cache;
+
+    UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: stored %d doodad placements, %d WMO placements for streaming"),
+        TX, TY, DoodadPlacements.Num(), WmoPlacements.Num());
 }

@@ -7,6 +7,11 @@
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#if WITH_EDITOR
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#endif
+
+DEFINE_LOG_CATEGORY_STATIC(LogTerrainMat, Log, All);
 
 UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
     const FAdtChunkData& ChunkData,
@@ -24,7 +29,13 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
         int32 TexIdx = ChunkData.TextureIndices[i];
         if (AdtData.TexturePaths.IsValidIndex(TexIdx))
         {
-            UTexture2D* Tex = LoadBlpTexture(AdtData.TexturePaths[TexIdx], Mpq, Cache);
+            const FString& TexPath = AdtData.TexturePaths[TexIdx];
+            UTexture2D* Tex = LoadBlpTexture(TexPath, Mpq, Cache);
+            if (Tex)
+            {
+                UE_LOG(LogTerrainMat, Verbose, TEXT("Loaded layer %d texture: %s (%dx%d)"),
+                    i, *TexPath, Tex->GetSizeX(), Tex->GetSizeY());
+            }
             LayerTextures.Add(Tex);
         }
         else
@@ -34,8 +45,10 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
     }
 
     // If no textures at all, return nullptr to fall back to default
-    if (LayerTextures.Num() == 0 || (LayerTextures.Num() > 0 && !LayerTextures[0]))
+    if (LayerTextures.Num() == 0 || !LayerTextures[0])
     {
+        UE_LOG(LogTerrainMat, Warning, TEXT("Chunk [%d,%d] has no valid base texture"),
+            ChunkData.IndexX, ChunkData.IndexY);
         return nullptr;
     }
 
@@ -57,27 +70,34 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
 
     // Get base material and create dynamic instance
     UMaterial* BaseMat = GetBaseMaterial();
-    if (!BaseMat) return nullptr;
+    if (!BaseMat)
+    {
+        UE_LOG(LogTerrainMat, Error, TEXT("Failed to get base terrain material"));
+        return nullptr;
+    }
 
     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, Outer);
-    if (!MID) return nullptr;
+    if (!MID)
+    {
+        UE_LOG(LogTerrainMat, Error, TEXT("Failed to create MID"));
+        return nullptr;
+    }
 
     // Set the base layer texture (always present)
-    if (LayerTextures.Num() > 0 && LayerTextures[0])
-    {
-        MID->SetTextureParameterValue(TEXT("BaseTexture"), LayerTextures[0]);
-    }
+    MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), LayerTextures[0]);
+    UE_LOG(LogTerrainMat, Verbose, TEXT("Chunk [%d,%d]: assigned BaseTexture %s"),
+        ChunkData.IndexX, ChunkData.IndexY, *LayerTextures[0]->GetName());
 
     // Set additional layer textures and their alpha maps
     static const FName LayerParamNames[] = {
-        TEXT("Layer1Texture"),
-        TEXT("Layer2Texture"),
-        TEXT("Layer3Texture")
+        FName(TEXT("Layer1Texture")),
+        FName(TEXT("Layer2Texture")),
+        FName(TEXT("Layer3Texture"))
     };
     static const FName AlphaParamNames[] = {
-        TEXT("Alpha1"),
-        TEXT("Alpha2"),
-        TEXT("Alpha3")
+        FName(TEXT("Alpha1")),
+        FName(TEXT("Alpha2")),
+        FName(TEXT("Alpha3"))
     };
 
     for (int32 i = 0; i < 3; ++i)
@@ -97,18 +117,52 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
 
 UMaterial* FWowTerrainMaterial::GetBaseMaterial()
 {
-    // Try to load our custom terrain splatting material first.
-    // If it doesn't exist yet, fall back to BasicShapeMaterial which
-    // has a texture parameter we can use for the base layer.
     static UMaterial* CachedMat = nullptr;
-    if (CachedMat) return CachedMat;
+    if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
 
-    // Try our custom material first
+    // Try loading our custom material asset first
     CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowTerrain"));
-    if (CachedMat) return CachedMat;
+    if (CachedMat)
+    {
+        UE_LOG(LogTerrainMat, Log, TEXT("Loaded custom terrain material /Game/Materials/M_WowTerrain"));
+        return CachedMat;
+    }
 
-    // Fall back to engine material that supports a texture parameter
+#if WITH_EDITOR
+    // No custom material found - create one programmatically with a BaseTexture parameter.
+    // This uses editor-only APIs to build a material graph and compile it.
+    UE_LOG(LogTerrainMat, Log, TEXT("Creating runtime terrain material with TextureSampleParameter2D"));
+
+    CachedMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowTerrainRuntime"));
+    CachedMat->SetShadingModel(MSM_DefaultLit);
+    CachedMat->TwoSided = true;
+
+    // Create a texture sample parameter named "BaseTexture"
+    UMaterialExpressionTextureSampleParameter2D* TexParam =
+        NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
+    TexParam->ParameterName = FName(TEXT("BaseTexture"));
+    TexParam->SamplerType = SAMPLERTYPE_Color;
+    // Default to white so the material compiles even without a texture set
+    TexParam->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
+    TexParam->MaterialExpressionEditorX = -400;
+    TexParam->MaterialExpressionEditorY = 0;
+
+    CachedMat->GetExpressionCollection().AddExpression(TexParam);
+
+    // Connect the RGB output of the texture sample to BaseColor
+    CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, TexParam);
+
+    // Trigger material compilation
+    CachedMat->PreEditChange(nullptr);
+    CachedMat->PostEditChange();
+
+    UE_LOG(LogTerrainMat, Log, TEXT("Runtime terrain material created and compiled"));
+#else
+    // In non-editor builds, fall back to BasicShapeMaterial
     CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+    UE_LOG(LogTerrainMat, Warning, TEXT("No custom terrain material; using BasicShapeMaterial fallback"));
+#endif
+
     return CachedMat;
 }
 

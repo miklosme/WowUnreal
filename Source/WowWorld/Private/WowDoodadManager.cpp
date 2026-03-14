@@ -248,3 +248,41 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
 
     UE_LOG(LogWowDoodad, Log, TEXT("Spawned %d doodad meshes"), Spawned);
 }
+
+UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
+    AActor* ParentActor, const FAdtDoodadPlacement& Placement,
+    const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache)
+{
+    if (!ParentActor || !Mpq || M2Path.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    TSharedPtr<FM2Data> M2Data = GetOrParseM2(M2Path, Mpq);
+    if (!M2Data || !M2Data->bIsValid)
+    {
+        return nullptr;
+    }
+
+    FName CompName = *FString::Printf(TEXT("Doodad_%u"), Placement.UniqueId);
+    UProceduralMeshComponent* MeshComp = CreateM2MeshComponent(
+        ParentActor, *M2Data, M2Path, Mpq, Cache, CompName);
+
+    if (!MeshComp)
+    {
+        return nullptr;
+    }
+
+    // MDDF positions are in noggit3 space
+    FVector UEPos = FWowCoordinate::NoggitToUE(
+        Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+
+    FRotator UERot = FRotator(0.0f, -Placement.Rotation.Y, 0.0f);
+    float ScaleVal = Placement.GetScaleFloat();
+
+    MeshComp->SetWorldLocation(UEPos);
+    MeshComp->SetWorldRotation(UERot);
+    MeshComp->SetWorldScale3D(FVector(ScaleVal));
+
+    return MeshComp;
+}

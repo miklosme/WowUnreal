@@ -7,6 +7,8 @@
 #include "Formats/WdtTypes.h"
 #include "Coord/WowCoordinate.h"
 #include "Kismet/GameplayStatics.h"
+#include "WowDoodadManager.h"
+#include "WowWmoRenderer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 
@@ -124,6 +126,7 @@ void AWowWorldManager::Tick(float DT)
     }
 
     UpdateStreaming();
+    UpdateObjectStreaming();
 }
 
 void AWowWorldManager::LoadTile(int32 TX, int32 TY)
@@ -246,9 +249,179 @@ void AWowWorldManager::UpdateStreaming()
         TObjectPtr<AWowTerrainTile>* Found = LoadedTiles.Find(Key);
         if (Found && *Found)
         {
-            UE_LOG(LogWowWorld, Log, TEXT("Unloading tile %d,%d (too far)"), (*Found)->GetTileCoord().X, (*Found)->GetTileCoord().Y);
-            (*Found)->Destroy();
+            AWowTerrainTile* Tile = *Found;
+            UE_LOG(LogWowWorld, Log, TEXT("Unloading tile %d,%d (too far)"), Tile->GetTileCoord().X, Tile->GetTileCoord().Y);
+
+            // Clean up spawned objects tracked by this tile
+            for (auto& DoodadPair : Tile->SpawnedDoodads)
+            {
+                if (DoodadPair.Value)
+                {
+                    DoodadPair.Value->DestroyComponent();
+                    --ActiveDoodadCount;
+                }
+                SpawnedDoodadIds.Remove(DoodadPair.Key);
+            }
+            for (auto& WmoPair : Tile->SpawnedWmos)
+            {
+                if (WmoPair.Value)
+                {
+                    WmoPair.Value->Destroy();
+                    --ActiveWmoGroupCount; // approximate; exact tracking not critical here
+                }
+                SpawnedWmoIds.Remove(WmoPair.Key);
+            }
+
+            Tile->Destroy();
         }
         LoadedTiles.Remove(Key);
+    }
+}
+
+void AWowWorldManager::UpdateObjectStreaming()
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PC) return;
+
+    FVector CamLoc;
+    FRotator CamRot;
+    PC->GetPlayerViewPoint(CamLoc, CamRot);
+
+    const float DoodadRadiusSq = DoodadRadius * DoodadRadius;
+    const float DoodadDespawnRadiusSq = (DoodadRadius * 1.2f) * (DoodadRadius * 1.2f);
+    const float WmoRadiusSq = WmoRadius * WmoRadius;
+    const float WmoDespawnRadiusSq = (WmoRadius * 1.2f) * (WmoRadius * 1.2f);
+
+    // Iterate all loaded tiles
+    for (auto& TilePair : LoadedTiles)
+    {
+        AWowTerrainTile* Tile = TilePair.Value;
+        if (!Tile || !Tile->CachedMpq) continue;
+
+        // --- DOODADS: despawn out-of-range ---
+        {
+            TArray<uint32> ToDespawn;
+            for (auto& Pair : Tile->SpawnedDoodads)
+            {
+                if (!Pair.Value) { ToDespawn.Add(Pair.Key); continue; }
+                float DistSq = FVector::DistSquared(CamLoc, Pair.Value->GetComponentLocation());
+                if (DistSq > DoodadDespawnRadiusSq)
+                {
+                    ToDespawn.Add(Pair.Key);
+                }
+            }
+            for (uint32 Id : ToDespawn)
+            {
+                TObjectPtr<UProceduralMeshComponent>* Comp = Tile->SpawnedDoodads.Find(Id);
+                if (Comp && *Comp)
+                {
+                    (*Comp)->DestroyComponent();
+                    --ActiveDoodadCount;
+                }
+                Tile->SpawnedDoodads.Remove(Id);
+                SpawnedDoodadIds.Remove(Id);
+            }
+        }
+
+        // --- DOODADS: spawn in-range ---
+        for (const FAdtDoodadPlacement& Placement : Tile->DoodadPlacements)
+        {
+            if (ActiveDoodadCount >= MaxActiveDoodads) break;
+
+            // Already spawned globally (could be on this tile or another)
+            if (SpawnedDoodadIds.Contains(Placement.UniqueId)) continue;
+
+            // Resolve path
+            if (Placement.NameIndex < 0 || Placement.NameIndex >= Tile->DoodadPaths.Num()) continue;
+            const FString& M2Path = Tile->DoodadPaths[Placement.NameIndex];
+            if (M2Path.IsEmpty()) continue;
+
+            // Distance check using noggit->UE position
+            FVector UEPos = FWowCoordinate::NoggitToUE(
+                Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+            float DistSq = FVector::DistSquared(CamLoc, UEPos);
+            if (DistSq > DoodadRadiusSq) continue;
+
+            // Spawn it
+            UProceduralMeshComponent* Comp = FWowDoodadManager::SpawnSingleDoodad(
+                Tile, Placement, M2Path, Tile->CachedMpq, Tile->CachedCache);
+            if (Comp)
+            {
+                Tile->SpawnedDoodads.Add(Placement.UniqueId, Comp);
+                SpawnedDoodadIds.Add(Placement.UniqueId);
+                ++ActiveDoodadCount;
+            }
+        }
+
+        // --- WMOs: despawn out-of-range ---
+        {
+            TArray<uint32> ToDespawn;
+            for (auto& Pair : Tile->SpawnedWmos)
+            {
+                if (!Pair.Value) { ToDespawn.Add(Pair.Key); continue; }
+                float DistSq = FVector::DistSquared(CamLoc, Pair.Value->GetActorLocation());
+                if (DistSq > WmoDespawnRadiusSq)
+                {
+                    ToDespawn.Add(Pair.Key);
+                }
+            }
+            for (uint32 Id : ToDespawn)
+            {
+                TObjectPtr<AActor>* Act = Tile->SpawnedWmos.Find(Id);
+                if (Act && *Act)
+                {
+                    (*Act)->Destroy();
+                    --ActiveWmoGroupCount; // approximate
+                }
+                Tile->SpawnedWmos.Remove(Id);
+                SpawnedWmoIds.Remove(Id);
+            }
+        }
+
+        // --- WMOs: spawn in-range ---
+        for (const FAdtWmoPlacement& Placement : Tile->WmoPlacements)
+        {
+            if (ActiveWmoGroupCount >= MaxActiveWmoGroups) break;
+
+            // Already spawned globally
+            if (SpawnedWmoIds.Contains(Placement.UniqueId)) continue;
+
+            // Resolve path
+            if (Placement.NameIndex < 0 || Placement.NameIndex >= Tile->WmoPaths.Num()) continue;
+            const FString& WmoPath = Tile->WmoPaths[Placement.NameIndex];
+            if (WmoPath.IsEmpty()) continue;
+
+            // Distance check
+            FVector UEPos = FWowCoordinate::NoggitToUE(
+                Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+            float DistSq = FVector::DistSquared(CamLoc, UEPos);
+            if (DistSq > WmoRadiusSq) continue;
+
+            // Check group count - skip huge WMOs (e.g. Stormwind)
+            uint32 GroupCount = FWowWmoRenderer::GetWmoGroupCount(WmoPath, Tile->CachedMpq);
+            if (GroupCount == 0) continue;
+            if ((int32)GroupCount > MaxWmoGroupsPerObject)
+            {
+                // Mark as "spawned" so we don't re-check every tick
+                SpawnedWmoIds.Add(Placement.UniqueId);
+                UE_LOG(LogWowWorld, Log, TEXT("Skipping large WMO %s (%d groups > max %d)"),
+                    *WmoPath, GroupCount, MaxWmoGroupsPerObject);
+                continue;
+            }
+
+            // Check if adding this WMO would exceed the group limit
+            if (ActiveWmoGroupCount + (int32)GroupCount > MaxActiveWmoGroups) continue;
+
+            // Spawn it
+            AActor* WmoActor = FWowWmoRenderer::SpawnWmo(
+                GetWorld(), WmoPath, Placement, Tile->CachedMpq, Tile->CachedCache);
+            if (WmoActor)
+            {
+                WmoActor->AttachToActor(Tile, FAttachmentTransformRules::KeepWorldTransform);
+                Tile->SpawnedWmos.Add(Placement.UniqueId, WmoActor);
+                SpawnedWmoIds.Add(Placement.UniqueId);
+                ActiveWmoGroupCount += (int32)GroupCount;
+            }
+        }
     }
 }

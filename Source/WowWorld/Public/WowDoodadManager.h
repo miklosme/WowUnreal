@@ -21,6 +21,10 @@ public:
     static void SpawnDoodads(AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
                              const TArray<FString>& DoodadPaths, FMpqManager* Mpq, FWowAssetCache* Cache);
 
+    /** Spawn a single doodad and return the ProceduralMeshComponent (for distance-based streaming) */
+    static UProceduralMeshComponent* SpawnSingleDoodad(AActor* ParentActor, const FAdtDoodadPlacement& Placement,
+                                                        const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache);
+
 private:
     /** Cache of parsed M2 data (not UObjects, just geometry) */
     static TMap<FString, TSharedPtr<FM2Data>> ParsedM2Cache;

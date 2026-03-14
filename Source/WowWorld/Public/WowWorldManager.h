@@ -40,6 +40,27 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Debug")
     bool bStreamingEnabled = false;
 
+    // ---- Object streaming settings ----
+    /** Radius (UE cm) within which doodads (M2) are spawned. Default 2000m. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    float DoodadRadius = 200000.0f;
+
+    /** Radius (UE cm) within which WMOs (buildings) are spawned. Default 3000m. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    float WmoRadius = 300000.0f;
+
+    /** Maximum number of active doodad ProceduralMeshComponents. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    int32 MaxActiveDoodads = 200;
+
+    /** Maximum number of active WMO group ProceduralMeshComponents. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    int32 MaxActiveWmoGroups = 100;
+
+    /** Skip WMOs with more groups than this to avoid GPU overload. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    int32 MaxWmoGroupsPerObject = 20;
+
 private:
     TUniquePtr<FMpqManager> MpqManager;
     TUniquePtr<FWowAssetCache> AssetCache;
@@ -53,9 +74,19 @@ private:
     /** Track spawned WMO unique IDs to avoid duplicates across tiles */
     TSet<uint32> SpawnedWmoIds;
 
+    /** Track spawned doodad unique IDs to avoid duplicates across tiles */
+    TSet<uint32> SpawnedDoodadIds;
+
+    /** Current count of active doodad mesh components */
+    int32 ActiveDoodadCount = 0;
+
+    /** Current count of active WMO group mesh components */
+    int32 ActiveWmoGroupCount = 0;
+
     void LoadTile(int32 TX, int32 TY);
     void UnloadTile(int32 TX, int32 TY);
     void UpdateStreaming();
+    void UpdateObjectStreaming();
     bool IsTileLoaded(int32 TX, int32 TY) const;
     static int64 TileKey(int32 TX, int32 TY) { return ((int64)TX << 32) | (int64)(uint32)TY; }
 };

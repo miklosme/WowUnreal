@@ -16,6 +16,9 @@ public:
     static AActor* SpawnWmo(UWorld* World, const FString& WmoPath, const FAdtWmoPlacement& Placement,
                             FMpqManager* Mpq, FWowAssetCache* Cache);
 
+    /** Query the number of groups in a WMO root file without spawning anything. Returns 0 on failure. */
+    static uint32 GetWmoGroupCount(const FString& WmoPath, FMpqManager* Mpq);
+
 private:
     /** Construct group filename from root WMO path and group index */
     static FString GetGroupPath(const FString& RootPath, int32 GroupIndex);
