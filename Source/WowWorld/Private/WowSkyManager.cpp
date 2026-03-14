@@ -3,6 +3,12 @@
 #include "Components/SkyAtmosphereComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
+#include "Formats/Dbc/DbcStore.h"
+#include "Formats/Dbc/LightDbc.h"
+#include "Formats/Dbc/LightParamsDbc.h"
+#include "Formats/Dbc/LightIntParamsDbc.h"
+#include "Coord/WowCoordinate.h"
+#include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowSky, Log, All);
 
@@ -57,12 +63,35 @@ void AWowSkyManager::BeginPlay()
 		HeightFog->SetStartDistance(50000.0f); // 500m
 	}
 
+	// Load light zones from DBC
+	LoadLightZones(CurrentMapId);
+
 	// Initial update
 	UpdateSunPosition();
 	UpdateLightColors();
 	UpdateFog();
 
-	UE_LOG(LogWowSky, Log, TEXT("Sky manager initialized: time=%.0f, speed=%.1f"), TimeOfDay, TimeSpeed);
+	UE_LOG(LogWowSky, Log, TEXT("Sky manager initialized: time=%.0f, speed=%.1f, dbcLights=%d"),
+		TimeOfDay, TimeSpeed, MapLights.Num());
+}
+
+void AWowSkyManager::LoadLightZones(int32 MapId)
+{
+	CurrentMapId = MapId;
+	MapLights.Empty();
+
+	const FDbcStore& Dbc = FDbcStore::Get();
+	if (Dbc.Lights().Num() == 0)
+	{
+		UE_LOG(LogWowSky, Log, TEXT("Light.dbc not loaded, using fallback colors"));
+		bHasDbcLights = false;
+		return;
+	}
+
+	MapLights = Dbc.Lights().GetByMap(static_cast<uint32>(MapId));
+	bHasDbcLights = MapLights.Num() > 0;
+
+	UE_LOG(LogWowSky, Log, TEXT("Loaded %d light zones for map %d"), MapLights.Num(), MapId);
 }
 
 void AWowSkyManager::Tick(float DeltaTime)
@@ -87,13 +116,10 @@ void AWowSkyManager::UpdateSunPosition()
 	if (!SunLight) return;
 
 	// Time 0=midnight, 360=6am, 720=noon, 1080=6pm, 1440=midnight
-	// Sun angle: at noon (720) sun is highest (-90 pitch), at midnight (0) sun is lowest (+90)
 	float NormalizedTime = TimeOfDay / 1440.0f; // 0-1
-	float SunAngle = (NormalizedTime * 360.0f) - 90.0f; // -90 at midnight, +90 at noon, +270 at midnight
 
-	// Sun pitch: 0 at horizon, -90 at zenith
-	// At noon (NormalizedTime=0.5), sun should be at highest point
-	float SunPitch = -90.0f * FMath::Sin(NormalizedTime * PI); // peaks at 0.5
+	// Sun pitch: peaks at noon (NormalizedTime=0.5)
+	float SunPitch = -90.0f * FMath::Sin(NormalizedTime * PI);
 
 	// Sun yaw rotates through the day
 	float SunYaw = (NormalizedTime * 360.0f) + 180.0f;
@@ -118,17 +144,41 @@ void AWowSkyManager::UpdateLightColors()
 {
 	if (!SunLight) return;
 
-	FLinearColor SunColor = GetSunColorForTime();
+	FLinearColor SunColor;
 	float SunIntensity = GetSunIntensityForTime();
 
-	SunLight->SetLightColor(SunColor);
-	SunLight->SetIntensity(SunIntensity);
-
-	// Update sky light intensity based on time
-	if (SkyLight)
+	if (bHasDbcLights)
 	{
-		float AmbientIntensity = FMath::Lerp(0.15f, 1.0f, SunIntensity / 3.14f);
-		SkyLight->SetIntensity(AmbientIntensity);
+		FVector PlayerPos = FVector::ZeroVector;
+		if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(this, 0))
+		{
+			PlayerPos = Pawn->GetActorLocation();
+		}
+
+		SunColor = BlendZoneColor(LP_SunColor, PlayerPos);
+		FLinearColor AmbientColor = BlendZoneColor(LP_GlobalAmbient, PlayerPos);
+
+		SunLight->SetLightColor(SunColor);
+		SunLight->SetIntensity(SunIntensity);
+
+		if (SkyLight)
+		{
+			SkyLight->SetLightColor(AmbientColor);
+			float AmbientIntensity = FMath::Lerp(0.15f, 1.0f, SunIntensity / 3.14f);
+			SkyLight->SetIntensity(AmbientIntensity);
+		}
+	}
+	else
+	{
+		SunColor = GetSunColorFallback();
+		SunLight->SetLightColor(SunColor);
+		SunLight->SetIntensity(SunIntensity);
+
+		if (SkyLight)
+		{
+			float AmbientIntensity = FMath::Lerp(0.15f, 1.0f, SunIntensity / 3.14f);
+			SkyLight->SetIntensity(AmbientIntensity);
+		}
 	}
 }
 
@@ -136,39 +186,191 @@ void AWowSkyManager::UpdateFog()
 {
 	if (!HeightFog) return;
 
-	FLinearColor FogColor = GetFogColorForTime();
+	FLinearColor FogColor;
+
+	if (bHasDbcLights)
+	{
+		FVector PlayerPos = FVector::ZeroVector;
+		if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(this, 0))
+		{
+			PlayerPos = Pawn->GetActorLocation();
+		}
+		FogColor = BlendZoneColor(LP_SkyFogColor, PlayerPos);
+	}
+	else
+	{
+		FogColor = GetFogColorFallback();
+	}
+
 	HeightFog->SetFogInscatteringColor(FogColor);
 }
 
-FLinearColor AWowSkyManager::GetSunColorForTime() const
-{
-	// Dawn (5:00-7:00), Day (7:00-17:00), Dusk (17:00-19:00), Night (19:00-5:00)
-	float T = TimeOfDay;
+// ── DBC Color Interpolation ────────────────────────────────────────────────────
 
-	if (T >= 300.0f && T < 420.0f) // Dawn: 5:00-7:00
+FLinearColor AWowSkyManager::InterpolateDbcColor(uint32 ParamID, ELightProperty Property) const
+{
+	if (ParamID == 0) return FLinearColor::White;
+
+	const FDbcStore& Dbc = FDbcStore::Get();
+
+	// LightIntParams ID = (ParamID - 1) * 18 + PropertyIndex + 1
+	uint32 IntParamID = (ParamID - 1) * 18 + static_cast<uint32>(Property) + 1;
+	const FLightIntParamsDbcEntry* Entry = Dbc.LightIntParams().GetById(IntParamID);
+	if (!Entry || Entry->EntryCount == 0)
+	{
+		return FLinearColor::White;
+	}
+
+	// Time in DBC is stored as half-minutes (0-2880)
+	uint32 DbcTime = static_cast<uint32>(TimeOfDay * 2.0f);
+
+	// Find the two bracketing time entries and interpolate
+	uint32 Count = FMath::Min(Entry->EntryCount, static_cast<uint32>(FLightIntParamsDbcEntry::MaxEntries));
+
+	// Find lower and upper bounds
+	uint32 LowIdx = Count - 1;
+	uint32 HighIdx = 0;
+	for (uint32 i = 0; i < Count; i++)
+	{
+		if (Entry->Times[i] <= DbcTime)
+		{
+			LowIdx = i;
+		}
+		if (Entry->Times[i] > DbcTime && HighIdx == 0)
+		{
+			HighIdx = i;
+		}
+	}
+	if (HighIdx == 0) HighIdx = 0; // wrap around
+
+	// Decode BGRA packed color values
+	auto DecodeColor = [](uint32 Packed) -> FLinearColor
+	{
+		float B = ((Packed >> 0) & 0xFF) / 255.0f;
+		float G = ((Packed >> 8) & 0xFF) / 255.0f;
+		float R = ((Packed >> 16) & 0xFF) / 255.0f;
+		return FLinearColor(R, G, B);
+	};
+
+	FLinearColor LowColor = DecodeColor(Entry->Values[LowIdx]);
+	FLinearColor HighColor = DecodeColor(Entry->Values[HighIdx]);
+
+	// Interpolation factor
+	uint32 LowTime = Entry->Times[LowIdx];
+	uint32 HighTime = Entry->Times[HighIdx];
+
+	if (HighTime <= LowTime)
+	{
+		// Wrapping: high is next day
+		HighTime += 2880;
+		uint32 AdjTime = (DbcTime < LowTime) ? DbcTime + 2880 : DbcTime;
+		float Alpha = (HighTime > LowTime) ? static_cast<float>(AdjTime - LowTime) / (HighTime - LowTime) : 0.0f;
+		return FMath::Lerp(LowColor, HighColor, FMath::Clamp(Alpha, 0.0f, 1.0f));
+	}
+
+	float Alpha = static_cast<float>(DbcTime - LowTime) / FMath::Max(1u, HighTime - LowTime);
+	return FMath::Lerp(LowColor, HighColor, FMath::Clamp(Alpha, 0.0f, 1.0f));
+}
+
+FLinearColor AWowSkyManager::BlendZoneColor(ELightProperty Property, const FVector& PlayerPos) const
+{
+	if (MapLights.Num() == 0) return FLinearColor::White;
+
+	// Convert player UE position back to WoW coordinates for distance checks
+	FVector WowPos = FWowCoordinate::UEToWow(PlayerPos);
+
+	FLinearColor Result = FLinearColor::Black;
+	float TotalWeight = 0.0f;
+
+	// First entry with FalloffEnd == 0 is the global/default light for this map
+	const FLightDbcEntry* DefaultLight = nullptr;
+
+	for (const FLightDbcEntry* Light : MapLights)
+	{
+		if (Light->FalloffEnd == 0.0f)
+		{
+			DefaultLight = Light;
+			continue;
+		}
+
+		// Distance from player to light center
+		FVector LightPos(Light->X, Light->Y, Light->Z);
+		float Dist = FVector::Dist(WowPos, LightPos);
+
+		if (Dist > Light->FalloffEnd) continue;
+
+		// Weight: 1.0 inside FalloffStart, lerp to 0.0 at FalloffEnd
+		float Weight = 1.0f;
+		if (Dist > Light->FalloffStart && Light->FalloffEnd > Light->FalloffStart)
+		{
+			Weight = 1.0f - (Dist - Light->FalloffStart) / (Light->FalloffEnd - Light->FalloffStart);
+		}
+
+		// Use the first non-zero paramID (index 0 is for normal weather)
+		uint32 ParamID = Light->ParamIDs[0];
+		if (ParamID == 0) continue;
+
+		FLinearColor ZoneColor = InterpolateDbcColor(ParamID, Property);
+		Result += ZoneColor * Weight;
+		TotalWeight += Weight;
+	}
+
+	if (TotalWeight < 1.0f && DefaultLight)
+	{
+		// Fill remainder with default light
+		uint32 DefaultParamID = DefaultLight->ParamIDs[0];
+		if (DefaultParamID != 0)
+		{
+			FLinearColor DefaultColor = InterpolateDbcColor(DefaultParamID, Property);
+			float DefaultWeight = 1.0f - TotalWeight;
+			Result += DefaultColor * DefaultWeight;
+			TotalWeight += DefaultWeight;
+		}
+	}
+
+	if (TotalWeight > 0.0f)
+	{
+		Result /= TotalWeight;
+	}
+	else
+	{
+		// No DBC lights matched — fall back to hardcoded
+		switch (Property)
+		{
+		case LP_SunColor: return GetSunColorFallback();
+		case LP_SkyFogColor: return GetFogColorFallback();
+		default: return GetSkyColorFallback();
+		}
+	}
+
+	return Result;
+}
+
+// ── Fallback (hardcoded) color functions ────────────────────────────────────────
+
+FLinearColor AWowSkyManager::GetSunColorFallback() const
+{
+	float T = TimeOfDay;
+	if (T >= 300.0f && T < 420.0f) // Dawn
 	{
 		float A = (T - 300.0f) / 120.0f;
 		return FMath::Lerp(FLinearColor(0.9f, 0.4f, 0.2f), FLinearColor(1.0f, 0.95f, 0.85f), A);
 	}
-	else if (T >= 420.0f && T < 1020.0f) // Day: 7:00-17:00
+	else if (T >= 420.0f && T < 1020.0f) // Day
 	{
 		return FLinearColor(1.0f, 0.95f, 0.85f);
 	}
-	else if (T >= 1020.0f && T < 1140.0f) // Dusk: 17:00-19:00
+	else if (T >= 1020.0f && T < 1140.0f) // Dusk
 	{
 		float A = (T - 1020.0f) / 120.0f;
 		return FMath::Lerp(FLinearColor(1.0f, 0.95f, 0.85f), FLinearColor(0.9f, 0.4f, 0.2f), A);
 	}
-	else // Night
-	{
-		return FLinearColor(0.3f, 0.35f, 0.5f);
-	}
+	return FLinearColor(0.3f, 0.35f, 0.5f); // Night
 }
 
 float AWowSkyManager::GetSunIntensityForTime() const
 {
 	float T = TimeOfDay;
-
 	if (T >= 300.0f && T < 420.0f) // Dawn
 	{
 		float A = (T - 300.0f) / 120.0f;
@@ -183,40 +385,32 @@ float AWowSkyManager::GetSunIntensityForTime() const
 		float A = (T - 1020.0f) / 120.0f;
 		return FMath::Lerp(3.14f, 0.1f, A);
 	}
-	else // Night
-	{
-		return 0.1f;
-	}
+	return 0.1f; // Night
 }
 
-FLinearColor AWowSkyManager::GetFogColorForTime() const
+FLinearColor AWowSkyManager::GetFogColorFallback() const
 {
 	float T = TimeOfDay;
-
-	if (T >= 300.0f && T < 420.0f) // Dawn
+	if (T >= 300.0f && T < 420.0f)
 	{
 		float A = (T - 300.0f) / 120.0f;
 		return FMath::Lerp(FLinearColor(0.05f, 0.05f, 0.1f), FLinearColor(0.7f, 0.75f, 0.85f), A);
 	}
-	else if (T >= 420.0f && T < 1020.0f) // Day
+	else if (T >= 420.0f && T < 1020.0f)
 	{
 		return FLinearColor(0.7f, 0.75f, 0.85f);
 	}
-	else if (T >= 1020.0f && T < 1140.0f) // Dusk
+	else if (T >= 1020.0f && T < 1140.0f)
 	{
 		float A = (T - 1020.0f) / 120.0f;
 		return FMath::Lerp(FLinearColor(0.7f, 0.75f, 0.85f), FLinearColor(0.05f, 0.05f, 0.1f), A);
 	}
-	else // Night
-	{
-		return FLinearColor(0.05f, 0.05f, 0.1f);
-	}
+	return FLinearColor(0.05f, 0.05f, 0.1f); // Night
 }
 
-FLinearColor AWowSkyManager::GetSkyColorForTime() const
+FLinearColor AWowSkyManager::GetSkyColorFallback() const
 {
 	float T = TimeOfDay;
-
 	if (T >= 420.0f && T < 1020.0f) // Day
 	{
 		return FLinearColor(0.4f, 0.6f, 1.0f);
@@ -231,8 +425,5 @@ FLinearColor AWowSkyManager::GetSkyColorForTime() const
 		float A = (T - 1020.0f) / 120.0f;
 		return FMath::Lerp(FLinearColor(0.4f, 0.6f, 1.0f), FLinearColor(0.1f, 0.1f, 0.2f), A);
 	}
-	else // Night
-	{
-		return FLinearColor(0.1f, 0.1f, 0.2f);
-	}
+	return FLinearColor(0.1f, 0.1f, 0.2f); // Night
 }
