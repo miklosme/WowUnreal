@@ -4,7 +4,11 @@
 class FMpqManager;
 class FWowAssetCache;
 class UStaticMesh;
+class USkeletalMesh;
+class USkeleton;
+class UAnimSequence;
 class UStaticMeshComponent;
+class USkeletalMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 struct FAdtDoodadPlacement;
 struct FM2Data;
@@ -39,10 +43,22 @@ public:
     /** Get or create a UStaticMesh from M2 data (cached in asset cache) */
     static UStaticMesh* GetOrCreateStaticMesh(const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache);
 
+    /** Check if an M2 model should use skeletal mesh (has bones + animation data) */
+    static bool ShouldUseSkeletalMesh(const FM2Data& Data);
+
+    /** Get or create a USkeletalMesh from animated M2 data (cached in asset cache) */
+    static USkeletalMesh* GetOrCreateSkeletalMesh(const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache);
+
 private:
     /** Cache of parsed M2 data (not UObjects, just geometry) */
     static TMap<FString, TSharedPtr<FM2Data>> ParsedM2Cache;
     static FCriticalSection CacheLock;
+
+    /** Cache of skeletons per M2 model (shared between mesh and animations) */
+    static TMap<FString, TWeakObjectPtr<USkeleton>> SkeletonCache;
+
+    /** Cache of animation sequences per M2 model */
+    static TMap<FString, TArray<TWeakObjectPtr<UAnimSequence>>> AnimCache;
 
     /** Build skin file path from M2 path */
     static FString GetSkinPath(const FString& M2Path);

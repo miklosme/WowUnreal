@@ -305,6 +305,189 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         UE_LOG(LogM2, Log, TEXT("  Parsed %d animation sequences"), Result.Animations.Num());
     }
 
+    // ── Parse animation keyframes ─────────────────────────────────────────
+    // Helper function to unpack quaternions from int16 values
+    auto UnpackQuaternion = [](int16 x, int16 y, int16 z, int16 w) -> FQuat
+    {
+        return FQuat(
+            (x < 0 ? (x + 32768) : (x - 32767)) / 32767.0f,
+            (y < 0 ? (y + 32768) : (y - 32767)) / 32767.0f,
+            (z < 0 ? (z + 32768) : (z - 32767)) / 32767.0f,
+            (w < 0 ? (w + 32768) : (w - 32767)) / 32767.0f
+        );
+    };
+
+    // Structure for animation block header (20 bytes)
+    struct FAnimBlock
+    {
+        uint16 InterpolationType;
+        uint16 GlobalSequence;
+        uint32 nTimestampArrays;
+        uint32 ofsTimestampArrays;
+        uint32 nValueArrays;
+        uint32 ofsValueArrays;
+    };
+
+    // Sub-array header (8 bytes)
+    struct FSubArrayHeader
+    {
+        uint32 nEntries;
+        uint32 ofsEntries;
+    };
+
+    if (Header.nAnimations > 0 && Header.nBones > 0 && RawBones != nullptr)
+    {
+        // Only parse keyframes for looping animations (internal data, not external .anim files)
+        Result.AnimationTracks.Reserve(Header.nAnimations);
+
+        for (uint32 animIdx = 0; animIdx < Header.nAnimations; animIdx++)
+        {
+            const FM2AnimSequenceRaw& AnimSeq = RawAnims[animIdx];
+
+            // Skip animations that don't have embedded data (external .anim files)
+            if ((AnimSeq.Flags & 0x20) == 0)
+            {
+                continue; // Not looping, likely external animation
+            }
+
+            FM2AnimationData AnimData;
+            AnimData.AnimationId = AnimSeq.AnimationId;
+            AnimData.SubAnimationId = AnimSeq.SubAnimationId;
+            AnimData.Duration = AnimSeq.Length;
+            AnimData.bIsLooping = (AnimSeq.Flags & 0x20) != 0;
+            AnimData.MoveSpeed = AnimSeq.MoveSpeed;
+            AnimData.BoneTracks.SetNum(Header.nBones);
+
+            bool bHasAnyKeyframes = false;
+
+            // Process each bone's animation data
+            for (uint32 boneIdx = 0; boneIdx < Header.nBones; boneIdx++)
+            {
+                const FM2BoneRaw& Bone = RawBones[boneIdx];
+                FM2BoneTrack& Track = AnimData.BoneTracks[boneIdx];
+
+                // Parse translation block
+                const FAnimBlock* TransBlock = reinterpret_cast<const FAnimBlock*>(Bone.TransBlock);
+                if (TransBlock->nTimestampArrays > animIdx && TransBlock->nValueArrays > animIdx)
+                {
+                    const FSubArrayHeader* TimestampHeaders = nullptr;
+                    const FSubArrayHeader* ValueHeaders = nullptr;
+
+                    if (SafeRead(M2Base, M2Size, TransBlock->ofsTimestampArrays, TransBlock->nTimestampArrays, TimestampHeaders) &&
+                        SafeRead(M2Base, M2Size, TransBlock->ofsValueArrays, TransBlock->nValueArrays, ValueHeaders))
+                    {
+                        const FSubArrayHeader& TimestampHeader = TimestampHeaders[animIdx];
+                        const FSubArrayHeader& ValueHeader = ValueHeaders[animIdx];
+
+                        if (TimestampHeader.nEntries > 0 && ValueHeader.nEntries > 0)
+                        {
+                            const uint32* Timestamps = nullptr;
+                            const float* Values = nullptr; // 3 floats per entry (FVector)
+
+                            if (SafeRead(M2Base, M2Size, TimestampHeader.ofsEntries, TimestampHeader.nEntries, Timestamps) &&
+                                SafeRead(M2Base, M2Size, ValueHeader.ofsEntries, ValueHeader.nEntries * 3, Values))
+                            {
+                                Track.TransTimestamps.SetNum(TimestampHeader.nEntries);
+                                Track.TransValues.SetNum(ValueHeader.nEntries);
+
+                                FMemory::Memcpy(Track.TransTimestamps.GetData(), Timestamps, TimestampHeader.nEntries * sizeof(uint32));
+
+                                for (uint32 i = 0; i < ValueHeader.nEntries; i++)
+                                {
+                                    Track.TransValues[i] = FVector(Values[i * 3], Values[i * 3 + 1], Values[i * 3 + 2]);
+                                }
+                                bHasAnyKeyframes = true;
+                            }
+                        }
+                    }
+                }
+
+                // Parse rotation block
+                const FAnimBlock* RotBlock = reinterpret_cast<const FAnimBlock*>(Bone.RotBlock);
+                if (RotBlock->nTimestampArrays > animIdx && RotBlock->nValueArrays > animIdx)
+                {
+                    const FSubArrayHeader* TimestampHeaders = nullptr;
+                    const FSubArrayHeader* ValueHeaders = nullptr;
+
+                    if (SafeRead(M2Base, M2Size, RotBlock->ofsTimestampArrays, RotBlock->nTimestampArrays, TimestampHeaders) &&
+                        SafeRead(M2Base, M2Size, RotBlock->ofsValueArrays, RotBlock->nValueArrays, ValueHeaders))
+                    {
+                        const FSubArrayHeader& TimestampHeader = TimestampHeaders[animIdx];
+                        const FSubArrayHeader& ValueHeader = ValueHeaders[animIdx];
+
+                        if (TimestampHeader.nEntries > 0 && ValueHeader.nEntries > 0)
+                        {
+                            const uint32* Timestamps = nullptr;
+                            const int16* Values = nullptr; // 4 int16 per entry (packed quaternion)
+
+                            if (SafeRead(M2Base, M2Size, TimestampHeader.ofsEntries, TimestampHeader.nEntries, Timestamps) &&
+                                SafeRead(M2Base, M2Size, ValueHeader.ofsEntries, ValueHeader.nEntries * 4, Values))
+                            {
+                                Track.RotTimestamps.SetNum(TimestampHeader.nEntries);
+                                Track.RotValues.SetNum(ValueHeader.nEntries);
+
+                                FMemory::Memcpy(Track.RotTimestamps.GetData(), Timestamps, TimestampHeader.nEntries * sizeof(uint32));
+
+                                for (uint32 i = 0; i < ValueHeader.nEntries; i++)
+                                {
+                                    int16 x = Values[i * 4];
+                                    int16 y = Values[i * 4 + 1];
+                                    int16 z = Values[i * 4 + 2];
+                                    int16 w = Values[i * 4 + 3];
+                                    Track.RotValues[i] = UnpackQuaternion(x, y, z, w);
+                                }
+                                bHasAnyKeyframes = true;
+                            }
+                        }
+                    }
+                }
+
+                // Parse scale block
+                const FAnimBlock* ScaleBlock = reinterpret_cast<const FAnimBlock*>(Bone.ScaleBlock);
+                if (ScaleBlock->nTimestampArrays > animIdx && ScaleBlock->nValueArrays > animIdx)
+                {
+                    const FSubArrayHeader* TimestampHeaders = nullptr;
+                    const FSubArrayHeader* ValueHeaders = nullptr;
+
+                    if (SafeRead(M2Base, M2Size, ScaleBlock->ofsTimestampArrays, ScaleBlock->nTimestampArrays, TimestampHeaders) &&
+                        SafeRead(M2Base, M2Size, ScaleBlock->ofsValueArrays, ScaleBlock->nValueArrays, ValueHeaders))
+                    {
+                        const FSubArrayHeader& TimestampHeader = TimestampHeaders[animIdx];
+                        const FSubArrayHeader& ValueHeader = ValueHeaders[animIdx];
+
+                        if (TimestampHeader.nEntries > 0 && ValueHeader.nEntries > 0)
+                        {
+                            const uint32* Timestamps = nullptr;
+                            const float* Values = nullptr; // 3 floats per entry (FVector)
+
+                            if (SafeRead(M2Base, M2Size, TimestampHeader.ofsEntries, TimestampHeader.nEntries, Timestamps) &&
+                                SafeRead(M2Base, M2Size, ValueHeader.ofsEntries, ValueHeader.nEntries * 3, Values))
+                            {
+                                Track.ScaleTimestamps.SetNum(TimestampHeader.nEntries);
+                                Track.ScaleValues.SetNum(ValueHeader.nEntries);
+
+                                FMemory::Memcpy(Track.ScaleTimestamps.GetData(), Timestamps, TimestampHeader.nEntries * sizeof(uint32));
+
+                                for (uint32 i = 0; i < ValueHeader.nEntries; i++)
+                                {
+                                    Track.ScaleValues[i] = FVector(Values[i * 3], Values[i * 3 + 1], Values[i * 3 + 2]);
+                                }
+                                bHasAnyKeyframes = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (bHasAnyKeyframes)
+            {
+                Result.AnimationTracks.Add(MoveTemp(AnimData));
+            }
+        }
+
+        UE_LOG(LogM2, Log, TEXT("  Parsed %d animation tracks with keyframe data"), Result.AnimationTracks.Num());
+    }
+
     // ── Read textures ───────────────────────────────────────────────────
     const FM2TextureEntry* TexEntries = nullptr;
     if (Header.nTextures > 0 && SafeRead(M2Base, M2Size, Header.ofsTextures, Header.nTextures, TexEntries))

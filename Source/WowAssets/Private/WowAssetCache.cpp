@@ -1,6 +1,8 @@
 #include "WowAssetCache.h"
 #include "Engine/Texture2D.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowCache, Log, All);
 
@@ -30,18 +32,32 @@ UStaticMesh* FWowAssetCache::FindMesh(const FString& P) const
 	return (F && F->IsValid()) ? F->Get() : nullptr;
 }
 
+void FWowAssetCache::CacheSkelMesh(const FString& P, USkeletalMesh* M)
+{
+	FScopeLock L(&Lock);
+	SkelMeshes.Add(P, M);
+}
+
+USkeletalMesh* FWowAssetCache::FindSkelMesh(const FString& P) const
+{
+	FScopeLock L(&Lock);
+	auto* F = SkelMeshes.Find(P);
+	return (F && F->IsValid()) ? F->Get() : nullptr;
+}
+
 void FWowAssetCache::Clear()
 {
 	FScopeLock L(&Lock);
 	Textures.Empty();
 	Meshes.Empty();
+	SkelMeshes.Empty();
 }
 
 void FWowAssetCache::PurgeStaleEntries()
 {
 	FScopeLock L(&Lock);
 
-	int32 PurgedTex = 0, PurgedMesh = 0;
+	int32 PurgedTex = 0, PurgedMesh = 0, PurgedSkel = 0;
 
 	for (auto It = Textures.CreateIterator(); It; ++It)
 	{
@@ -61,9 +77,19 @@ void FWowAssetCache::PurgeStaleEntries()
 		}
 	}
 
-	if (PurgedTex > 0 || PurgedMesh > 0)
+	for (auto It = SkelMeshes.CreateIterator(); It; ++It)
 	{
-		UE_LOG(LogWowCache, Log, TEXT("Purged %d stale textures, %d stale meshes"), PurgedTex, PurgedMesh);
+		if (!It.Value().IsValid())
+		{
+			It.RemoveCurrent();
+			PurgedSkel++;
+		}
+	}
+
+	if (PurgedTex > 0 || PurgedMesh > 0 || PurgedSkel > 0)
+	{
+		UE_LOG(LogWowCache, Log, TEXT("Purged %d stale textures, %d stale meshes, %d stale skel meshes"),
+			PurgedTex, PurgedMesh, PurgedSkel);
 	}
 }
 
@@ -87,6 +113,15 @@ FWowCacheStats FWowAssetCache::GetStats() const
 		{
 			Stats.MeshCount++;
 			Stats.EstimatedMeshMemory += EstimateMeshMemory(Pair.Value.Get());
+		}
+	}
+
+	for (const auto& Pair : SkelMeshes)
+	{
+		if (Pair.Value.IsValid())
+		{
+			Stats.SkelMeshCount++;
+			Stats.EstimatedSkelMeshMemory += EstimateSkelMeshMemory(Pair.Value.Get());
 		}
 	}
 
@@ -123,4 +158,18 @@ int64 FWowAssetCache::EstimateMeshMemory(UStaticMesh* Mesh)
 		}
 	}
 	return Est > 0 ? Est : 64 * 1024; // default 64KB if we can't calculate
+}
+
+int64 FWowAssetCache::EstimateSkelMeshMemory(USkeletalMesh* Mesh)
+{
+	if (!Mesh) return 0;
+	int64 Est = 0;
+	if (FSkeletalMeshRenderData* RD = Mesh->GetResourceForRendering())
+	{
+		for (const FSkeletalMeshLODRenderData& LOD : RD->LODRenderData)
+		{
+			Est += LOD.GetNumVertices() * 64; // Slightly larger than static mesh (includes bone weights)
+		}
+	}
+	return Est > 0 ? Est : 64 * 1024;
 }

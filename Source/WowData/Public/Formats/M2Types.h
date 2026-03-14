@@ -39,6 +39,42 @@ struct WOWDATA_API FM2AnimSequence
 	bool IsLooping() const { return (Flags & 0x20) != 0; }
 };
 
+// Animation keyframe for a single bone
+struct WOWDATA_API FM2AnimKeyframe
+{
+    uint32 Time = 0; // ms
+    FVector Translation = FVector::ZeroVector;
+    FQuat Rotation = FQuat::Identity;
+    FVector Scale = FVector::OneVector;
+};
+
+// Animation track for one bone across one animation sequence
+struct WOWDATA_API FM2BoneTrack
+{
+    TArray<uint32> TransTimestamps;
+    TArray<FVector> TransValues;
+    TArray<uint32> RotTimestamps;
+    TArray<FQuat> RotValues;
+    TArray<uint32> ScaleTimestamps;
+    TArray<FVector> ScaleValues;
+
+    bool HasTranslation() const { return TransTimestamps.Num() > 0; }
+    bool HasRotation() const { return RotTimestamps.Num() > 0; }
+    bool HasScale() const { return ScaleTimestamps.Num() > 0; }
+    bool IsEmpty() const { return !HasTranslation() && !HasRotation() && !HasScale(); }
+};
+
+// All animation tracks for all bones for one animation sequence
+struct WOWDATA_API FM2AnimationData
+{
+    uint16 AnimationId = 0;
+    uint16 SubAnimationId = 0;
+    uint32 Duration = 0; // ms
+    bool bIsLooping = false;
+    float MoveSpeed = 0.0f;
+    TArray<FM2BoneTrack> BoneTracks; // one per bone
+};
+
 struct WOWDATA_API FM2Data
 {
     TArray<FM2Vertex> Vertices;
@@ -49,9 +85,11 @@ struct WOWDATA_API FM2Data
     float BoundingSphereRadius = 0.0f;
     TArray<FM2Bone> Bones;
     TArray<FM2AnimSequence> Animations;
+    TArray<FM2AnimationData> AnimationTracks; // parsed keyframe data per animation
     uint32 NumBones = 0;
     bool bIsValid = false;
 
     bool HasBones() const { return Bones.Num() > 0; }
     bool HasAnimations() const { return Animations.Num() > 0; }
+    bool HasAnimationData() const { return AnimationTracks.Num() > 0; }
 };

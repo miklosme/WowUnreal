@@ -1,6 +1,7 @@
 #include "WowDoodadManager.h"
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
+#include "WowSkeletalMeshBuilder.h"
 #include "Formats/M2Parser.h"
 #include "Formats/M2Types.h"
 #include "Formats/BlpParser.h"
@@ -10,8 +11,12 @@
 #include "Coord/WowCoordinate.h"
 #include "Formats/AdtTypes.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
+#include "Animation/AnimSequence.h"
+#include "Animation/Skeleton.h"
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -20,6 +25,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowDoodad, Log, All);
 
 TMap<FString, TSharedPtr<FM2Data>> FWowDoodadManager::ParsedM2Cache;
 FCriticalSection FWowDoodadManager::CacheLock;
+TMap<FString, TWeakObjectPtr<USkeleton>> FWowDoodadManager::SkeletonCache;
+TMap<FString, TArray<TWeakObjectPtr<UAnimSequence>>> FWowDoodadManager::AnimCache;
 
 FString FWowDoodadManager::GetSkinPath(const FString& M2Path)
 {
@@ -122,34 +129,64 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             continue;
         }
 
-        // Get or create static mesh (cached)
-        UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
-        if (!SM)
+        // Check if this model should use skeletal mesh (animated)
+        TSharedPtr<FM2Data> M2Parsed = GetOrParseM2(M2Path, Mpq);
+        if (!M2Parsed || !M2Parsed->bIsValid)
         {
             continue;
         }
-
-        // Create mesh component
-        FName CompName = *FString::Printf(TEXT("Doodad_%d_%d"), Placement.UniqueId, i);
-        UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(ParentActor, CompName);
-        MeshComp->SetStaticMesh(SM);
-        MeshComp->SetupAttachment(ParentActor->GetRootComponent());
-        MeshComp->SetCastShadow(true);
-        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
         // MDDF positions: convert to ADT space, then AdtToUE (matches terrain)
         float AdtX = Placement.Position.X;
         float AdtY = Placement.Position.Y;
         float AdtZ = Placement.Position.Z;
         FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
-
-        // Simple rotation: just yaw
         float ScaleVal = Placement.GetScaleFloat();
+        FRotator Rot(0.0f, -Placement.Rotation.Y, 0.0f);
 
-        MeshComp->SetWorldLocation(UEPos);
-        MeshComp->SetWorldRotation(FRotator(0.0f, -Placement.Rotation.Y, 0.0f));
-        MeshComp->SetWorldScale3D(FVector(ScaleVal));
-        MeshComp->RegisterComponent();
+        if (ShouldUseSkeletalMesh(*M2Parsed))
+        {
+            // Animated M2 — use skeletal mesh with animations
+            USkeletalMesh* SkelMesh = GetOrCreateSkeletalMesh(M2Path, Mpq, Cache);
+            if (!SkelMesh) continue;
+
+            FName CompName = *FString::Printf(TEXT("SkelDoodad_%d_%d"), Placement.UniqueId, i);
+            USkeletalMeshComponent* SkelComp = NewObject<USkeletalMeshComponent>(ParentActor, CompName);
+            SkelComp->SetSkeletalMesh(SkelMesh);
+            SkelComp->SetupAttachment(ParentActor->GetRootComponent());
+            SkelComp->SetCastShadow(true);
+            SkelComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            SkelComp->SetWorldLocation(UEPos);
+            SkelComp->SetWorldRotation(Rot);
+            SkelComp->SetWorldScale3D(FVector(ScaleVal));
+            SkelComp->RegisterComponent();
+
+            // Play first animation if available
+            FString NormPath = M2Path.ToLower();
+            NormPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+            auto* Anims = AnimCache.Find(NormPath);
+            if (Anims && Anims->Num() > 0 && (*Anims)[0].IsValid())
+            {
+                SkelComp->PlayAnimation((*Anims)[0].Get(), true);
+            }
+        }
+        else
+        {
+            // Static M2 — use static mesh as before
+            UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
+            if (!SM) continue;
+
+            FName CompName = *FString::Printf(TEXT("Doodad_%d_%d"), Placement.UniqueId, i);
+            UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(ParentActor, CompName);
+            MeshComp->SetStaticMesh(SM);
+            MeshComp->SetupAttachment(ParentActor->GetRootComponent());
+            MeshComp->SetCastShadow(true);
+            MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            MeshComp->SetWorldLocation(UEPos);
+            MeshComp->SetWorldRotation(Rot);
+            MeshComp->SetWorldScale3D(FVector(ScaleVal));
+            MeshComp->RegisterComponent();
+        }
 
         ++Spawned;
     }
@@ -406,4 +443,75 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
         TotalInstances, Result.Num(), GroupedPlacements.Num());
 
     return Result;
+}
+
+bool FWowDoodadManager::ShouldUseSkeletalMesh(const FM2Data& Data)
+{
+    return Data.HasBones() && Data.HasAnimationData() && Data.Bones.Num() > 1;
+}
+
+USkeletalMesh* FWowDoodadManager::GetOrCreateSkeletalMesh(const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache)
+{
+    if (!Mpq || !Cache) return nullptr;
+
+    FString NormalizedPath = M2Path.ToLower();
+    NormalizedPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+    // Check cache first
+    USkeletalMesh* Cached = Cache->FindSkelMesh(NormalizedPath);
+    if (Cached) return Cached;
+
+    // Parse M2
+    TSharedPtr<FM2Data> M2Data = GetOrParseM2(M2Path, Mpq);
+    if (!M2Data || !M2Data->bIsValid || !ShouldUseSkeletalMesh(*M2Data))
+    {
+        return nullptr;
+    }
+
+    FString ModelName = FPaths::GetBaseFilename(M2Path);
+
+    // Create or find skeleton
+    USkeleton* Skeleton = nullptr;
+    {
+        auto* CachedSkel = SkeletonCache.Find(NormalizedPath);
+        if (CachedSkel && CachedSkel->IsValid())
+        {
+            Skeleton = CachedSkel->Get();
+        }
+        else
+        {
+            Skeleton = FWowSkeletalMeshBuilder::CreateSkeleton(*M2Data, ModelName);
+            if (Skeleton)
+            {
+                SkeletonCache.Add(NormalizedPath, Skeleton);
+            }
+        }
+    }
+
+    if (!Skeleton) return nullptr;
+
+    // Create skeletal mesh
+    USkeletalMesh* SkelMesh = FWowSkeletalMeshBuilder::CreateSkeletalMesh(*M2Data, Skeleton, ModelName, Mpq, Cache);
+    if (SkelMesh)
+    {
+        Cache->CacheSkelMesh(NormalizedPath, SkelMesh);
+
+        // Create and cache animations
+        auto* CachedAnims = AnimCache.Find(NormalizedPath);
+        if (!CachedAnims)
+        {
+            TArray<UAnimSequence*> Anims = FWowSkeletalMeshBuilder::CreateAnimations(*M2Data, Skeleton, ModelName);
+            TArray<TWeakObjectPtr<UAnimSequence>> WeakAnims;
+            for (UAnimSequence* Anim : Anims)
+            {
+                WeakAnims.Add(Anim);
+            }
+            AnimCache.Add(NormalizedPath, MoveTemp(WeakAnims));
+        }
+
+        UE_LOG(LogWowDoodad, Log, TEXT("Created skeletal mesh for %s with %d bones, %d animations"),
+            *M2Path, M2Data->Bones.Num(), M2Data->AnimationTracks.Num());
+    }
+
+    return SkelMesh;
 }
