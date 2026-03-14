@@ -1,22 +1,15 @@
 #include "Formats/WdlParser.h"
+#include "Formats/ChunkId.h"
 DEFINE_LOG_CATEGORY_STATIC(LogWdl, Log, All);
 
-namespace
-{
-constexpr uint32 MakeFourCC(char A, char B, char C, char D)
-{
-	return (uint32)A | ((uint32)B << 8) | ((uint32)C << 16) | ((uint32)D << 24);
-}
-
 // On-disk reversed FourCCs
-constexpr uint32 CHUNK_MVER = MakeFourCC('R', 'E', 'V', 'M');
-constexpr uint32 CHUNK_MWMO = MakeFourCC('O', 'M', 'W', 'M');
-constexpr uint32 CHUNK_MWID = MakeFourCC('D', 'I', 'W', 'M');
-constexpr uint32 CHUNK_MODF = MakeFourCC('F', 'D', 'O', 'M');
-constexpr uint32 CHUNK_MAOF = MakeFourCC('F', 'O', 'A', 'M');
-constexpr uint32 CHUNK_MARE = MakeFourCC('E', 'R', 'A', 'M');
-constexpr uint32 CHUNK_MAHO = MakeFourCC('O', 'H', 'A', 'M');
-}
+static constexpr uint32 WDL_MVER = MakeFourCC('R', 'E', 'V', 'M');
+static constexpr uint32 WDL_MWMO = MakeFourCC('O', 'M', 'W', 'M');
+static constexpr uint32 WDL_MWID = MakeFourCC('D', 'I', 'W', 'M');
+static constexpr uint32 WDL_MODF = MakeFourCC('F', 'D', 'O', 'M');
+static constexpr uint32 WDL_MAOF = MakeFourCC('F', 'O', 'A', 'M');
+static constexpr uint32 WDL_MARE = MakeFourCC('E', 'R', 'A', 'M');
+static constexpr uint32 WDL_MAHO = MakeFourCC('O', 'H', 'A', 'M');
 
 FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 {
@@ -39,7 +32,7 @@ FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 
 		if (ChunkData + Size > End) break;
 
-		if (Magic == CHUNK_MVER)
+		if (Magic == WDL_MVER)
 		{
 			if (Size >= 4)
 			{
@@ -51,7 +44,7 @@ FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 				}
 			}
 		}
-		else if (Magic == CHUNK_MAOF)
+		else if (Magic == WDL_MAOF)
 		{
 			if (Size >= 64 * 64 * sizeof(uint32))
 			{
@@ -85,7 +78,7 @@ FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 			uint32 TileMagic = *reinterpret_cast<const uint32*>(TilePtr);
 			uint32 TileSize = *reinterpret_cast<const uint32*>(TilePtr + 4);
 
-			if (TileMagic != CHUNK_MARE) continue;
+			if (TileMagic != WDL_MARE) continue;
 			if (TileSize != 0x442) continue; // 17*17*2 + 16*16*2 = 578 + 512 = 1090 = 0x442
 
 			const uint8* HeightData = TilePtr + 8;

@@ -39,7 +39,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] TerrainTile actor (256 chunk meshes + materials)
 - [x] World manager with WDT loading and tile streaming
 - [x] Single tile test rendering (build/run audit still loads and renders terrain tiles)
-- [ ] Fix terrain material compile/fallback warnings on Metal (`M_WowTerrain` falls back to the default material during `./run_test.sh build`)
+- [?] Fix terrain material compile/fallback warnings on Metal (suppressed spurious LoadObject warning, extracted shared ChunkId.h to fix unity build collisions)
 
 ## Phase 4: World Streaming
 - [x] Camera-based tile streaming (load/unload with hysteresis)

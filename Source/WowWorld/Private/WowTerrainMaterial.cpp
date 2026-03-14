@@ -7,6 +7,8 @@
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "UObject/SoftObjectPath.h"
+#include "Misc/PackageName.h"
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
@@ -125,8 +127,14 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     static UMaterial* CachedMat = nullptr;
     if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
 
-    // Try loading a hand-authored material asset first
-    CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowTerrain"));
+    // Try loading a hand-authored material asset first (if it exists)
+    {
+        FSoftObjectPath MatPath(TEXT("/Game/Materials/M_WowTerrain.M_WowTerrain"));
+        if (MatPath.ResolveObject() || FPackageName::DoesPackageExist(MatPath.GetLongPackageName()))
+        {
+            CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowTerrain"));
+        }
+    }
     if (CachedMat)
     {
         UE_LOG(LogTerrainMat, Log, TEXT("Loaded custom terrain material /Game/Materials/M_WowTerrain"));

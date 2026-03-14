@@ -1,41 +1,31 @@
 #include "Formats/WmoParser.h"
+#include "Formats/ChunkId.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWmo, Log, All);
 
-namespace
-{
-// Helper to build a FourCC uint32 from a 4-char string literal.
-// WoW chunk magics are stored reversed in the file, e.g. "MOHD" is stored as 'D','H','O','M'.
-// We define the expected uint32 value as it appears when read as a little-endian uint32.
-constexpr uint32 MakeFourCC(char A, char B, char C, char D)
-{
-    return static_cast<uint32>(A)
-        | (static_cast<uint32>(B) << 8)
-        | (static_cast<uint32>(C) << 16)
-        | (static_cast<uint32>(D) << 24);
-}
-
 // Root chunks — REVERSED order, as stored on disk (little-endian uint32 read)
-constexpr uint32 CHUNK_MVER = MakeFourCC('R','E','V','M');
-constexpr uint32 CHUNK_MOHD = MakeFourCC('D','H','O','M');
-constexpr uint32 CHUNK_MOTX = MakeFourCC('X','T','O','M');
-constexpr uint32 CHUNK_MOMT = MakeFourCC('T','M','O','M');
-constexpr uint32 CHUNK_MOGN = MakeFourCC('N','G','O','M');
-constexpr uint32 CHUNK_MOGI = MakeFourCC('I','G','O','M');
-constexpr uint32 CHUNK_MODS = MakeFourCC('S','D','O','M');
-constexpr uint32 CHUNK_MODN = MakeFourCC('N','D','O','M');
-constexpr uint32 CHUNK_MODD = MakeFourCC('D','D','O','M');
+static constexpr uint32 WMO_MVER = MakeFourCC('R','E','V','M');
+static constexpr uint32 WMO_MOHD = MakeFourCC('D','H','O','M');
+static constexpr uint32 WMO_MOTX = MakeFourCC('X','T','O','M');
+static constexpr uint32 WMO_MOMT = MakeFourCC('T','M','O','M');
+static constexpr uint32 WMO_MOGN = MakeFourCC('N','G','O','M');
+static constexpr uint32 WMO_MOGI = MakeFourCC('I','G','O','M');
+static constexpr uint32 WMO_MODS = MakeFourCC('S','D','O','M');
+static constexpr uint32 WMO_MODN = MakeFourCC('N','D','O','M');
+static constexpr uint32 WMO_MODD = MakeFourCC('D','D','O','M');
 
 // Group chunks — REVERSED order, as stored on disk (little-endian uint32 read)
-constexpr uint32 CHUNK_MOGP = MakeFourCC('P','G','O','M');
-constexpr uint32 CHUNK_MOPY = MakeFourCC('Y','P','O','M');
-constexpr uint32 CHUNK_MOVI = MakeFourCC('I','V','O','M');
-constexpr uint32 CHUNK_MOVT = MakeFourCC('T','V','O','M');
-constexpr uint32 CHUNK_MONR = MakeFourCC('R','N','O','M');
-constexpr uint32 CHUNK_MOTV = MakeFourCC('V','T','O','M');
-constexpr uint32 CHUNK_MOBA = MakeFourCC('A','B','O','M');
-constexpr uint32 CHUNK_MOCV = MakeFourCC('V','C','O','M');
+static constexpr uint32 WMO_MOGP = MakeFourCC('P','G','O','M');
+static constexpr uint32 WMO_MOPY = MakeFourCC('Y','P','O','M');
+static constexpr uint32 WMO_MOVI = MakeFourCC('I','V','O','M');
+static constexpr uint32 WMO_MOVT = MakeFourCC('T','V','O','M');
+static constexpr uint32 WMO_MONR = MakeFourCC('R','N','O','M');
+static constexpr uint32 WMO_MOTV = MakeFourCC('V','T','O','M');
+static constexpr uint32 WMO_MOBA = MakeFourCC('A','B','O','M');
+static constexpr uint32 WMO_MOCV = MakeFourCC('V','C','O','M');
 
+namespace
+{
 // Safe read helpers
     template<typename T>
     FORCEINLINE T ReadVal(const uint8* Base, uint32& Offset, uint32 DataSize)
@@ -164,7 +154,7 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
             break;
         }
 
-        if (ChunkMagic == CHUNK_MOHD)
+        if (ChunkMagic == WMO_MOHD)
         {
             // Header: 64 bytes
             if (ChunkSize < 64)
@@ -205,13 +195,13 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
             (void)nMaterials; // materials count comes from MOMT chunk size
             (void)AmbientBGRA;
         }
-        else if (ChunkMagic == CHUNK_MOTX)
+        else if (ChunkMagic == WMO_MOTX)
         {
             // Texture name string table - just store pointer, will be used by MOMT
             TexNameTable = Base + ChunkStart;
             TexNameTableSize = ChunkSize;
         }
-        else if (ChunkMagic == CHUNK_MOMT)
+        else if (ChunkMagic == WMO_MOMT)
         {
             // Materials: 64 bytes each
             const uint32 NumMaterials = ChunkSize / 64;
@@ -265,7 +255,7 @@ FWmoRootData FWmoParser::ParseRoot(const TArray<uint8>& Data)
                 Result.Materials.Add(MoveTemp(Mat));
             }
         }
-        else if (ChunkMagic == CHUNK_MODN)
+        else if (ChunkMagic == WMO_MODN)
         {
             // Doodad name string table
             DoodNameTable = Base + ChunkStart;
@@ -326,7 +316,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
             break;
         }
 
-        if (ChunkMagic == CHUNK_MOGP)
+        if (ChunkMagic == WMO_MOGP)
         {
             // Parse the MOGP header (68 bytes)
             if (ChunkSize < 68)
@@ -391,7 +381,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
             break;
         }
 
-        if (ChunkMagic == CHUNK_MOVI)
+        if (ChunkMagic == WMO_MOVI)
         {
             // Triangle indices: uint16 each
             const uint32 NumIndices = ChunkSize / 2;
@@ -402,7 +392,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
                 Result.Indices[i] = ReadU16(Base, Off, DataSize);
             }
         }
-        else if (ChunkMagic == CHUNK_MOVT)
+        else if (ChunkMagic == WMO_MOVT)
         {
             // Vertices: 3 floats (12 bytes) each
             const uint32 NumVerts = ChunkSize / 12;
@@ -416,7 +406,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
                 Result.Vertices[i] = FVector(X, Y, Z);
             }
         }
-        else if (ChunkMagic == CHUNK_MONR)
+        else if (ChunkMagic == WMO_MONR)
         {
             // Normals: 3 floats (12 bytes) each
             const uint32 NumNormals = ChunkSize / 12;
@@ -430,7 +420,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
                 Result.Normals[i] = FVector(X, Y, Z);
             }
         }
-        else if (ChunkMagic == CHUNK_MOTV)
+        else if (ChunkMagic == WMO_MOTV)
         {
             // Texture coordinates: 2 floats (8 bytes) each
             // Only store the first MOTV set (some groups have two)
@@ -447,7 +437,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
                 }
             }
         }
-        else if (ChunkMagic == CHUNK_MOBA)
+        else if (ChunkMagic == WMO_MOBA)
         {
             // Render batches: 24 bytes each
             const uint32 NumBatches = ChunkSize / 24;
@@ -468,7 +458,7 @@ FWmoGroupData FWmoParser::ParseGroup(const TArray<uint8>& Data)
                 Batch.MaterialIndex = ReadU8(Base, Off, DataSize);
             }
         }
-        else if (ChunkMagic == CHUNK_MOCV)
+        else if (ChunkMagic == WMO_MOCV)
         {
             // Vertex colors: BGRA, 4 bytes each
             // Only store the first MOCV set

@@ -1,21 +1,12 @@
 #include "Formats/WdtParser.h"
+#include "Formats/ChunkId.h"
 DEFINE_LOG_CATEGORY_STATIC(LogWdt, Log, All);
 
-namespace
-{
-// WoW stores chunk IDs as reversed FourCC on disk.
-// "MPHD" is stored as bytes D,H,P,M. Read as LE uint32: M | P<<8 | H<<16 | D<<24
-constexpr uint32 MakeFourCC(char A, char B, char C, char D)
-{
-    return (uint32)A | ((uint32)B << 8) | ((uint32)C << 16) | ((uint32)D << 24);
-}
-
 // These match what's ON DISK (reversed)
-constexpr uint32 CHUNK_MVER = MakeFourCC('R', 'E', 'V', 'M');
-constexpr uint32 CHUNK_MPHD = MakeFourCC('D', 'H', 'P', 'M');
-constexpr uint32 CHUNK_MAIN = MakeFourCC('N', 'I', 'A', 'M');
-constexpr uint32 CHUNK_MWMO = MakeFourCC('O', 'M', 'W', 'M');
-}
+static constexpr uint32 WDT_MVER = MakeFourCC('R', 'E', 'V', 'M');
+static constexpr uint32 WDT_MPHD = MakeFourCC('D', 'H', 'P', 'M');
+static constexpr uint32 WDT_MAIN = MakeFourCC('N', 'I', 'A', 'M');
+static constexpr uint32 WDT_MWMO = MakeFourCC('O', 'M', 'W', 'M');
 
 FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
 {
@@ -33,7 +24,7 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
 
         if (ChunkData + Size > End) break;
 
-        if (Magic == CHUNK_MPHD)
+        if (Magic == WDT_MPHD)
         {
             if (Size >= 4)
             {
@@ -41,7 +32,7 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
                 Result.bUseBigAlpha = (Result.Flags & 0x04) != 0;
             }
         }
-        else if (Magic == CHUNK_MAIN)
+        else if (Magic == WDT_MAIN)
         {
             if (Size >= 64 * 64 * 8)
             {
@@ -58,7 +49,7 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
                 UE_LOG(LogWdt, Log, TEXT("MAIN chunk: found %d existing tiles"), TileCount);
             }
         }
-        else if (Magic == CHUNK_MWMO)
+        else if (Magic == WDT_MWMO)
         {
             if (Size > 0)
             {

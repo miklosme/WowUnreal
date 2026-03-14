@@ -1,4 +1,5 @@
 #include "Formats/AdtParser.h"
+#include "Formats/ChunkId.h"
 #include "Coord/WowCoordinate.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAdt, Log, All);
@@ -7,15 +8,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogAdt, Log, All);
 
 namespace
 {
-    // Reverse FourCC stored in files (e.g. "REVM" on disk → 'MVER')
-    uint32 MakeFourCC(char A, char B, char C, char D)
-    {
-        return (static_cast<uint32>(A))
-             | (static_cast<uint32>(B) << 8)
-             | (static_cast<uint32>(C) << 16)
-             | (static_cast<uint32>(D) << 24);
-    }
-
     // Chunk magics as they appear on disk (little-endian reversed)
     const uint32 MAGIC_MVER = MakeFourCC('R','E','V','M');
     const uint32 MAGIC_MHDR = MakeFourCC('R','D','H','M');
