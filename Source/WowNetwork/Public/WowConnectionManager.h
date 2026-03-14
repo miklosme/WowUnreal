@@ -36,6 +36,15 @@ public:
     /** Set target selection */
     UFUNCTION(BlueprintCallable) void SendSetSelection(int64 TargetGuid);
 
+    /** Cast a spell on the current target (or self if no target) */
+    UFUNCTION(BlueprintCallable) void SendCastSpell(int32 SpellId, int64 TargetGuid = 0);
+
+    /** Start melee attack on target */
+    UFUNCTION(BlueprintCallable) void SendAttackSwing(int64 TargetGuid);
+
+    /** Stop melee attack */
+    UFUNCTION(BlueprintCallable) void SendAttackStop();
+
     /** Get current target GUID */
     UFUNCTION(BlueprintCallable) int64 GetTargetGuid() const { return TargetGuid; }
 

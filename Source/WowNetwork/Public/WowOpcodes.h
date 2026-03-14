@@ -12,6 +12,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_MESSAGECHAT            = 0x0095;
     inline constexpr uint16 CMSG_CAST_SPELL             = 0x012E;
     inline constexpr uint16 CMSG_ATTACKSWING            = 0x0141;
+    inline constexpr uint16 CMSG_ATTACKSTOP             = 0x0142;
     inline constexpr uint16 CMSG_AUTH_SESSION            = 0x01ED;
     inline constexpr uint16 CMSG_SET_ACTIVE_MOVER       = 0x026A;
     inline constexpr uint16 CMSG_MOVE_TIME_SKIPPED      = 0x02CE;

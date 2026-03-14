@@ -2,7 +2,10 @@
 #include "WowEntityManager.h"
 #include "WowEntity.h"
 #include "WowConnectionManager.h"
+#include "WowPacketHandler.h"
 #include "WowUpdateFields.h"
+#include "Formats/Dbc/DbcStore.h"
+#include "Formats/Dbc/SpellDbc.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -264,11 +267,59 @@ STUB_RETURN_NIL(GetActionInfo)
 STUB_RETURN_NIL(GetActionTexture)
 STUB_RETURN_NONE(UseAction)
 
-// ─── Spell stubs ────────────────────────────────────────────────────────────────
+// ─── Spell functions ────────────────────────────────────────────────────────────
 STUB_RETURN_NIL(GetSpellInfo)
 STUB_RETURN_NIL(GetSpellCooldown)
-STUB_RETURN_NONE(CastSpellByName)
-STUB_RETURN_NONE(CastSpellByID)
+
+static int L_CastSpellByID(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (!Ctx || !Ctx->ConnectionManager) return 0;
+
+    int32 SpellId = static_cast<int32>(luaL_checknumber(L, 1));
+    int64 TargetGuid = Ctx->ConnectionManager->GetTargetGuid();
+    Ctx->ConnectionManager->SendCastSpell(SpellId, TargetGuid);
+    return 0;
+}
+
+static int L_CastSpellByName(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (!Ctx || !Ctx->ConnectionManager) return 0;
+
+    const char* SpellName = luaL_checkstring(L, 1);
+    FString NameStr = UTF8_TO_TCHAR(SpellName);
+
+    // Strip rank suffix like "Fireball(Rank 1)" — WoW API convention
+    int32 ParenIdx = INDEX_NONE;
+    if (NameStr.FindChar(TEXT('('), ParenIdx))
+    {
+        NameStr.LeftInline(ParenIdx);
+        NameStr.TrimEndInline();
+    }
+
+    // Look up spell ID from DBC by name, matching against known spells
+    const FSpellDbc& Spells = FDbcStore::Get().Spells();
+    const FWowPacketHandler& Handler = Ctx->ConnectionManager->PacketHandler;
+    uint32 FoundSpellId = 0;
+
+    for (const FSpellDbcEntry& Entry : Spells.GetAll())
+    {
+        if (Entry.SpellName.Equals(NameStr, ESearchCase::IgnoreCase) && Handler.KnownSpells.Contains(Entry.ID))
+        {
+            // Pick the highest-rank known spell with this name
+            FoundSpellId = Entry.ID;
+        }
+    }
+
+    if (FoundSpellId != 0)
+    {
+        int64 TargetGuid = Ctx->ConnectionManager->GetTargetGuid();
+        Ctx->ConnectionManager->SendCastSpell(FoundSpellId, TargetGuid);
+    }
+
+    return 0;
+}
 
 // ─── Item stubs ─────────────────────────────────────────────────────────────────
 STUB_RETURN_NIL(GetItemInfo)
@@ -298,6 +349,31 @@ static int L_ClearTarget(lua_State* L)
     if (Ctx && Ctx->ConnectionManager)
     {
         Ctx->ConnectionManager->SendSetSelection(0);
+    }
+    return 0;
+}
+
+// ─── Combat ─────────────────────────────────────────────────────────────────────
+static int L_AttackTarget(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        int64 TargetGuid = Ctx->ConnectionManager->GetTargetGuid();
+        if (TargetGuid != 0)
+        {
+            Ctx->ConnectionManager->SendAttackSwing(TargetGuid);
+        }
+    }
+    return 0;
+}
+
+static int L_StopAttack(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        Ctx->ConnectionManager->SendAttackStop();
     }
     return 0;
 }
@@ -409,6 +485,10 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     // Target
     lua_register(L, "TargetUnit", L_TargetUnit);
     lua_register(L, "ClearTarget", L_ClearTarget);
+
+    // Combat
+    lua_register(L, "AttackTarget", L_AttackTarget);
+    lua_register(L, "StopAttack", L_StopAttack);
 
     // Misc
     lua_register(L, "IsLoggedIn", L_IsLoggedIn);

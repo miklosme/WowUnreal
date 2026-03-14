@@ -56,7 +56,7 @@ void FWowPacketHandler::HandleLoginVerifyWorld(FPacketReader& R)
     UE_LOG(LogWowPacket, Log, TEXT("LOGIN_VERIFY_WORLD: map=%d pos=(%.1f, %.1f, %.1f) orient=%.2f"),
         MapId, X, Y, Z, O);
 
-    OnLoginVerifyWorld.Broadcast(MapId, X, Y, Z);
+    OnLoginVerifyWorld.Broadcast(MapId, X, Y, Z, O);
 }
 
 // ── SMSG_UPDATE_OBJECT ───────────────────────────────────────────────────────
@@ -497,10 +497,12 @@ void FWowPacketHandler::HandleInitialSpells(FPacketReader& R)
     R.ReadU8(); // talent spec
     uint16 SpellCount = R.ReadU16();
 
+    KnownSpells.Empty(SpellCount);
     for (int32 i = 0; i < SpellCount; ++i)
     {
-        R.ReadU32(); // spell ID
+        uint32 SpellId = R.ReadU32();
         R.ReadU16(); // unknown (slot?)
+        KnownSpells.Add(SpellId);
     }
 
     uint16 CooldownCount = R.ReadU16();
@@ -513,7 +515,7 @@ void FWowPacketHandler::HandleInitialSpells(FPacketReader& R)
         R.ReadU32(); // category cooldown
     }
 
-    UE_LOG(LogWowPacket, Log, TEXT("INITIAL_SPELLS: %d spells, %d cooldowns"), SpellCount, CooldownCount);
+    UE_LOG(LogWowPacket, Log, TEXT("INITIAL_SPELLS: %d spells stored, %d cooldowns"), SpellCount, CooldownCount);
 }
 
 // ── SMSG_ACTION_BUTTONS ──────────────────────────────────────────────────────

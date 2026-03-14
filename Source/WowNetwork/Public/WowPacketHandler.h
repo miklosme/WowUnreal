@@ -3,7 +3,7 @@
 #include "WowOpcodes.h"
 #include "WowEntityManager.h"
 
-DECLARE_MULTICAST_DELEGATE_FourParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/);
+DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
 DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
 
@@ -90,6 +90,9 @@ public:
 
     /** Entity manager — tracks all objects in the world */
     FWowEntityManager EntityManager;
+
+    /** Known spell IDs (populated from SMSG_INITIAL_SPELLS) */
+    TSet<uint32> KnownSpells;
 
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;

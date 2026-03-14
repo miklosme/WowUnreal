@@ -78,7 +78,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
     }
 
     const FWowRealmInfo& Realm = CachedRealms[I];
-    UE_LOG(LogWowNet, Log, TEXT("Selected realm: %s (%s:%d)"), *Realm.Name, *Realm.Address, Realm.Port);
+    UE_LOG(LogWowNet, Log, TEXT("Selected realm: %s id=%u (%s:%d)"), *Realm.Name, Realm.RealmId, *Realm.Address, Realm.Port);
 
     SetState(EWowSessionState::WorldConnecting);
 
@@ -109,7 +109,7 @@ void UWowConnectionManager::SelectRealm(int32 I)
         }
     });
 
-    if (!WorldSocket->Connect(Realm.Address, Realm.Port, CachedAccountName, SessionKey))
+    if (!WorldSocket->Connect(Realm.Address, Realm.Port, CachedAccountName, SessionKey, Realm.RealmId))
     {
         UE_LOG(LogWowNet, Error, TEXT("Failed to connect to world server %s:%d"), *Realm.Address, Realm.Port);
         SetState(EWowSessionState::Error);
@@ -171,10 +171,12 @@ void UWowConnectionManager::EnterWorld(int64 G)
         return;
     }
 
+    PacketHandler.EntityManager.LocalPlayerGuid = static_cast<uint64>(G);
+
     // Listen for LOGIN_VERIFY_WORLD to transition to InGame state
-    PacketHandler.OnLoginVerifyWorld.AddLambda([this](uint32 MapId, float X, float Y, float Z)
+    PacketHandler.OnLoginVerifyWorld.AddLambda([this](uint32 MapId, float X, float Y, float Z, float Orientation)
     {
-        UE_LOG(LogWowNet, Log, TEXT("Entered world: map=%d pos=(%.1f, %.1f, %.1f)"), MapId, X, Y, Z);
+        UE_LOG(LogWowNet, Log, TEXT("Entered world: map=%d pos=(%.1f, %.1f, %.1f) orient=%.2f"), MapId, X, Y, Z, Orientation);
         SetState(EWowSessionState::WorldInGame);
     });
 
@@ -276,6 +278,74 @@ void UWowConnectionManager::SendSetSelection(int64 InTargetGuid)
 
     WorldSocket->SendPacket(WowOpcode::CMSG_SET_SELECTION, Data);
     UE_LOG(LogWowNet, Log, TEXT("Set target: GUID %lld"), InTargetGuid);
+}
+
+void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(32);
+
+    // castCount (uint8) — 0 for first cast
+    uint8 CastCount = 0;
+    Data.Add(CastCount);
+
+    // spellId (uint32)
+    uint32 Spell = static_cast<uint32>(SpellId);
+    Data.Append(reinterpret_cast<const uint8*>(&Spell), 4);
+
+    // castFlags (uint8) — 0 for normal cast
+    uint8 CastFlags = 0;
+    Data.Add(CastFlags);
+
+    // targetMask (uint32) — TARGET_FLAG_UNIT (0x02) if we have a target, else TARGET_FLAG_NONE (0x00)
+    uint64 TGuid = static_cast<uint64>(InTargetGuid);
+    uint32 TargetMask = (TGuid != 0) ? 0x0002 : 0x0000;
+    Data.Append(reinterpret_cast<const uint8*>(&TargetMask), 4);
+
+    // If targeting a unit, write packed GUID
+    if (TGuid != 0)
+    {
+        uint8 GuidMask = 0;
+        uint8 GuidBytes[8];
+        int32 GuidByteCount = 0;
+        for (int32 i = 0; i < 8; ++i)
+        {
+            uint8 Byte = static_cast<uint8>((TGuid >> (i * 8)) & 0xFF);
+            if (Byte != 0)
+            {
+                GuidMask |= (1 << i);
+                GuidBytes[GuidByteCount++] = Byte;
+            }
+        }
+        Data.Add(GuidMask);
+        Data.Append(GuidBytes, GuidByteCount);
+    }
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_CAST_SPELL, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Cast spell %d on target %lld"), SpellId, InTargetGuid);
+}
+
+void UWowConnectionManager::SendAttackSwing(int64 InTargetGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    uint64 G = static_cast<uint64>(InTargetGuid);
+    FMemory::Memcpy(Data.GetData(), &G, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_ATTACKSWING, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Attack swing on target %lld"), InTargetGuid);
+}
+
+void UWowConnectionManager::SendAttackStop()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_ATTACKSTOP);
+    UE_LOG(LogWowNet, Log, TEXT("Attack stop"));
 }
 
 void UWowConnectionManager::SendKeepAlive()
