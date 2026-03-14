@@ -83,17 +83,16 @@ void AWowWorldManager::BeginPlay()
     // First chunk (0,0) starts at local offset ~(-26667, -26667, height*100)
     // The height for Elwynn is ~236 WoW units = 23600 UE cm
     FVector TileCenter = FWowCoordinate::TileToWorld(DebugTileX, DebugTileY);
-    TileCenter.Z = 30000.0f;  // 300m, above typical terrain height of ~236m
-
-    UE_LOG(LogWowWorld, Log, TEXT("Tile actor at: %s, teleporting player to Z=30000 above it"), *TileCenter.ToString());
+    // Start at a reasonable flying height (above terrain which is ~100-300 WoW units = 10000-30000 cm)
+    TileCenter.Z = 40000.0f;  // 400m up, well above Elwynn terrain (~100-300 WoW units)
 
     APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
     if (PC && PC->GetPawn())
     {
         PC->GetPawn()->SetActorLocation(TileCenter);
-        // Look straight down to see terrain
-        PC->SetControlRotation(FRotator(-89.0f, 0.0f, 0.0f));
-        UE_LOG(LogWowWorld, Log, TEXT("Teleported player to: %s, looking down"), *TileCenter.ToString());
+        // Look slightly down at the terrain (not straight down)
+        PC->SetControlRotation(FRotator(-20.0f, 0.0f, 0.0f));
+        UE_LOG(LogWowWorld, Log, TEXT("Teleported player to: %s"), *TileCenter.ToString());
     }
 }
 
@@ -173,7 +172,7 @@ void AWowWorldManager::LoadTile(int32 TX, int32 TY)
     AWowTerrainTile* Tile = GetWorld()->SpawnActor<AWowTerrainTile>(AWowTerrainTile::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
     if (Tile)
     {
-        Tile->BuildFromAdtData(AdtData, TX, TY, MpqManager.Get(), AssetCache.Get());
+        Tile->BuildFromAdtData(AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds);
         LoadedTiles.Add(TileKey(TX, TY), Tile);
     }
 }

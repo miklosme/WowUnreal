@@ -50,6 +50,9 @@ private:
 
     FIntPoint LastCameraTile = FIntPoint(-9999, -9999);
 
+    /** Track spawned WMO unique IDs to avoid duplicates across tiles */
+    TSet<uint32> SpawnedWmoIds;
+
     void LoadTile(int32 TX, int32 TY);
     void UnloadTile(int32 TX, int32 TY);
     void UpdateStreaming();

@@ -25,7 +25,7 @@ UMaterialInterface* AWowTerrainTile::GetDefaultTerrainMaterial() const
     return DefaultMat;
 }
 
-void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache)
+void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds)
 {
     TileCoord = FIntPoint(TX, TY);
     if (!Data.bIsValid) return;
@@ -111,22 +111,43 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         }
 
         MeshComp->SetCastShadow(false);
+        MeshComp->bUseComplexAsSimpleCollision = false;
+        // Render both sides to avoid backface culling gaps
+        MeshComp->SetRenderCustomDepth(false);
         ChunkMeshes.Add(MeshComp);
 
-        UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: merged mesh with %d verts, %d tris"),
-            TX, TY, AllVertices.Num(), AllIndices.Num() / 3);
+        // Log bounds for gap debugging
+        FVector MinV(FLT_MAX), MaxV(-FLT_MAX);
+        for (const FVector& V : AllVertices)
+        {
+            MinV.X = FMath::Min(MinV.X, V.X); MinV.Y = FMath::Min(MinV.Y, V.Y); MinV.Z = FMath::Min(MinV.Z, V.Z);
+            MaxV.X = FMath::Max(MaxV.X, V.X); MaxV.Y = FMath::Max(MaxV.Y, V.Y); MaxV.Z = FMath::Max(MaxV.Z, V.Z);
+        }
+        FVector WorldMin = GetActorLocation() + MinV;
+        FVector WorldMax = GetActorLocation() + MaxV;
+        UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d verts, %d tris. Local[%s to %s] World[%s to %s]"),
+            TX, TY, AllVertices.Num(), AllIndices.Num() / 3,
+            *MinV.ToString(), *MaxV.ToString(), *WorldMin.ToString(), *WorldMax.ToString());
     }
 
-    // Spawn doodads (M2 models)
-    if (Data.DoodadPlacements.Num() > 0 && Data.DoodadPaths.Num() > 0)
-    {
-        FWowDoodadManager::SpawnDoodads(this, Data.DoodadPlacements, Data.DoodadPaths, Mpq, Cache);
-    }
+    // TODO: Doodads temporarily disabled - too many ProceduralMesh components crash Metal
+    // Need to batch into HISMC or use runtime StaticMesh
+    // FWowDoodadManager::SpawnDoodads(this, Data.DoodadPlacements, Data.DoodadPaths, Mpq, Cache);
 
-    // Spawn WMOs (buildings/structures)
+    // TODO: WMOs temporarily disabled - too many ProceduralMesh components crash Metal
+    // Need to batch group meshes or use runtime StaticMesh
     int32 WmosSpawned = 0;
+    if (false) // DISABLED
     for (const FAdtWmoPlacement& WmoPlacement : Data.WmoPlacements)
     {
+        // Skip WMOs already spawned by another tile
+        if (SpawnedWmoIds)
+        {
+            if (SpawnedWmoIds->Contains(WmoPlacement.UniqueId))
+                continue;
+            SpawnedWmoIds->Add(WmoPlacement.UniqueId);
+        }
+
         if (WmoPlacement.NameIndex >= 0 && WmoPlacement.NameIndex < Data.WmoPaths.Num())
         {
             const FString& WmoPath = Data.WmoPaths[WmoPlacement.NameIndex];

@@ -47,9 +47,8 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
         return nullptr;
     }
 
-    // Spawn actor for this WMO
+    // Spawn actor for this WMO (use NAME_None to auto-generate unique name)
     FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = *FString::Printf(TEXT("WMO_%u"), Placement.UniqueId);
     SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
     AActor* WmoActor = World->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);

@@ -14,7 +14,7 @@ class WOWWORLD_API AWowTerrainTile : public AActor
     GENERATED_BODY()
 public:
     AWowTerrainTile();
-    void BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache);
+    void BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds = nullptr);
     FIntPoint GetTileCoord() const { return TileCoord; }
 private:
     UPROPERTY()
