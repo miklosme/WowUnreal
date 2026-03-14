@@ -81,6 +81,22 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMaterialInstanceDynamic> CloudMaterial;
 
+	/** Sun disc billboard */
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> SunDiscMesh;
+
+	/** Moon disc billboard */
+	UPROPERTY()
+	TObjectPtr<UStaticMeshComponent> MoonDiscMesh;
+
+	/** Dynamic material for sun disc */
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> SunDiscMaterial;
+
+	/** Dynamic material for moon disc */
+	UPROPERTY()
+	TObjectPtr<UMaterialInstanceDynamic> MoonDiscMaterial;
+
 	/** Cached light zone entries for the current map */
 	TArray<const FLightDbcEntry*> MapLights;
 
@@ -149,6 +165,12 @@ private:
 
 	/** Create the cloud plane mesh */
 	void CreateCloudMesh();
+
+	/** Create sun/moon disc billboards */
+	void CreateCelestialDiscs();
+
+	/** Update sun/moon disc positions and visibility */
+	void UpdateCelestialDiscs();
 
 	/** Fallback interpolation (used when DBC data not available) */
 	FLinearColor GetSkyColorFallback() const;

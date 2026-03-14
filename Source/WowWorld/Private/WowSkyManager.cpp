@@ -83,6 +83,18 @@ void AWowSkyManager::BeginPlay()
 	// Create cloud plane
 	CreateCloudMesh();
 
+	// Create sun/moon disc billboards
+	CreateCelestialDiscs();
+
+	// Parse -timeofday= command-line override for deterministic verification
+	float CmdTimeOfDay = -1.0f;
+	if (FParse::Value(FCommandLine::Get(), TEXT("-timeofday="), CmdTimeOfDay))
+	{
+		TimeOfDay = FMath::Clamp(CmdTimeOfDay, 0.0f, 1439.9f);
+		TimeSpeed = 0.0f; // Freeze time for screenshots
+		UE_LOG(LogWowSky, Log, TEXT("Time-of-day override: %.0f minutes (frozen)"), TimeOfDay);
+	}
+
 	// Load light zones from DBC
 	LoadLightZones(CurrentMapId);
 
@@ -95,6 +107,7 @@ void AWowSkyManager::BeginPlay()
 	UpdateFog();
 	UpdateSkydome();
 	UpdateClouds();
+	UpdateCelestialDiscs();
 
 	UE_LOG(LogWowSky, Log, TEXT("Sky manager initialized: time=%.0f, speed=%.1f, dbcLights=%d, floatParams=%s"),
 		TimeOfDay, TimeSpeed, MapLights.Num(), bHasFloatParams ? TEXT("yes") : TEXT("no"));
@@ -411,6 +424,146 @@ void AWowSkyManager::CreateCloudMesh()
 	UE_LOG(LogWowSky, Log, TEXT("Cloud mesh created"));
 }
 
+void AWowSkyManager::CreateCelestialDiscs()
+{
+	const float DiscDistance = 850000.0f; // Slightly inside skydome radius
+	const float SunSize = 30000.0f;
+	const float MoonSize = 20000.0f;
+
+	// Helper: create a simple quad mesh for a celestial disc
+	auto MakeDiscMesh = [this](float Size, const FName& Name) -> UStaticMesh*
+	{
+		TArray<FVector> Verts;
+		TArray<FVector4f> Colors;
+		TArray<int32> Indices;
+
+		float H = Size * 0.5f;
+		Verts.Add(FVector(0, -H, -H));
+		Verts.Add(FVector(0,  H, -H));
+		Verts.Add(FVector(0,  H,  H));
+		Verts.Add(FVector(0, -H,  H));
+
+		Colors.Add(FVector4f(0, 0, 1, 1));
+		Colors.Add(FVector4f(1, 0, 1, 1));
+		Colors.Add(FVector4f(1, 1, 1, 1));
+		Colors.Add(FVector4f(0, 1, 1, 1));
+
+		Indices.Add(0); Indices.Add(1); Indices.Add(2);
+		Indices.Add(0); Indices.Add(2); Indices.Add(3);
+		// Back face
+		Indices.Add(0); Indices.Add(2); Indices.Add(1);
+		Indices.Add(0); Indices.Add(3); Indices.Add(2);
+
+		return BuildDomeMesh(this, Verts, Indices, Colors);
+	};
+
+	// Create emissive material for sun disc
+	auto MakeDiscMaterial = [this](const FName& MatName, const FLinearColor& DefaultColor) -> UMaterialInstanceDynamic*
+	{
+		UMaterial* BaseMat = NewObject<UMaterial>(this, MatName);
+		BaseMat->SetShadingModel(MSM_Unlit);
+		BaseMat->TwoSided = true;
+		BaseMat->BlendMode = BLEND_Additive;
+
+		auto* PColor = NewObject<UMaterialExpressionVectorParameter>(BaseMat);
+		PColor->ParameterName = TEXT("DiscColor");
+		PColor->DefaultValue = DefaultColor;
+		BaseMat->GetExpressionCollection().AddExpression(PColor);
+
+		BaseMat->GetEditorOnlyData()->EmissiveColor.Connect(0, PColor);
+		BaseMat->PreEditChange(nullptr);
+		BaseMat->PostEditChange();
+
+		return UMaterialInstanceDynamic::Create(BaseMat, this);
+	};
+
+	// Sun disc
+	UStaticMesh* SunMesh = MakeDiscMesh(SunSize, TEXT("SunDiscQuad"));
+	SunDiscMaterial = MakeDiscMaterial(TEXT("SunDiscMat"), FLinearColor(3.0f, 2.5f, 1.5f)); // Bright warm
+
+	SunDiscMesh = NewObject<UStaticMeshComponent>(this, TEXT("SunDiscComp"));
+	SunDiscMesh->SetStaticMesh(SunMesh);
+	SunDiscMesh->SetMaterial(0, SunDiscMaterial);
+	SunDiscMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SunDiscMesh->SetCastShadow(false);
+	SunDiscMesh->bAffectDistanceFieldLighting = false;
+	SunDiscMesh->RegisterComponent();
+	SunDiscMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+
+	// Moon disc
+	UStaticMesh* MoonMeshAsset = MakeDiscMesh(MoonSize, TEXT("MoonDiscQuad"));
+	MoonDiscMaterial = MakeDiscMaterial(TEXT("MoonDiscMat"), FLinearColor(0.6f, 0.65f, 0.9f)); // Cool blue-white
+
+	MoonDiscMesh = NewObject<UStaticMeshComponent>(this, TEXT("MoonDiscComp"));
+	MoonDiscMesh->SetStaticMesh(MoonMeshAsset);
+	MoonDiscMesh->SetMaterial(0, MoonDiscMaterial);
+	MoonDiscMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MoonDiscMesh->SetCastShadow(false);
+	MoonDiscMesh->bAffectDistanceFieldLighting = false;
+	MoonDiscMesh->RegisterComponent();
+	MoonDiscMesh->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+
+	UE_LOG(LogWowSky, Log, TEXT("Celestial discs created (sun=%.0f, moon=%.0f)"), SunSize, MoonSize);
+}
+
+void AWowSkyManager::UpdateCelestialDiscs()
+{
+	const float DiscDistance = 850000.0f;
+
+	FVector CameraPos = FVector::ZeroVector;
+	if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(this, 0))
+	{
+		CameraPos = Pawn->GetActorLocation();
+	}
+
+	float NormalizedTime = TimeOfDay / 1440.0f;
+	float SunPitch = -90.0f * FMath::Sin(NormalizedTime * PI);
+	float SunYaw = (NormalizedTime * 360.0f) + 180.0f;
+	bool bSunAboveHorizon = SunPitch < -5.0f;
+
+	if (SunDiscMesh)
+	{
+		// Position sun disc along the sun's direction vector from camera
+		FRotator SunRot(SunPitch, SunYaw, 0.0f);
+		FVector SunDir = SunRot.Vector();
+		FVector SunPos = CameraPos - SunDir * DiscDistance; // Light points toward origin
+
+		SunDiscMesh->SetWorldLocation(SunPos);
+		// Billboard: face the camera
+		FRotator FaceCamera = (CameraPos - SunPos).Rotation();
+		SunDiscMesh->SetWorldRotation(FaceCamera);
+		SunDiscMesh->SetVisibility(bSunAboveHorizon);
+
+		// Tint sun disc color based on time (warm at sunrise/sunset)
+		if (SunDiscMaterial)
+		{
+			FLinearColor SunColor;
+			if (bHasDbcLights)
+			{
+				SunColor = BlendZoneColor(LP_SunColor, CameraPos) * 3.0f;
+			}
+			else
+			{
+				SunColor = GetSunColorFallback() * 3.0f;
+			}
+			SunDiscMaterial->SetVectorParameterValue(TEXT("DiscColor"), SunColor);
+		}
+	}
+
+	if (MoonDiscMesh)
+	{
+		// Moon is opposite the sun
+		FRotator MoonRot(SunPitch + 180.0f, SunYaw + 180.0f, 0.0f);
+		FVector MoonDir = MoonRot.Vector();
+		FVector MoonPos = CameraPos - MoonDir * DiscDistance;
+
+		MoonDiscMesh->SetWorldLocation(MoonPos);
+		FRotator FaceCamera = (CameraPos - MoonPos).Rotation();
+		MoonDiscMesh->SetWorldRotation(FaceCamera);
+		MoonDiscMesh->SetVisibility(!bSunAboveHorizon);
+	}
+}
+
 void AWowSkyManager::LoadLightZones(int32 MapId)
 {
 	CurrentMapId = MapId;
@@ -460,6 +613,7 @@ void AWowSkyManager::Tick(float DeltaTime)
 	UpdateFog();
 	UpdateSkydome();
 	UpdateClouds();
+	UpdateCelestialDiscs();
 }
 
 void AWowSkyManager::UpdateSunPosition()
