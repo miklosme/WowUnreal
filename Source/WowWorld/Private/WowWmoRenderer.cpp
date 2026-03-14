@@ -6,7 +6,9 @@
 #include "Formats/BlpParser.h"
 #include "Formats/BlpTypes.h"
 #include "WowTextureFactory.h"
+#include "WowTerrainMaterial.h"
 #include "Coord/WowCoordinate.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Formats/AdtTypes.h"
 #include "ProceduralMeshComponent.h"
 #include "GameFramework/Actor.h"
@@ -65,12 +67,10 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     // MODF positions are in noggit3 space (X=east, Y=up, Z=south)
     FVector UEPos = FWowCoordinate::NoggitToUE(
         Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
-    // noggit3 rotation: from_model_rotation(rX, rY, rZ) = (-rZ, rY - 90, rX)
-    // Applied as YZX euler. In UE after our coord transform:
-    // UE Yaw = -(rY - 90) = -rY + 90 (noggit3 Y-axis maps to UE yaw)
-    // UE Pitch = rX (noggit3 X-axis)
-    // UE Roll = rZ (noggit3 Z-axis)
-    FRotator UERot = FRotator(Placement.Rotation.X, -Placement.Rotation.Y + 90.0f, Placement.Rotation.Z);
+    // WoW rotation (degrees): rotY is yaw around Y-up axis.
+    // In UE Z-up: Yaw = rotY, but negated due to X negation + axis swap
+    // Pitch = rotX, Roll = rotZ
+    FRotator UERot = FRotator(-Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
 
     WmoActor->SetActorLocation(UEPos);
     WmoActor->SetActorRotation(UERot);
@@ -79,8 +79,9 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     float ScaleVal = (Placement.Scale == 0) ? 1.0f : Placement.Scale / 1024.0f;
     WmoActor->SetActorScale3D(FVector(ScaleVal));
 
-    // Load a default material
-    UMaterial* DefaultMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+    // Get the runtime material that supports texture parameters
+    UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
+    UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
 
     int32 GroupsLoaded = 0;
 
@@ -141,14 +142,16 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WMO file vertices are (X=east, Y=south, Z=up)
-            // Convert to noggit3 (X=east, Y=up, Z=south): (fX, fZ, -fY)
-            // Then NoggitToUE: UE = (-NgZ, NgX, NgY) = (fY, fX, fZ)
+            // WoW model vertices are right-handed Y-up (OpenGL convention).
+            // UE is left-handed Z-up. Convert by:
+            // 1) Swap Y and Z (Y-up → Z-up): (X, Z, Y)
+            // 2) Negate X to fix handedness (RH → LH): (-X, Z, Y)
+            // Combined with SCALE for unit conversion.
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(P.Y, P.X, P.Z) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(-P.X, P.Z, P.Y) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(GroupData.Normals[i].Y, GroupData.Normals[i].X, GroupData.Normals[i].Z)
+                ? FVector(-GroupData.Normals[i].X, GroupData.Normals[i].Z, GroupData.Normals[i].Y)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;
@@ -163,12 +166,14 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             Tangents[i] = FProcMeshTangent(T, false);
         }
 
-        // Convert indices from uint16 to int32 (keep original winding)
+        // Convert indices from uint16 to int32, reverse winding (negate X flips handedness)
         TArray<int32> Indices;
         Indices.SetNum(GroupData.Indices.Num());
-        for (int32 i = 0; i < GroupData.Indices.Num(); ++i)
+        for (int32 i = 0; i + 2 < GroupData.Indices.Num(); i += 3)
         {
-            Indices[i] = static_cast<int32>(GroupData.Indices[i]);
+            Indices[i]     = static_cast<int32>(GroupData.Indices[i]);
+            Indices[i + 1] = static_cast<int32>(GroupData.Indices[i + 2]);
+            Indices[i + 2] = static_cast<int32>(GroupData.Indices[i + 1]);
         }
 
         // If we have batches, create one section per batch for separate materials
@@ -228,13 +233,14 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                     SectionIdx, BatchVerts, BatchIndices, BatchNormals,
                     BatchUVs, BatchColors, BatchTangents, false);
 
-                // Try to apply texture from material
-                if (Batch.MaterialIndex < RootData.Materials.Num() && Cache)
+                // Apply textured material from WMO material data
+                if (Batch.MaterialIndex < RootData.Materials.Num() && Cache && BaseMat)
                 {
                     const FWmoMaterial& WmoMat = RootData.Materials[Batch.MaterialIndex];
+                    UTexture2D* Tex = nullptr;
                     if (!WmoMat.TexturePath1.IsEmpty())
                     {
-                        UTexture2D* Tex = Cache->FindTexture(WmoMat.TexturePath1);
+                        Tex = Cache->FindTexture(WmoMat.TexturePath1);
                         if (!Tex)
                         {
                             TArray<uint8> BlpRaw;
@@ -244,18 +250,21 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                                 if (BlpData.bIsValid)
                                 {
                                     Tex = FWowTextureFactory::CreateTexture(BlpData, WmoMat.TexturePath1);
-                                    if (Tex)
-                                    {
-                                        Cache->CacheTexture(WmoMat.TexturePath1, Tex);
-                                    }
+                                    if (Tex) Cache->CacheTexture(WmoMat.TexturePath1, Tex);
                                 }
                             }
                         }
                     }
 
-                    if (DefaultMat)
+                    if (Tex)
                     {
-                        MeshComp->SetMaterial(SectionIdx, DefaultMat);
+                        UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, WmoActor);
+                        MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
+                        MeshComp->SetMaterial(SectionIdx, MID);
+                    }
+                    else if (FallbackMat)
+                    {
+                        MeshComp->SetMaterial(SectionIdx, FallbackMat);
                     }
                 }
 
@@ -268,9 +277,9 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             MeshComp->CreateMeshSection_LinearColor(
                 0, Vertices, Indices, Normals, UVs, VertColors, Tangents, false);
 
-            if (DefaultMat)
+            if (FallbackMat)
             {
-                MeshComp->SetMaterial(0, DefaultMat);
+                MeshComp->SetMaterial(0, FallbackMat);
             }
         }
 

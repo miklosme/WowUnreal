@@ -6,9 +6,11 @@
 #include "Formats/BlpParser.h"
 #include "Formats/BlpTypes.h"
 #include "WowTextureFactory.h"
+#include "WowTerrainMaterial.h"
 #include "Coord/WowCoordinate.h"
 #include "Formats/AdtTypes.h"
 #include "ProceduralMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowDoodad, Log, All);
 
@@ -106,10 +108,10 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
     for (int32 i = 0; i < NumVerts; ++i)
     {
         const FM2Vertex& V = Data.Vertices[i];
-        // M2 model file vertices are (X=east, Y=south, Z=up) - same as WMO
-        // Convert: UE = (fY, fX, fZ) * SCALE
-        Vertices[i] = FVector(V.Position.Y, V.Position.X, V.Position.Z) * FWowCoordinate::SCALE;
-        Normals[i] = FVector(V.Normal.Y, V.Normal.X, V.Normal.Z);
+        // WoW model vertices are right-handed Y-up (OpenGL).
+        // Convert to UE left-handed Z-up: (-X, Z, Y) * SCALE
+        Vertices[i] = FVector(-V.Position.X, V.Position.Z, V.Position.Y) * FWowCoordinate::SCALE;
+        Normals[i] = FVector(-V.Normal.X, V.Normal.Z, V.Normal.Y);
         Normals[i].Normalize();
         UVs[i] = V.TexCoord;
 
@@ -124,46 +126,50 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
         Tangents[i] = FProcMeshTangent(T, false);
     }
 
-    // Convert indices from uint16 to int32 (keep original winding)
+    // Convert indices, reverse winding (negate X flips handedness)
     TArray<int32> Indices;
     Indices.SetNum(Data.Indices.Num());
-    for (int32 i = 0; i < Data.Indices.Num(); ++i)
+    for (int32 i = 0; i + 2 < Data.Indices.Num(); i += 3)
     {
-        Indices[i] = static_cast<int32>(Data.Indices[i]);
+        Indices[i]     = static_cast<int32>(Data.Indices[i]);
+        Indices[i + 1] = static_cast<int32>(Data.Indices[i + 2]);
+        Indices[i + 2] = static_cast<int32>(Data.Indices[i + 1]);
     }
 
     TArray<FLinearColor> EmptyColors;
     MeshComp->CreateMeshSection_LinearColor(0, Vertices, Indices, Normals, UVs, EmptyColors, Tangents, false);
 
-    // Try to load and apply the first texture as material
+    // Load and apply the first texture as material
     if (Data.TexturePaths.Num() > 0 && Mpq && Cache)
     {
         const FString& TexPath = Data.TexturePaths[0];
-        UTexture2D* Tex = Cache->FindTexture(TexPath);
-        if (!Tex)
+        if (!TexPath.IsEmpty())
         {
-            TArray<uint8> BlpRaw;
-            if (Mpq->ReadFile(TexPath, BlpRaw))
+            UTexture2D* Tex = Cache->FindTexture(TexPath);
+            if (!Tex)
             {
-                FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
-                if (BlpData.bIsValid)
+                TArray<uint8> BlpRaw;
+                if (Mpq->ReadFile(TexPath, BlpRaw))
                 {
-                    Tex = FWowTextureFactory::CreateTexture(BlpData, TexPath);
-                    if (Tex)
+                    FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
+                    if (BlpData.bIsValid)
                     {
-                        Cache->CacheTexture(TexPath, Tex);
+                        Tex = FWowTextureFactory::CreateTexture(BlpData, TexPath);
+                        if (Tex) Cache->CacheTexture(TexPath, Tex);
                     }
                 }
             }
-        }
 
-        // Use a simple material with the texture
-        if (Tex)
-        {
-            UMaterial* BaseMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
-            if (BaseMat)
+            if (Tex)
             {
-                MeshComp->SetMaterial(0, BaseMat);
+                // Use the terrain material which has a BaseTexture parameter
+                UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
+                if (BaseMat)
+                {
+                    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, Owner);
+                    MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
+                    MeshComp->SetMaterial(0, MID);
+                }
             }
         }
     }
@@ -232,8 +238,8 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
         FVector UEPos = FWowCoordinate::NoggitToUE(
             Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
 
-        // noggit3 rotation: from_model_rotation(rX, rY, rZ) = (-rZ, rY - 90, rX)
-        FRotator UERot = FRotator(Placement.Rotation.X, -Placement.Rotation.Y + 90.0f, Placement.Rotation.Z);
+        // Rotation: same convention as WMO
+        FRotator UERot = FRotator(-Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
 
         // Scale
         float ScaleVal = Placement.GetScaleFloat();
