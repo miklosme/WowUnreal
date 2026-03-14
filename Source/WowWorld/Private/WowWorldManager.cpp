@@ -34,6 +34,32 @@ void AWowWorldManager::BeginPlay()
     {
         WdtData = MakeUnique<FWdtData>(FWdtParser::Parse(WdtRaw));
         UE_LOG(LogWowWorld, Log, TEXT("Loaded WDT for %s (BigAlpha=%d)"), *MapName, WdtData->bUseBigAlpha ? 1 : 0);
+
+        // Log existing tiles for debugging
+        int32 TileCount = 0;
+        FString FirstTiles;
+        for (int32 y = 0; y < 64; y++)
+        {
+            for (int32 x = 0; x < 64; x++)
+            {
+                if (WdtData->TileExists[x][y])
+                {
+                    TileCount++;
+                    if (TileCount <= 10)
+                    {
+                        FirstTiles += FString::Printf(TEXT("(%d,%d) "), x, y);
+                    }
+                }
+            }
+        }
+        UE_LOG(LogWowWorld, Log, TEXT("WDT has %d tiles. First: %s"), TileCount, *FirstTiles);
+
+        // Check if debug tile exists
+        if (DebugTileX >= 0 && DebugTileX < 64 && DebugTileY >= 0 && DebugTileY < 64)
+        {
+            UE_LOG(LogWowWorld, Log, TEXT("Debug tile %d,%d exists: %s"), DebugTileX, DebugTileY,
+                WdtData->TileExists[DebugTileX][DebugTileY] ? TEXT("YES") : TEXT("NO"));
+        }
     }
     else
     {
@@ -86,9 +112,13 @@ void AWowWorldManager::LoadTile(int32 TX, int32 TY)
     {
         if (TX < 0 || TX >= 64 || TY < 0 || TY >= 64 || !WdtData->TileExists[TX][TY])
         {
-            UE_LOG(LogWowWorld, Verbose, TEXT("Tile %d,%d does not exist in WDT"), TX, TY);
+            UE_LOG(LogWowWorld, Warning, TEXT("Tile %d,%d does not exist in WDT"), TX, TY);
             return;
         }
+    }
+    else
+    {
+        UE_LOG(LogWowWorld, Warning, TEXT("No valid WDT data, attempting tile load anyway"));
     }
 
     // Read ADT file from MPQ

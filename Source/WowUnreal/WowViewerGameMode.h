@@ -9,4 +9,5 @@ class WOWUNREAL_API AWowViewerGameMode : public AGameModeBase
     GENERATED_BODY()
 public:
     AWowViewerGameMode();
+    virtual void BeginPlay() override;
 };

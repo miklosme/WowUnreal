@@ -1,6 +1,19 @@
 #include "Formats/WdtParser.h"
 DEFINE_LOG_CATEGORY_STATIC(LogWdt, Log, All);
 
+// WoW stores chunk IDs as reversed FourCC on disk.
+// "MPHD" is stored as bytes D,H,P,M. Read as LE uint32: M | P<<8 | H<<16 | D<<24
+static constexpr uint32 MakeFourCC(char A, char B, char C, char D)
+{
+    return (uint32)A | ((uint32)B << 8) | ((uint32)C << 16) | ((uint32)D << 24);
+}
+
+// These match what's ON DISK (reversed)
+static constexpr uint32 CHUNK_MVER = MakeFourCC('R', 'E', 'V', 'M');
+static constexpr uint32 CHUNK_MPHD = MakeFourCC('D', 'H', 'P', 'M');
+static constexpr uint32 CHUNK_MAIN = MakeFourCC('N', 'I', 'A', 'M');
+static constexpr uint32 CHUNK_MWMO = MakeFourCC('O', 'M', 'W', 'M');
+
 FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
 {
     FWdtData Result;
@@ -17,8 +30,7 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
 
         if (ChunkData + Size > End) break;
 
-        // MPHD — map header flags (32 bytes: uint32 flags + 7 uint32 padding)
-        if (Magic == 'DHPM') // "MPHD" reversed
+        if (Magic == CHUNK_MPHD)
         {
             if (Size >= 4)
             {
@@ -26,30 +38,30 @@ FWdtData FWdtParser::Parse(const TArray<uint8>& Data)
                 Result.bUseBigAlpha = (Result.Flags & 0x04) != 0;
             }
         }
-        // MAIN — 64x64 tile entries, each 8 bytes (uint32 flags, uint32 asyncId)
-        else if (Magic == 'NIAM') // "MAIN" reversed
+        else if (Magic == CHUNK_MAIN)
         {
             if (Size >= 64 * 64 * 8)
             {
+                int32 TileCount = 0;
                 for (int32 y = 0; y < 64; y++)
                 {
                     for (int32 x = 0; x < 64; x++)
                     {
                         uint32 Flags = *reinterpret_cast<const uint32*>(ChunkData + (y * 64 + x) * 8);
                         Result.TileExists[x][y] = (Flags & 0x01) != 0;
+                        if (Flags & 0x01) TileCount++;
                     }
                 }
+                UE_LOG(LogWdt, Log, TEXT("MAIN chunk: found %d existing tiles"), TileCount);
             }
         }
-        // MWMO — global WMO path (for dungeon/raid maps that are a single WMO)
-        else if (Magic == 'OMWM') // "MWMO" reversed
+        else if (Magic == CHUNK_MWMO)
         {
             if (Size > 0)
             {
                 Result.GlobalWmoPath = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(ChunkData)));
             }
         }
-        // MODF and MVER are present but we don't need to extract data from them right now
 
         Ptr = ChunkData + Size;
     }
