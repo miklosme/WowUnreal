@@ -1,6 +1,7 @@
 #include "WowEventSystem.h"
 #include "WowLuaVM.h"
 #include "WowFrameTypes.h"
+#include "LuaApi/LuaApiRegistry.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -193,6 +194,17 @@ void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName)
 		FTCHARToUTF8 UTF8Name(*FrameName);
 		lua_pushstring(L, UTF8Name.Get());
 		lua_setfield(L, -2, "__name");
+	}
+
+	// Set the frame metatable so frame:Method() calls work
+	luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
+	if (!lua_isnil(L, -1))
+	{
+		lua_setmetatable(L, -2);
+	}
+	else
+	{
+		lua_pop(L, 1); // pop nil if metatable not registered yet
 	}
 
 	// Store as registry ref

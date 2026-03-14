@@ -13,12 +13,15 @@ extern "C" {
 
 static const char* WOW_CONTEXT_KEY = "WowLuaContext";
 
+const char* WowLuaApi::FRAME_METATABLE = "WowFrame";
+
 void WowLuaApi::RegisterAll(lua_State* L)
 {
 #if HAS_LUA
     if (!L) return;
     RegisterGlobals(L);
     RegisterStubs(L);
+    RegisterFrameApi(L);
 #endif
 }
 
