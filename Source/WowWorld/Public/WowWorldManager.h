@@ -4,9 +4,19 @@
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
 #include "Formats/WdtTypes.h"
+#include "Formats/AdtTypes.h"
+#include "Async/Future.h"
 #include "WowWorldManager.generated.h"
 
 class AWowTerrainTile;
+
+/** Result of an async tile load (MPQ read + ADT parse on background thread) */
+struct FPendingTileLoad
+{
+    int32 TX = 0;
+    int32 TY = 0;
+    TFuture<TSharedPtr<FAdtData>> Future;
+};
 
 UCLASS()
 class WOWWORLD_API AWowWorldManager : public AActor
@@ -84,9 +94,19 @@ private:
     int32 ActiveWmoGroupCount = 0;
 
     void LoadTile(int32 TX, int32 TY);
+    void LoadTileAsync(int32 TX, int32 TY);
+    void FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData);
+    void ProcessPendingLoads();
     void UnloadTile(int32 TX, int32 TY);
     void UpdateStreaming();
     void UpdateObjectStreaming();
     bool IsTileLoaded(int32 TX, int32 TY) const;
+    bool IsTilePending(int32 TX, int32 TY) const;
     static int64 TileKey(int32 TX, int32 TY) { return ((int64)TX << 32) | (int64)(uint32)TY; }
+
+    /** Tiles currently being loaded on background threads */
+    TArray<FPendingTileLoad> PendingLoads;
+
+    /** Track tile keys that are in-flight to avoid duplicate requests */
+    TSet<int64> PendingTileKeys;
 };

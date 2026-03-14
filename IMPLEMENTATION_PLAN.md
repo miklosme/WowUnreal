@@ -38,7 +38,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 ## Phase 4: World Streaming ✅ DONE (integrated into Phase 3)
 - [x] Camera-based tile streaming (load/unload with hysteresis)
 - [x] WDT-driven tile existence
-- [ ] Async tile loader (background thread - currently synchronous)
+- [?] Async tile loader (background thread with TFuture, game-thread finalization)
 - [ ] Multi-tile fly-through test (needs UE editor verification)
 
 ## Phase 5: Static Objects ✅ DONE

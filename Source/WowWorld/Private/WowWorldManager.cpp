@@ -10,6 +10,7 @@
 #include "WowDoodadManager.h"
 #include "WowWmoRenderer.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "Async/Async.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 
@@ -104,6 +105,17 @@ void AWowWorldManager::BeginPlay()
 
 void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
 {
+    // Wait for any pending async loads to complete before cleanup
+    for (FPendingTileLoad& Pending : PendingLoads)
+    {
+        if (Pending.Future.IsValid())
+        {
+            Pending.Future.Wait();
+        }
+    }
+    PendingLoads.Empty();
+    PendingTileKeys.Empty();
+
     // Destroy all loaded tiles
     for (auto& Pair : LoadedTiles)
     {
@@ -124,6 +136,9 @@ void AWowWorldManager::Tick(float DT)
 {
     Super::Tick(DT);
 
+    // Always process completed async loads, even before streaming is enabled
+    ProcessPendingLoads();
+
     if (!bStreamingEnabled || !MpqManager || !MpqManager->IsInitialized())
     {
         return;
@@ -135,7 +150,7 @@ void AWowWorldManager::Tick(float DT)
 
 void AWowWorldManager::LoadTile(int32 TX, int32 TY)
 {
-    if (IsTileLoaded(TX, TY))
+    if (IsTileLoaded(TX, TY) || IsTilePending(TX, TY))
     {
         return;
     }
@@ -184,6 +199,103 @@ void AWowWorldManager::LoadTile(int32 TX, int32 TY)
     }
 }
 
+void AWowWorldManager::LoadTileAsync(int32 TX, int32 TY)
+{
+    if (IsTileLoaded(TX, TY) || IsTilePending(TX, TY))
+    {
+        return;
+    }
+
+    // Check WDT if available
+    if (WdtData && WdtData->bIsValid)
+    {
+        if (TX < 0 || TX >= 64 || TY < 0 || TY >= 64 || !WdtData->TileExists[TX][TY])
+        {
+            return;
+        }
+    }
+
+    int64 Key = TileKey(TX, TY);
+    PendingTileKeys.Add(Key);
+
+    UE_LOG(LogWowWorld, Log, TEXT("Async loading tile %d,%d"), TX, TY);
+
+    // Capture what we need for the background thread
+    FMpqManager* Mpq = MpqManager.Get();
+    FString Map = MapName;
+    bool bBigAlpha = WdtData ? WdtData->bUseBigAlpha : false;
+
+    FPendingTileLoad Pending;
+    Pending.TX = TX;
+    Pending.TY = TY;
+    Pending.Future = Async(EAsyncExecution::ThreadPool, [Mpq, Map, TX, TY, bBigAlpha]() -> TSharedPtr<FAdtData>
+    {
+        FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *Map, *Map, TX, TY);
+        TArray<uint8> AdtRaw;
+        if (!Mpq->ReadFile(AdtPath, AdtRaw))
+        {
+            UE_LOG(LogWowWorld, Warning, TEXT("Async: Failed to read ADT: %s"), *AdtPath);
+            return nullptr;
+        }
+
+        TSharedPtr<FAdtData> Result = MakeShared<FAdtData>(FAdtParser::Parse(AdtRaw, bBigAlpha));
+        if (!Result->bIsValid)
+        {
+            UE_LOG(LogWowWorld, Warning, TEXT("Async: Failed to parse ADT: %s"), *AdtPath);
+            return nullptr;
+        }
+
+        return Result;
+    });
+
+    PendingLoads.Add(MoveTemp(Pending));
+}
+
+void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData> AdtData)
+{
+    if (!AdtData || IsTileLoaded(TX, TY))
+    {
+        return;
+    }
+
+    UE_LOG(LogWowWorld, Log, TEXT("Finalizing async tile %d,%d on game thread"), TX, TY);
+
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Name = *FString::Printf(TEXT("TerrainTile_%d_%d"), TX, TY);
+    AWowTerrainTile* Tile = GetWorld()->SpawnActor<AWowTerrainTile>(AWowTerrainTile::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+    if (Tile)
+    {
+        Tile->BuildFromAdtData(*AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds);
+        LoadedTiles.Add(TileKey(TX, TY), Tile);
+    }
+}
+
+void AWowWorldManager::ProcessPendingLoads()
+{
+    for (int32 i = PendingLoads.Num() - 1; i >= 0; --i)
+    {
+        FPendingTileLoad& Pending = PendingLoads[i];
+        if (Pending.Future.IsReady())
+        {
+            TSharedPtr<FAdtData> Result = Pending.Future.Get();
+            int64 Key = TileKey(Pending.TX, Pending.TY);
+            PendingTileKeys.Remove(Key);
+
+            if (Result)
+            {
+                FinalizeTileLoad(Pending.TX, Pending.TY, Result);
+            }
+
+            PendingLoads.RemoveAt(i);
+        }
+    }
+}
+
+bool AWowWorldManager::IsTilePending(int32 TX, int32 TY) const
+{
+    return PendingTileKeys.Contains(TileKey(TX, TY));
+}
+
 void AWowWorldManager::UnloadTile(int32 TX, int32 TY)
 {
     int64 Key = TileKey(TX, TY);
@@ -220,7 +332,7 @@ void AWowWorldManager::UpdateStreaming()
 
     UE_LOG(LogWowWorld, Verbose, TEXT("Camera tile: %d,%d"), CameraTile.X, CameraTile.Y);
 
-    // Load tiles within radius
+    // Load tiles within radius (async to avoid main-thread stalls)
     for (int32 DX = -LoadRadius; DX <= LoadRadius; ++DX)
     {
         for (int32 DY = -LoadRadius; DY <= LoadRadius; ++DY)
@@ -229,7 +341,7 @@ void AWowWorldManager::UpdateStreaming()
             int32 TY = CameraTile.Y + DY;
             if (TX >= 0 && TX < 64 && TY >= 0 && TY < 64)
             {
-                LoadTile(TX, TY);
+                LoadTileAsync(TX, TY);
             }
         }
     }
