@@ -33,7 +33,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] Terrain mesh builder (145-vertex chunks → ProceduralMesh)
 - [x] TerrainTile actor (256 chunk meshes + materials)
 - [x] World manager with WDT loading and tile streaming
-- [?] Single tile test rendering (verified: builds, smoke test passes, logs confirm tile loading, screenshots show textured terrain)
+- [x] Single tile test rendering (verified: builds, smoke test passes, logs confirm tile loading, screenshots show textured terrain)
 
 ## Phase 4: World Streaming ✅ DONE (integrated into Phase 3)
 - [x] Camera-based tile streaming (load/unload with hysteresis)
