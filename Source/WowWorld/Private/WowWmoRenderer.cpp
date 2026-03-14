@@ -142,13 +142,14 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WoW model files are RH Z-up (X=east, Y=north, Z=up)
-            // UE is LH Z-up. Negate Y for handedness: UE = (X, -Y, Z) * SCALE
+            // WoW model files are RH Z-up (X, Y, Z)
+            // UE is LH Z-up. Keep vertices as-is, fix handedness with winding reversal only.
+            // No axis negation = no mirroring.
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(P.X, -P.Y, P.Z) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(P.X, P.Y, P.Z) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(GroupData.Normals[i].X, -GroupData.Normals[i].Y, GroupData.Normals[i].Z)
+                ? FVector(GroupData.Normals[i].X, GroupData.Normals[i].Y, GroupData.Normals[i].Z)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;

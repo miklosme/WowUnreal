@@ -108,9 +108,9 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
     for (int32 i = 0; i < NumVerts; ++i)
     {
         const FM2Vertex& V = Data.Vertices[i];
-        // WoW model files are RH Z-up. Negate Y for handedness: UE = (X, -Y, Z) * SCALE
-        Vertices[i] = FVector(V.Position.X, -V.Position.Y, V.Position.Z) * FWowCoordinate::SCALE;
-        Normals[i] = FVector(V.Normal.X, -V.Normal.Y, V.Normal.Z);
+        // WoW model files are RH Z-up. Keep as-is, fix handedness with winding only.
+        Vertices[i] = FVector(V.Position.X, V.Position.Y, V.Position.Z) * FWowCoordinate::SCALE;
+        Normals[i] = FVector(V.Normal.X, V.Normal.Y, V.Normal.Z);
         Normals[i].Normalize();
         UVs[i] = V.TexCoord;
 
