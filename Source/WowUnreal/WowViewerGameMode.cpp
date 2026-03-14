@@ -1,5 +1,6 @@
 #include "WowViewerGameMode.h"
 #include "WowFlyCamera.h"
+#include "WowPlayerCharacter.h"
 #include "WowGameplayController.h"
 #include "WowDebugHUD.h"
 #include "WowAutoLogin.h"
@@ -28,7 +29,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
 AWowViewerGameMode::AWowViewerGameMode()
 {
-    DefaultPawnClass = AWowFlyCamera::StaticClass();
+    // Default to gameplay character pawn — fly camera used only for non-gameplay test scenes
+    DefaultPawnClass = AWowPlayerCharacter::StaticClass();
     PlayerControllerClass = AWowGameplayController::StaticClass();
     HUDClass = AWowDebugHUD::StaticClass();
 }

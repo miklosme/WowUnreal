@@ -34,19 +34,19 @@ public:
     float MaxCameraDistance = 3000.0f; // ~30 yards
 
     // ── Input ─────────────────────────────────────────────────────────────────
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    UPROPERTY()
     TObjectPtr<UInputMappingContext> GameplayContext;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    UPROPERTY()
     TObjectPtr<UInputAction> MoveAction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    UPROPERTY()
     TObjectPtr<UInputAction> LookAction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    UPROPERTY()
     TObjectPtr<UInputAction> JumpAction;
 
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    UPROPERTY()
     TObjectPtr<UInputAction> ZoomAction;
 
     // ── Movement ──────────────────────────────────────────────────────────────

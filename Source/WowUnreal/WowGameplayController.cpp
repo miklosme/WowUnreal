@@ -65,10 +65,13 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
     // Only care about local player entity
     if (Entity.Guid != ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) return;
 
-    // Apply server speeds to character if available
+    // Apply server speeds to character
     if (Entity.Movement.RunSpeed > 0.0f)
     {
-        // Will apply speeds when character rendering is implemented
+        if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
+        {
+            PlayerChar->ApplyServerSpeeds(Entity.Movement.RunSpeed, Entity.Movement.WalkSpeed);
+        }
     }
 }
 
