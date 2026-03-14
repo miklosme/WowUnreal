@@ -12,8 +12,20 @@ public:
     /** Get or create an entity by GUID */
     FWowEntity& GetOrCreate(uint64 Guid);
 
+    /** Promote an existing generic entity to the concrete subclass implied by its type mask. */
+    FWowEntity& PromoteToTyped(uint64 Guid, uint32 TypeMask);
+
     /** Find an entity, returns nullptr if not found */
     FWowEntity* Find(uint64 Guid);
+
+    /** Typed find helpers */
+    FWowItemEntity* FindItem(uint64 Guid);
+    FWowContainerEntity* FindContainer(uint64 Guid);
+    FWowUnitEntity* FindUnit(uint64 Guid);
+    FWowPlayerEntity* FindPlayer(uint64 Guid);
+    FWowGameObjectEntity* FindGameObject(uint64 Guid);
+    FWowDynamicObjectEntity* FindDynamicObject(uint64 Guid);
+    FWowCorpseEntity* FindCorpse(uint64 Guid);
 
     /** Remove an entity */
     void Remove(uint64 Guid);
@@ -31,7 +43,7 @@ public:
     uint64 LocalPlayerGuid = 0;
 
     /** Find the local player entity */
-    FWowEntity* GetLocalPlayer() { return Find(LocalPlayerGuid); }
+    FWowPlayerEntity* GetLocalPlayer() { return FindPlayer(LocalPlayerGuid); }
 
     // Events
     FOnEntityCreated OnEntityCreated;

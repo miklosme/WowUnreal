@@ -166,6 +166,88 @@ bool FEntityTypeMasks::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEntityTypedPromotion, "WowUnreal.Entity.TypedPromotion",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FEntityTypedPromotion::RunTest(const FString& Parameters)
+{
+    FWowEntityManager EM;
+
+    FWowEntity& Base = EM.GetOrCreate(777);
+    Base.SetField(ObjectField::TYPE, WowTypeMask::UNIT | WowTypeMask::PLAYER);
+    Base.SetField(UnitField::HEALTH, 4242);
+    Base.SetField(UnitField::MAXHEALTH, 5000);
+    Base.SetField(UnitField::LEVEL, 80);
+    Base.SetField(PlayerField::XP, 9001);
+    Base.SetField(PlayerField::COINAGE, 123456);
+
+    FWowEntity& Promoted = EM.PromoteToTyped(777, Base.GetField(ObjectField::TYPE));
+    TestTrue(TEXT("Promoted entity reports player kind"), Promoted.IsPlayer());
+
+    FWowPlayerEntity* Player = EM.FindPlayer(777);
+    TestNotNull(TEXT("Typed player lookup succeeds"), Player);
+    if (!Player)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Unit data preserved across promotion"), Player->GetHealth(), 4242);
+    TestEqual(TEXT("Player XP accessor works"), Player->GetXp(), static_cast<uint32>(9001));
+    TestEqual(TEXT("Player coinage accessor works"), Player->GetCoinage(), static_cast<uint32>(123456));
+    TestEqual(TEXT("Unit lookup returns promoted player"), EM.FindUnit(777), static_cast<FWowUnitEntity*>(Player));
+
+    EM.LocalPlayerGuid = 777;
+    TestEqual(TEXT("Local player lookup is typed"), EM.GetLocalPlayer(), Player);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEntityTypedContainersAndGameObjects, "WowUnreal.Entity.TypedContainersAndGameObjects",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FEntityTypedContainersAndGameObjects::RunTest(const FString& Parameters)
+{
+    FWowEntityManager EM;
+
+    FWowEntity& ContainerBase = EM.GetOrCreate(1001);
+    ContainerBase.SetField(ObjectField::TYPE, WowTypeMask::ITEM | WowTypeMask::CONTAINER);
+    ContainerBase.SetField(ItemField::STACK_COUNT, 20);
+    ContainerBase.SetField(ContainerField::NUM_SLOTS, 16);
+    ContainerBase.SetField(ContainerField::SLOT_1, 0xAABBCCDD);
+    ContainerBase.SetField(ContainerField::SLOT_1 + 1, 0x11223344);
+    EM.PromoteToTyped(1001, ContainerBase.GetField(ObjectField::TYPE));
+
+    FWowContainerEntity* Container = EM.FindContainer(1001);
+    TestNotNull(TEXT("Typed container lookup succeeds"), Container);
+    if (!Container)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Container inherits item stack count"), Container->GetStackCount(), 20);
+    TestEqual(TEXT("Container slot count accessor works"), Container->GetNumSlots(), 16);
+    TestEqual(TEXT("Container GUID slot accessor combines 64-bit field"), Container->GetItemGuidAtSlot(0), static_cast<uint64>(0x11223344AABBCCDDULL));
+    TestEqual(TEXT("Item lookup returns container subtype"), EM.FindItem(1001), static_cast<FWowItemEntity*>(Container));
+
+    FWowEntity& GoBase = EM.GetOrCreate(2002);
+    GoBase.SetField(ObjectField::TYPE, WowTypeMask::GAMEOBJECT);
+    GoBase.SetField(GameObjectField::DISPLAY_ID, 31415);
+    GoBase.SetField(GameObjectField::FLAGS, 0x20);
+    GoBase.SetField(GameObjectField::LEVEL, 1);
+    EM.PromoteToTyped(2002, GoBase.GetField(ObjectField::TYPE));
+
+    FWowGameObjectEntity* GameObject = EM.FindGameObject(2002);
+    TestNotNull(TEXT("Typed gameobject lookup succeeds"), GameObject);
+    if (!GameObject)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("GameObject display ID accessor works"), GameObject->GetGameObjectDisplayId(), static_cast<uint32>(31415));
+    TestEqual(TEXT("GameObject flags accessor works"), GameObject->GetGameObjectFlags(), static_cast<uint32>(0x20));
+    TestEqual(TEXT("GameObject level accessor works"), GameObject->GetGameObjectLevel(), 1);
+
+    return true;
+}
+
 // ====================================================================
 // DBC Parser Tests (require MPQ data)
 // ====================================================================

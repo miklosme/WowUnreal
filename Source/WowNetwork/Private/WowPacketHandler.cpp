@@ -170,6 +170,16 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
         if (Entity)
         {
             ParseUpdateFields(R, *Entity);
+            if (const uint32 UpdatedTypeMask = Entity->GetField(ObjectField::TYPE); UpdatedTypeMask != 0)
+            {
+                Entity = &EntityManager.PromoteToTyped(Guid, UpdatedTypeMask);
+                Entity->Entry = Entity->GetField(ObjectField::ENTRY);
+                Entity->Scale = Entity->GetFieldFloat(ObjectField::SCALE_X);
+                if (Entity->Scale == 0.0f)
+                {
+                    Entity->Scale = 1.0f;
+                }
+            }
             EntitiesUpdated++;
             EntityManager.OnEntityUpdated.Broadcast(*Entity);
         }
@@ -211,22 +221,22 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
         uint64 Guid = R.ReadPackedGuid();
         uint8 ObjTypeId = R.ReadU8();
 
-        FWowEntity& Entity = EntityManager.GetOrCreate(Guid);
-        Entity.ObjectType = ObjTypeId;
+        FWowEntity& BaseEntity = EntityManager.GetOrCreate(Guid);
+        BaseEntity.ObjectTypeId = ObjTypeId;
 
         // Movement/position block
         uint16 Flags = R.ReadU16();
 
         if (Flags & UpdateFlag::LIVING)
         {
-            ParseMovementInfo(R, Entity.Movement);
+            ParseMovementInfo(R, BaseEntity.Movement);
         }
         else if (Flags & UpdateFlag::STATIONARY_POSITION)
         {
-            Entity.Movement.Position.X = R.ReadFloat();
-            Entity.Movement.Position.Y = R.ReadFloat();
-            Entity.Movement.Position.Z = R.ReadFloat();
-            Entity.Movement.Orientation = R.ReadFloat();
+            BaseEntity.Movement.Position.X = R.ReadFloat();
+            BaseEntity.Movement.Position.Y = R.ReadFloat();
+            BaseEntity.Movement.Position.Z = R.ReadFloat();
+            BaseEntity.Movement.Orientation = R.ReadFloat();
         }
 
         if (Flags & UpdateFlag::LOWGUID)
@@ -256,19 +266,31 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
         }
 
         // Update fields
-        ParseUpdateFields(R, Entity);
+        ParseUpdateFields(R, BaseEntity);
 
         // Extract common fields
-        Entity.TypeMask = Entity.GetField(ObjectField::TYPE);
+        BaseEntity.TypeMask = BaseEntity.GetField(ObjectField::TYPE);
+        BaseEntity.Entry = BaseEntity.GetField(ObjectField::ENTRY);
+        BaseEntity.Scale = BaseEntity.GetFieldFloat(ObjectField::SCALE_X);
+        if (BaseEntity.Scale == 0.0f)
+        {
+            BaseEntity.Scale = 1.0f;
+        }
+
+        FWowEntity& Entity = EntityManager.PromoteToTyped(Guid, BaseEntity.TypeMask);
+        Entity.ObjectTypeId = ObjTypeId;
         Entity.Entry = Entity.GetField(ObjectField::ENTRY);
         Entity.Scale = Entity.GetFieldFloat(ObjectField::SCALE_X);
-        if (Entity.Scale == 0.0f) Entity.Scale = 1.0f;
+        if (Entity.Scale == 0.0f)
+        {
+            Entity.Scale = 1.0f;
+        }
 
         EntitiesCreated++;
         EntityManager.OnEntityCreated.Broadcast(Entity);
 
-        UE_LOG(LogWowPacket, Verbose, TEXT("Created entity GUID=%llu type=%d entry=%u pos=(%.1f,%.1f,%.1f)"),
-            Guid, ObjTypeId, Entity.Entry,
+        UE_LOG(LogWowPacket, Verbose, TEXT("Created %s GUID=%llu type=%d entry=%u pos=(%.1f,%.1f,%.1f)"),
+            Entity.GetEntityKindName(), Guid, ObjTypeId, Entity.Entry,
             Entity.Movement.Position.X, Entity.Movement.Position.Y, Entity.Movement.Position.Z);
         break;
     }
