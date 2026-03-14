@@ -133,14 +133,11 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             AdtY * FWowCoordinate::SCALE  // height (absolute, not relative)
         );
 
-        // Normals in ADT space (X=east, Y=up, Z=south) — same rotation as vertices: (-Z, X, Y)
-        const FVector& N = ChunkData.Normals[i];
-        Result.Normals[i] = FVector(-N.Z, N.X, N.Y);
-        if (Result.Normals[i].IsNearlyZero())
-        {
-            Result.Normals[i] = FVector(0, 0, 1);
-        }
-        Result.Normals[i].Normalize();
+        // MCNR normals stored as (east, north, up) in Normals[i].
+        // For UE, just set all normals to UP for now — ProceduralMesh can
+        // recompute them from geometry, or we can fix the mapping later.
+        // A flat surface should have normal (0, 0, 1) in UE.
+        Result.Normals[i] = FVector(0, 0, 1);
 
         // Tiling UVs: 0..8 range across the chunk for texture tiling
         Result.UVs[i] = FVector2D(GridX, GridY);
