@@ -34,6 +34,15 @@ void WowLuaApi::SetContext(lua_State* L, FWowLuaContext* Ctx)
 #endif
 }
 
+void WowLuaApi::ClearContext(lua_State* L)
+{
+#if HAS_LUA
+    if (!L) return;
+    lua_pushnil(L);
+    lua_setfield(L, LUA_REGISTRYINDEX, WOW_CONTEXT_KEY);
+#endif
+}
+
 FWowLuaContext* WowLuaApi::GetContext(lua_State* L)
 {
 #if HAS_LUA

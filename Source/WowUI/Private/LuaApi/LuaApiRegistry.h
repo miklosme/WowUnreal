@@ -25,6 +25,9 @@ namespace WowLuaApi
     /** Store game context pointer in Lua registry for API functions to use */
     void SetContext(lua_State* L, FWowLuaContext* Ctx);
 
+    /** Clear context from Lua registry (call before VM shutdown to prevent use-after-free) */
+    void ClearContext(lua_State* L);
+
     /** Retrieve context from Lua registry (returns nullptr if not set) */
     FWowLuaContext* GetContext(lua_State* L);
 

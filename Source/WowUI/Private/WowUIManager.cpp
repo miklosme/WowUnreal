@@ -37,16 +37,24 @@ void UWowUIManager::Initialize(FSubsystemCollectionBase& Collection)
 
 	// Set up the Lua context so API functions can access game systems
 	// EntityManager and ConnectionManager will be set later when networking is ready
-	static FWowLuaContext UIContext;
-	UIContext.EventSystem = EventSystem.Get();
-	UIContext.FrameManager = FrameManager.Get();
-	WowLuaApi::SetContext(LuaVM->GetState(), &UIContext);
+	UIContext = new FWowLuaContext();
+	UIContext->EventSystem = EventSystem.Get();
+	UIContext->FrameManager = FrameManager.Get();
+	WowLuaApi::SetContext(LuaVM->GetState(), UIContext);
 
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI Manager initialized (Lua VM + FrameManager + EventSystem)"));
 }
 
 void UWowUIManager::Deinitialize()
 {
+	if (LuaVM && LuaVM->GetState())
+	{
+		WowLuaApi::ClearContext(LuaVM->GetState());
+	}
+
+	delete UIContext;
+	UIContext = nullptr;
+
 	if (LuaVM)
 	{
 		LuaVM->Shutdown();

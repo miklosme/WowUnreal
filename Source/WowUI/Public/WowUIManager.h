@@ -6,6 +6,8 @@
 #include "WowEventSystem.h"
 #include "WowUIManager.generated.h"
 
+struct FWowLuaContext;
+
 class FMpqManager;
 class UCanvasPanel;
 
@@ -42,5 +44,6 @@ private:
 	TUniquePtr<FWowFrameManager> FrameManager;
 	TUniquePtr<FWowEventSystem> EventSystem;
 
+	FWowLuaContext* UIContext = nullptr;
 	bool bUILoaded = false;
 };
