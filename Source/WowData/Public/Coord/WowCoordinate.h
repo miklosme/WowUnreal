@@ -2,18 +2,18 @@
 #include "CoreMinimal.h"
 
 /**
- * Coordinate conversion between WoW/noggit3 space and UE space.
+ * Coordinate conversion between WoW/WoW ADT space and UE space.
  *
- * Noggit3 coordinate system (used by ADT data):
+ * WoW ADT coordinate system (used by ADT data):
  *   X = east (increases going east), range: 0 to 64*TILESIZE
  *   Y = up (height)
  *   Z = south (increases going south), range: 0 to 64*TILESIZE
  *   Tile (0,0) is at the northwest corner
  *
  * UE coordinate system:
- *   X = north (we map -noggit3.Z to UE.X so north is positive)
- *   Y = east (we map noggit3.X to UE.Y)
- *   Z = up (we map noggit3.Y to UE.Z)
+ *   X = north (we map -WoW ADT.Z to UE.X so north is positive)
+ *   Y = east (we map WoW ADT.X to UE.Y)
+ *   Z = up (we map WoW ADT.Y to UE.Z)
  *   Scale: 1 WoW unit ~ 1 yard ~ 91.44cm, we use SCALE=100 for simplicity
  */
 struct WOWDATA_API FWowCoordinate
@@ -24,8 +24,8 @@ struct WOWDATA_API FWowCoordinate
     static constexpr float MAP_ORIGIN = 32.0f * TILE_SIZE;
     static constexpr float SCALE = 100.0f;
 
-    /** Convert noggit3 coords (X=east, Y=up, Z=south) to UE coords */
-    static FVector NoggitToUE(float NgX, float NgY, float NgZ)
+    /** Convert WoW ADT coords (X=east, Y=up, Z=south) to UE coords */
+    static FVector AdtToUE(float NgX, float NgY, float NgZ)
     {
         return FVector(-NgZ * SCALE, NgX * SCALE, NgY * SCALE);
     }
@@ -35,13 +35,13 @@ struct WOWDATA_API FWowCoordinate
     {
         float NgX = TileX * TILE_SIZE + TILE_SIZE * 0.5f;  // east-west center
         float NgZ = TileY * TILE_SIZE + TILE_SIZE * 0.5f;  // north-south center
-        return NoggitToUE(NgX, 0.0f, NgZ);
+        return AdtToUE(NgX, 0.0f, NgZ);
     }
 
     /** Get the tile indices for a given UE world position */
     static FIntPoint WorldToTile(const FVector& UEPos)
     {
-        // Reverse of NoggitToUE: NgZ = -UE.X / SCALE, NgX = UE.Y / SCALE
+        // Reverse of AdtToUE: NgZ = -UE.X / SCALE, NgX = UE.Y / SCALE
         float NgX = UEPos.Y / SCALE;
         float NgZ = -UEPos.X / SCALE;
         int32 TX = FMath::FloorToInt32(NgX / TILE_SIZE);

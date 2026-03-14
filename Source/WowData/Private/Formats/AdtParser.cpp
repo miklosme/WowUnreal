@@ -353,7 +353,7 @@ namespace
         Chunk.IndexY = static_cast<int32>(Iy);
         Chunk.AreaId = AreaId;
         Chunk.Holes  = HolesLow;
-        // Position: noggit3 calculates from tile/chunk indices, NOT from header floats.
+        // Position: WoW ADT calculates from tile/chunk indices, NOT from header floats.
         // header.ypos (stored 3rd) is the only value used directly (height base).
         // header.zpos and header.xpos are derived values = ZEROPOINT - actual_pos.
         // We store the height and let the mesh builder compute XY from indices.

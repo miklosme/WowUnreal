@@ -277,11 +277,13 @@ UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
         return nullptr;
     }
 
-    // MDDF positions are in noggit3 space
-    FVector UEPos = FWowCoordinate::NoggitToUE(
-        Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+    // MDDF positions: MAP_ORIGIN conversion
+    float WX = FWowCoordinate::MAP_ORIGIN - Placement.Position.X;
+    float WY = FWowCoordinate::MAP_ORIGIN - Placement.Position.Z;
+    float WZ = Placement.Position.Y;
+    FVector UEPos = FVector(WX, -WY, WZ) * FWowCoordinate::SCALE;
 
-    FRotator UERot = FRotator(0.0f, -Placement.Rotation.Y, 0.0f);
+    FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
     float ScaleVal = Placement.GetScaleFloat();
 
     MeshComp->SetWorldLocation(UEPos);

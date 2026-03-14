@@ -50,16 +50,16 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
 {
     FTerrainChunkMeshData Result;
 
-    // Compute chunk position from tile + chunk indices (matching noggit3 approach)
-    // noggit3: xbase = tile.x * TILESIZE + chunk.ix * CHUNKSIZE (east-west)
+    // Compute chunk position from tile + chunk indices (matching WoW ADT approach)
+    // WoW ADT: xbase = tile.x * TILESIZE + chunk.ix * CHUNKSIZE (east-west)
     //          zbase = tile.z * TILESIZE + chunk.iy * CHUNKSIZE (north-south)
-    // In noggit3 coords: X=east, Y=up, Z=south
-    // Our tile indices: TileX maps to noggit3 tile.x, TileY maps to noggit3 tile.z
+    // In WoW ADT coords: X=east, Y=up, Z=south
+    // Our tile indices: TileX maps to WoW ADT tile.x, TileY maps to WoW ADT tile.z
     const float Xbase = TileX * FWowCoordinate::TILE_SIZE + ChunkData.IndexX * FWowCoordinate::CHUNK_SIZE;
     const float Zbase = TileY * FWowCoordinate::TILE_SIZE + ChunkData.IndexY * FWowCoordinate::CHUNK_SIZE;
     const float Ybase = ChunkData.WorldZ; // Height from MCNK header
 
-    // Tile center in noggit3 space for relative positioning
+    // Tile center in WoW ADT space for relative positioning
     const float TileCenterX = TileX * FWowCoordinate::TILE_SIZE + FWowCoordinate::TILE_SIZE * 0.5f;
     const float TileCenterZ = TileY * FWowCoordinate::TILE_SIZE + FWowCoordinate::TILE_SIZE * 0.5f;
 
@@ -108,29 +108,29 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             GridY = (float)(Row / 2);
         }
 
-        // Noggit3 vertex position: (xbase + xOffset, ybase + height, zbase + zOffset)
+        // WoW ADT vertex position: (xbase + xOffset, ybase + height, zbase + zOffset)
         // where xOffset = gridX * UNITSIZE, zOffset = gridY * 0.5 * UNITSIZE...
-        // Actually noggit3 iterates j(0..16)/i(0..8or7) and uses:
+        // Actually WoW ADT iterates j(0..16)/i(0..8or7) and uses:
         //   xpos = i * UNITSIZE (+ 0.5*UNITSIZE if inner row)
         //   zpos = j * 0.5 * UNITSIZE
         // Our GridX/GridY already account for this offset pattern.
-        float NoggitX = Xbase + GridX * FWowCoordinate::UNIT_SIZE;  // east-west
-        float NoggitY = Ybase + ChunkData.Heights[i];                // up
-        float NoggitZ = Zbase + GridY * FWowCoordinate::UNIT_SIZE;  // north-south
+        float AdtX = Xbase + GridX * FWowCoordinate::UNIT_SIZE;  // east-west
+        float AdtY = Ybase + ChunkData.Heights[i];                // up
+        float AdtZ = Zbase + GridY * FWowCoordinate::UNIT_SIZE;  // north-south
 
         // Make relative to tile center
-        float RelX = NoggitX - TileCenterX;
-        float RelZ = NoggitZ - TileCenterZ;
+        float RelX = AdtX - TileCenterX;
+        float RelZ = AdtZ - TileCenterZ;
 
-        // Convert noggit3 (X=east, Y=up, Z=south) to UE (X=forward, Y=right, Z=up)
-        // UE.X = noggit3.Z * SCALE (south in noggit = forward-ish)
-        // UE.Y = noggit3.X * SCALE (east in noggit = right)
-        // UE.Z = noggit3.Y * SCALE (up = up)
+        // Convert WoW ADT (X=east, Y=up, Z=south) to UE (X=forward, Y=right, Z=up)
+        // UE.X = WoW ADT.Z * SCALE (south in WoW ADT = forward-ish)
+        // UE.Y = WoW ADT.X * SCALE (east in WoW ADT = right)
+        // UE.Z = WoW ADT.Y * SCALE (up = up)
         // But we need to negate to match WoW orientation properly
         Result.Vertices[i] = FVector(
-            -RelZ * FWowCoordinate::SCALE,   // north-south (negate: noggit Z=south, UE X=north)
+            -RelZ * FWowCoordinate::SCALE,   // north-south (negate: WoW ADT Z=south, UE X=north)
             RelX * FWowCoordinate::SCALE,    // east-west
-            NoggitY * FWowCoordinate::SCALE  // height (absolute, not relative)
+            AdtY * FWowCoordinate::SCALE  // height (absolute, not relative)
         );
 
         // Convert normal from WoW space to UE space
@@ -184,7 +184,7 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
 
             // 4 triangles in fan pattern around center
             // UE uses clockwise winding when viewed from above (front face)
-            // Our coordinate transform (NoggitToUE) negates the Z axis,
+            // Our coordinate transform (AdtToUE) negates the Z axis,
             // which flips handedness, so we use reversed winding.
 
             // 4 triangles in fan pattern around center vertex
