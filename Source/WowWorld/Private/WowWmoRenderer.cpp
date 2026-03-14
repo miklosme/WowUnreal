@@ -64,29 +64,13 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     WmoActor->SetRootComponent(RootComp);
     RootComp->RegisterComponent();
 
-    // MODF positions are already in ADT space (X=east, Y=up, Z=south)
-    // Same coordinate system as terrain vertices — use AdtToUE directly
+    // Position in ADT space
     FVector UEPos = FWowCoordinate::AdtToUE(Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
+    WmoActor->SetActorLocation(UEPos);
 
-    // Rotation: WowGodot uses Godot YXZ euler with angles (rotX, rotY-90, -rotZ) in radians.
-    // Map Godot axes to UE axes (GodotX→UE_X, GodotY→UE_Z, GodotZ→-UE_Y)
-    // and build quaternion in the correct Godot YXZ application order.
-    {
-        const float Deg2Rad = PI / 180.0f;
-        float GodotRotX = Placement.Rotation.X * Deg2Rad;
-        float GodotRotY = (Placement.Rotation.Y - 90.0f) * Deg2Rad;
-        float GodotRotZ = -Placement.Rotation.Z * Deg2Rad;
-
-        // Godot YXZ order: apply Y first, then X, then Z
-        // In UE axes: Y→Z, X→X, Z→-Y
-        FQuat QYaw   = FQuat(FVector(0, 0, 1), GodotRotY);   // Godot Y → UE Z
-        FQuat QRoll  = FQuat(FVector(1, 0, 0), GodotRotX);    // Godot X → UE X
-        FQuat QPitch = FQuat(FVector(0, 1, 0), -GodotRotZ);   // Godot Z → -UE Y (negate angle)
-
-        FQuat FinalRot = QPitch * QRoll * QYaw;
-        WmoActor->SetActorLocation(UEPos);
-        WmoActor->SetActorRotation(FinalRot);
-    }
+    // Rotation: simple yaw only for now (most WMOs only rotate around vertical)
+    // Negate Y rotation because our coordinate system flips an axis
+    WmoActor->SetActorRotation(FRotator(0.0f, -Placement.Rotation.Y, 0.0f));
 
     // Scale (WMOs can have scale too)
     float ScaleVal = (Placement.Scale == 0) ? 1.0f : Placement.Scale / 1024.0f;
@@ -155,13 +139,12 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WoW file vertices → Godot: wow_to_godot(x,y,z)=(y,z,-x), then negate Z → (y,z,x)
-            // Godot(Y-up) → UE(Z-up): UE = (godotX, -godotZ, godotY) = (fileY, -fileX, fileZ)
+            // WoW model files are Z-up like UE. Pass through directly.
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(P.Y, -P.X, P.Z) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(P.X, P.Y, P.Z) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(GroupData.Normals[i].Y, -GroupData.Normals[i].X, GroupData.Normals[i].Z)
+                ? FVector(GroupData.Normals[i].X, GroupData.Normals[i].Y, GroupData.Normals[i].Z)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;
@@ -176,15 +159,12 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             Tangents[i] = FProcMeshTangent(T, false);
         }
 
-        // Reverse winding order: WoW files use CW front-faces (DirectX/LH convention)
-        // but UE uses CCW front-faces. Swap i1 and i2 in each triangle.
+        // Keep original winding order
         TArray<int32> Indices;
         Indices.SetNum(GroupData.Indices.Num());
-        for (int32 i = 0; i + 2 < GroupData.Indices.Num(); i += 3)
+        for (int32 i = 0; i < GroupData.Indices.Num(); ++i)
         {
-            Indices[i]     = static_cast<int32>(GroupData.Indices[i]);
-            Indices[i + 1] = static_cast<int32>(GroupData.Indices[i + 2]);
-            Indices[i + 2] = static_cast<int32>(GroupData.Indices[i + 1]);
+            Indices[i] = static_cast<int32>(GroupData.Indices[i]);
         }
 
         // If we have batches, create one section per batch for separate materials
