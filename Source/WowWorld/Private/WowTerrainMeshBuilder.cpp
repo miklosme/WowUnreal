@@ -134,8 +134,8 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
         );
 
         // MCNR normals stored as (east, north, up) in Normals[i].
-        // For UE, just set all normals to UP for now — ProceduralMesh can
-        // recompute them from geometry, or we can fix the mapping later.
+        // For UE, just set all normals to UP for now — we can fix the
+        // mapping to real MCNR normals later.
         // A flat surface should have normal (0, 0, 1) in UE.
         Result.Normals[i] = FVector(0, 0, 1);
 

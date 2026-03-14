@@ -10,7 +10,7 @@ struct FWmoRootData;
 
 /**
  * Renders WMO (World Map Object) buildings.
- * Uses UStaticMesh with Nanite when supported, falling back to ProceduralMeshComponent.
+ * Uses UStaticMesh with Nanite when supported.
  */
 class WOWWORLD_API FWowWmoRenderer
 {

@@ -1,15 +1,18 @@
 #include "WowWaterRenderer.h"
 #include "Formats/AdtTypes.h"
 #include "Coord/WowCoordinate.h"
-#include "ProceduralMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "MeshDescription.h"
+#include "StaticMeshAttributes.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWater, Log, All);
 
-TArray<UProceduralMeshComponent*> FWowWaterRenderer::CreateWaterMeshes(
+TArray<UStaticMeshComponent*> FWowWaterRenderer::CreateWaterMeshes(
 	AActor* Owner, const FAdtData& AdtData, int32 TileX, int32 TileY)
 {
-	TArray<UProceduralMeshComponent*> Result;
+	TArray<UStaticMeshComponent*> Result;
 	if (!Owner) return Result;
 
 	int32 WaterSectionIndex = 0;
@@ -40,10 +43,8 @@ TArray<UProceduralMeshComponent*> FWowWaterRenderer::CreateWaterMeshes(
 
 			TArray<FVector> Vertices;
 			TArray<FVector2D> UVs;
-			TArray<FColor> VertexColors;
 			Vertices.Reserve(VW * VH);
 			UVs.Reserve(VW * VH);
-			VertexColors.Reserve(VW * VH);
 
 			for (int32 Row = 0; Row <= Layer.Height; Row++)
 			{
@@ -58,10 +59,6 @@ TArray<UProceduralMeshComponent*> FWowWaterRenderer::CreateWaterMeshes(
 					FVector UEPos = FWowCoordinate::AdtToUE(NgX, NgY, NgZ);
 					Vertices.Add(UEPos);
 					UVs.Add(FVector2D((float)Col / (float)Layer.Width, (float)Row / (float)Layer.Height));
-
-					// Depth for transparency (0=shallow/transparent, 255=deep/opaque)
-					uint8 Depth = (HeightIdx < Layer.Depths.Num()) ? Layer.Depths[HeightIdx] : 128;
-					VertexColors.Add(FColor(Depth, Depth, Depth, 255));
 				}
 			}
 
@@ -97,20 +94,60 @@ TArray<UProceduralMeshComponent*> FWowWaterRenderer::CreateWaterMeshes(
 
 			if (Indices.Num() == 0) continue;
 
-			// Compute normals (mostly up for water)
-			TArray<FVector> Normals;
-			Normals.SetNum(Vertices.Num());
-			for (FVector& N : Normals) N = FVector::UpVector;
+			// Build UStaticMesh from FMeshDescription
+			FMeshDescription MeshDesc;
+			FStaticMeshAttributes Attributes(MeshDesc);
+			Attributes.Register();
 
-			// Create mesh component
-			FString CompName = FString::Printf(TEXT("Water_%d"), WaterSectionIndex++);
-			UProceduralMeshComponent* WaterMesh = NewObject<UProceduralMeshComponent>(Owner, *CompName);
-			WaterMesh->RegisterComponent();
-			WaterMesh->AttachToComponent(Owner->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
+			TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
+			TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
+			TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
+			TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
 
-			TArray<FLinearColor> EmptyLinearColors;
-			TArray<FProcMeshTangent> EmptyTangents;
-			WaterMesh->CreateMeshSection_LinearColor(0, Vertices, Indices, Normals, UVs, EmptyLinearColors, EmptyTangents, false);
+			FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+			MeshDesc.ReserveNewVertices(Vertices.Num());
+			MeshDesc.ReserveNewVertexInstances(Vertices.Num());
+			MeshDesc.ReserveNewPolygons(Indices.Num() / 3);
+
+			TArray<FVertexInstanceID> VertexInstanceIDs;
+			VertexInstanceIDs.SetNum(Vertices.Num());
+
+			for (int32 v = 0; v < Vertices.Num(); ++v)
+			{
+				const FVector& P = Vertices[v];
+				FVertexID VertID = MeshDesc.CreateVertex();
+				VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
+
+				FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+				VertexInstanceIDs[v] = InstID;
+
+				VertexInstanceNormals[InstID] = FVector3f(0, 0, 1); // water faces up
+				VertexInstanceTangents[InstID] = FVector3f(1, 0, 0);
+				VertexInstanceBinormalSigns[InstID] = 1.0f;
+
+				FVector2f UV = (v < UVs.Num()) ? FVector2f(UVs[v]) : FVector2f(0, 0);
+				VertexInstanceUVs.Set(InstID, 0, UV);
+			}
+
+			for (int32 t = 0; t < Indices.Num(); t += 3)
+			{
+				TArray<FVertexInstanceID> TriVerts;
+				TriVerts.Add(VertexInstanceIDs[Indices[t]]);
+				TriVerts.Add(VertexInstanceIDs[Indices[t + 1]]);
+				TriVerts.Add(VertexInstanceIDs[Indices[t + 2]]);
+				MeshDesc.CreatePolygon(PolyGroup, TriVerts);
+			}
+
+			UStaticMesh* SM = NewObject<UStaticMesh>();
+			SM->AddToRoot();
+
+			TArray<const FMeshDescription*> MeshDescs;
+			MeshDescs.Add(&MeshDesc);
+			UStaticMesh::FBuildMeshDescriptionsParams BuildParams;
+			BuildParams.bBuildSimpleCollision = false;
+			BuildParams.bFastBuild = true;
+			SM->BuildFromMeshDescriptions(MeshDescs, BuildParams);
 
 			// Create material based on liquid category
 			UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
@@ -131,13 +168,19 @@ TArray<UProceduralMeshComponent*> FWowWaterRenderer::CreateWaterMeshes(
 					Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.2f, 0.6f, 0.1f, 0.8f));
 					break;
 				}
-				WaterMesh->SetMaterial(0, Mat);
+				SM->SetMaterial(0, Mat);
 			}
 
-			WaterMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			WaterMesh->SetCastShadow(false);
+			// Create UStaticMeshComponent
+			FString CompName = FString::Printf(TEXT("Water_%d"), WaterSectionIndex++);
+			UStaticMeshComponent* WaterMeshComp = NewObject<UStaticMeshComponent>(Owner, *CompName);
+			WaterMeshComp->SetStaticMesh(SM);
+			WaterMeshComp->RegisterComponent();
+			WaterMeshComp->AttachToComponent(Owner->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+			WaterMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			WaterMeshComp->SetCastShadow(false);
 
-			Result.Add(WaterMesh);
+			Result.Add(WaterMeshComp);
 		}
 	}
 

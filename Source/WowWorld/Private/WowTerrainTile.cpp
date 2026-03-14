@@ -7,6 +7,10 @@
 #include "WowWmoRenderer.h"
 #include "WowWaterRenderer.h"
 #include "VT/RuntimeVirtualTexture.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "MeshDescription.h"
+#include "StaticMeshAttributes.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerrainTile, Log, All);
 
@@ -40,14 +44,19 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
-    // Create a single ProceduralMeshComponent with one section per chunk.
-    // Each section gets its own material instance with BLP textures.
-    UProceduralMeshComponent* MeshComp = NewObject<UProceduralMeshComponent>(this, TEXT("TerrainMesh"));
-    MeshComp->SetupAttachment(RootScene);
-    MeshComp->RegisterComponent();
-    MeshComp->SetCastShadow(false);
-    MeshComp->bUseComplexAsSimpleCollision = false;
+    // Build a single UStaticMesh with one polygon group per chunk (up to 256 material slots)
+    FMeshDescription MeshDesc;
+    FStaticMeshAttributes Attributes(MeshDesc);
+    Attributes.Register();
 
+    TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = Attributes.GetVertexInstanceTangents();
+    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = Attributes.GetVertexInstanceBinormalSigns();
+    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = Attributes.GetVertexInstanceUVs();
+
+    // Collect materials per section
+    TArray<UMaterialInterface*> SectionMaterials;
     int32 SectionIndex = 0;
     int32 ChunksWithHeights = 0;
     int32 ChunksSkipped = 0;
@@ -72,43 +81,62 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         }
         if (bHasHeights) ChunksWithHeights++;
 
-        // Build vertex colors and tangents for this chunk
-        TArray<FLinearColor> Colors;
-        TArray<FProcMeshTangent> Tangents;
-        Colors.Reserve(MeshData.Vertices.Num());
-        Tangents.Reserve(MeshData.Normals.Num());
+        // Create a polygon group for this chunk (maps to a material slot)
+        FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
 
-        for (const FColor& C : MeshData.VertexColors)
-        {
-            Colors.Add(FLinearColor(C));
-        }
+        // Add vertices and vertex instances for this chunk
+        int32 BaseVertIndex = MeshDesc.Vertices().Num();
+        TArray<FVertexInstanceID> ChunkVertInstIDs;
+        ChunkVertInstIDs.SetNum(MeshData.Vertices.Num());
 
-        for (const FVector& N : MeshData.Normals)
+        for (int32 v = 0; v < MeshData.Vertices.Num(); ++v)
         {
-            FVector T = FVector::CrossProduct(N, FVector(0, 1, 0));
+            const FVector& P = MeshData.Vertices[v];
+            FVertexID VertID = MeshDesc.CreateVertex();
+            VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
+
+            FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+            ChunkVertInstIDs[v] = InstID;
+
+            FVector3f N = (v < MeshData.Normals.Num())
+                ? FVector3f(MeshData.Normals[v]) : FVector3f(0, 0, 1);
+            N.Normalize();
+            VertexInstanceNormals[InstID] = N;
+
+            FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
             if (T.SizeSquared() < 0.001f)
-                T = FVector::CrossProduct(N, FVector(1, 0, 0));
+                T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
             T.Normalize();
-            Tangents.Add(FProcMeshTangent(T, false));
+            VertexInstanceTangents[InstID] = T;
+            VertexInstanceBinormalSigns[InstID] = 1.0f;
+
+            FVector2f UV = (v < MeshData.UVs.Num())
+                ? FVector2f(MeshData.UVs[v]) : FVector2f(0, 0);
+            VertexInstanceUVs.Set(InstID, 0, UV);
         }
 
-        // Create mesh section for this chunk
-        MeshComp->CreateMeshSection_LinearColor(
-            SectionIndex, MeshData.Vertices, MeshData.Indices,
-            MeshData.Normals, MeshData.UVs, Colors, Tangents, false);
+        // Create triangles for this chunk
+        for (int32 t = 0; t < MeshData.Indices.Num(); t += 3)
+        {
+            TArray<FVertexInstanceID> TriVerts;
+            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t]]);
+            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 1]]);
+            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 2]]);
+            MeshDesc.CreatePolygon(PolyGroup, TriVerts);
+        }
 
-        // Create a textured material for this chunk from BLP data
+        // Determine material for this chunk
         UMaterialInstanceDynamic* ChunkMat = FWowTerrainMaterial::CreateChunkMaterial(
             Chunk, Data, Mpq, Cache, this);
 
         if (ChunkMat)
         {
-            MeshComp->SetMaterial(SectionIndex, ChunkMat);
+            SectionMaterials.Add(ChunkMat);
             ChunksTextured++;
         }
-        else if (DefaultMat)
+        else
         {
-            MeshComp->SetMaterial(SectionIndex, DefaultMat);
+            SectionMaterials.Add(DefaultMat);
         }
 
         SectionIndex++;
@@ -116,19 +144,43 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     if (SectionIndex > 0)
     {
+        // Build UStaticMesh from the mesh description
+        UStaticMesh* SM = NewObject<UStaticMesh>();
+        SM->AddToRoot();
+
+        TArray<const FMeshDescription*> MeshDescs;
+        MeshDescs.Add(&MeshDesc);
+        UStaticMesh::FBuildMeshDescriptionsParams Params;
+        Params.bBuildSimpleCollision = false;
+        Params.bFastBuild = true;
+        SM->BuildFromMeshDescriptions(MeshDescs, Params);
+
+        // Assign materials to each section
+        for (int32 s = 0; s < SectionMaterials.Num(); ++s)
+        {
+            if (SectionMaterials[s])
+            {
+                SM->SetMaterial(s, SectionMaterials[s]);
+            }
+        }
+
+        // Create UStaticMeshComponent
+        UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(this, TEXT("TerrainMesh"));
+        MeshComp->SetStaticMesh(SM);
+        MeshComp->SetupAttachment(RootScene);
+        MeshComp->RegisterComponent();
+        MeshComp->SetCastShadow(false);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
         ChunkMeshes.Add(MeshComp);
         UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d sections, %d textured, %d/%d have heights, %d skipped"),
             TX, TY, SectionIndex, ChunksTextured, ChunksWithHeights, 256 - ChunksSkipped, ChunksSkipped);
     }
-    else
-    {
-        MeshComp->DestroyComponent();
-    }
 
     // Spawn water meshes from MH2O data
     {
-        TArray<UProceduralMeshComponent*> WaterComps = FWowWaterRenderer::CreateWaterMeshes(this, Data, TX, TY);
-        for (UProceduralMeshComponent* WC : WaterComps)
+        TArray<UStaticMeshComponent*> WaterComps = FWowWaterRenderer::CreateWaterMeshes(this, Data, TX, TY);
+        for (UStaticMeshComponent* WC : WaterComps)
         {
             WaterMeshes.Add(WC);
         }
@@ -157,7 +209,7 @@ void AWowTerrainTile::ApplyRuntimeVirtualTexture(URuntimeVirtualTexture* RVT)
     if (!RVT) return;
 
     // Configure all terrain chunk meshes to render into the RVT
-    for (UProceduralMeshComponent* Mesh : ChunkMeshes)
+    for (UStaticMeshComponent* Mesh : ChunkMeshes)
     {
         if (Mesh)
         {

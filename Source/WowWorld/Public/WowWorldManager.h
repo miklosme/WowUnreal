@@ -85,11 +85,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     float WmoRadius = 300000.0f;
 
-    /** Maximum number of active doodad ProceduralMeshComponents. */
+    /** Maximum number of active doodad components. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 MaxActiveDoodads = 200;
 
-    /** Maximum number of active WMO group ProceduralMeshComponents. */
+    /** Maximum number of active WMO group components. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 MaxActiveWmoGroups = 100;
 

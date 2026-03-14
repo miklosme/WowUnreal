@@ -1,7 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "ProceduralMeshComponent.h"
 #include "Formats/AdtTypes.h"
 #include "WowTerrainTile.generated.h"
 
@@ -10,6 +9,7 @@ class FMpqManager;
 class FWowAssetCache;
 class UHierarchicalInstancedStaticMeshComponent;
 class URuntimeVirtualTexture;
+class UStaticMeshComponent;
 
 UCLASS()
 class WOWWORLD_API AWowTerrainTile : public AActor
@@ -30,7 +30,7 @@ public:
 
     // Track which placements are currently spawned (legacy per-instance mode)
     UPROPERTY()
-    TMap<uint32, TObjectPtr<UProceduralMeshComponent>> SpawnedDoodads; // UniqueId -> component
+    TMap<uint32, TObjectPtr<UStaticMeshComponent>> SpawnedDoodads; // UniqueId -> component
 
     UPROPERTY()
     TMap<uint32, TObjectPtr<AActor>> SpawnedWmos; // UniqueId -> actor
@@ -51,10 +51,10 @@ private:
     TObjectPtr<USceneComponent> RootScene;
 
     UPROPERTY()
-    TArray<TObjectPtr<UProceduralMeshComponent>> ChunkMeshes;
+    TArray<TObjectPtr<UStaticMeshComponent>> ChunkMeshes;
 
     UPROPERTY()
-    TArray<TObjectPtr<UProceduralMeshComponent>> WaterMeshes;
+    TArray<TObjectPtr<UStaticMeshComponent>> WaterMeshes;
 
     FIntPoint TileCoord;
 

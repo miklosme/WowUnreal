@@ -9,7 +9,7 @@
 #include "WowTerrainMaterial.h"
 #include "Coord/WowCoordinate.h"
 #include "Formats/AdtTypes.h"
-#include "ProceduralMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "MeshDescription.h"
@@ -85,102 +85,6 @@ TSharedPtr<FM2Data> FWowDoodadManager::GetOrParseM2(const FString& M2Path, FMpqM
     return Data;
 }
 
-UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
-    AActor* Owner, const FM2Data& Data, const FString& M2Path,
-    FMpqManager* Mpq, FWowAssetCache* Cache, FName CompName)
-{
-    if (Data.Vertices.Num() == 0 || Data.Indices.Num() == 0)
-    {
-        return nullptr;
-    }
-
-    UProceduralMeshComponent* MeshComp = NewObject<UProceduralMeshComponent>(Owner, CompName);
-    MeshComp->SetupAttachment(Owner->GetRootComponent());
-
-    // Convert M2 vertices to ProceduralMesh format
-    const int32 NumVerts = Data.Vertices.Num();
-    TArray<FVector> Vertices;
-    TArray<FVector> Normals;
-    TArray<FVector2D> UVs;
-    TArray<FProcMeshTangent> Tangents;
-
-    Vertices.SetNum(NumVerts);
-    Normals.SetNum(NumVerts);
-    UVs.SetNum(NumVerts);
-    Tangents.SetNum(NumVerts);
-
-    for (int32 i = 0; i < NumVerts; ++i)
-    {
-        const FM2Vertex& V = Data.Vertices[i];
-        // WoW Z-up RH → UE Z-up LH: negate X to fix E/W mirror + handedness
-        Vertices[i] = FVector(-V.Position.X, V.Position.Y, V.Position.Z) * FWowCoordinate::SCALE;
-        Normals[i] = FVector(-V.Normal.X, V.Normal.Y, V.Normal.Z);
-        Normals[i].Normalize();
-        UVs[i] = V.TexCoord;
-
-        // Approximate tangent
-        FVector N = Normals[i];
-        FVector T = FVector::CrossProduct(N, FVector(0, 1, 0));
-        if (T.SizeSquared() < 0.001f)
-        {
-            T = FVector::CrossProduct(N, FVector(1, 0, 0));
-        }
-        T.Normalize();
-        Tangents[i] = FProcMeshTangent(T, false);
-    }
-
-    // Keep original winding order
-    TArray<int32> Indices;
-    Indices.SetNum(Data.Indices.Num());
-    for (int32 i = 0; i < Data.Indices.Num(); ++i)
-    {
-        Indices[i] = static_cast<int32>(Data.Indices[i]);
-    }
-
-    TArray<FLinearColor> EmptyColors;
-    MeshComp->CreateMeshSection_LinearColor(0, Vertices, Indices, Normals, UVs, EmptyColors, Tangents, false);
-
-    // Load and apply the first texture as material
-    if (Data.TexturePaths.Num() > 0 && Mpq && Cache)
-    {
-        const FString& TexPath = Data.TexturePaths[0];
-        if (!TexPath.IsEmpty())
-        {
-            UTexture2D* Tex = Cache->FindTexture(TexPath);
-            if (!Tex)
-            {
-                TArray<uint8> BlpRaw;
-                if (Mpq->ReadFile(TexPath, BlpRaw))
-                {
-                    FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
-                    if (BlpData.bIsValid)
-                    {
-                        Tex = FWowTextureFactory::CreateTexture(BlpData, TexPath);
-                        if (Tex) Cache->CacheTexture(TexPath, Tex);
-                    }
-                }
-            }
-
-            if (Tex)
-            {
-                // Use the terrain material which has a BaseTexture parameter
-                UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
-                if (BaseMat)
-                {
-                    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, Owner);
-                    MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
-                    MeshComp->SetMaterial(0, MID);
-                }
-            }
-        }
-    }
-
-    MeshComp->SetCastShadow(true);
-    MeshComp->RegisterComponent();
-
-    return MeshComp;
-}
-
 void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
                                       const TArray<FString>& DoodadPaths, FMpqManager* Mpq, FWowAssetCache* Cache)
 {
@@ -218,22 +122,20 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             continue;
         }
 
-        // Parse M2
-        TSharedPtr<FM2Data> M2Data = GetOrParseM2(M2Path, Mpq);
-        if (!M2Data || !M2Data->bIsValid)
+        // Get or create static mesh (cached)
+        UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
+        if (!SM)
         {
             continue;
         }
 
         // Create mesh component
         FName CompName = *FString::Printf(TEXT("Doodad_%d_%d"), Placement.UniqueId, i);
-        UProceduralMeshComponent* MeshComp = CreateM2MeshComponent(
-            ParentActor, *M2Data, M2Path, Mpq, Cache, CompName);
-
-        if (!MeshComp)
-        {
-            continue;
-        }
+        UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(ParentActor, CompName);
+        MeshComp->SetStaticMesh(SM);
+        MeshComp->SetupAttachment(ParentActor->GetRootComponent());
+        MeshComp->SetCastShadow(true);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
         // MDDF positions: convert to ADT space, then AdtToUE (matches terrain)
         float AdtX = Placement.Position.X;
@@ -247,6 +149,7 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
         MeshComp->SetWorldLocation(UEPos);
         MeshComp->SetWorldRotation(FRotator(0.0f, -Placement.Rotation.Y, 0.0f));
         MeshComp->SetWorldScale3D(FVector(ScaleVal));
+        MeshComp->RegisterComponent();
 
         ++Spawned;
     }
@@ -254,7 +157,7 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
     UE_LOG(LogWowDoodad, Log, TEXT("Spawned %d doodad meshes"), Spawned);
 }
 
-UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
+UStaticMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
     AActor* ParentActor, const FAdtDoodadPlacement& Placement,
     const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache)
 {
@@ -263,20 +166,19 @@ UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
         return nullptr;
     }
 
-    TSharedPtr<FM2Data> M2Data = GetOrParseM2(M2Path, Mpq);
-    if (!M2Data || !M2Data->bIsValid)
+    // Get or create static mesh (cached)
+    UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
+    if (!SM)
     {
         return nullptr;
     }
 
     FName CompName = *FString::Printf(TEXT("Doodad_%u"), Placement.UniqueId);
-    UProceduralMeshComponent* MeshComp = CreateM2MeshComponent(
-        ParentActor, *M2Data, M2Path, Mpq, Cache, CompName);
-
-    if (!MeshComp)
-    {
-        return nullptr;
-    }
+    UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(ParentActor, CompName);
+    MeshComp->SetStaticMesh(SM);
+    MeshComp->SetupAttachment(ParentActor->GetRootComponent());
+    MeshComp->SetCastShadow(true);
+    MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
     // MDDF positions: convert to ADT space, then AdtToUE (matches terrain)
     float AdtX = Placement.Position.X;
@@ -289,6 +191,7 @@ UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
     MeshComp->SetWorldLocation(UEPos);
     MeshComp->SetWorldRotation(FRotator(0.0f, -Placement.Rotation.Y, 0.0f));
     MeshComp->SetWorldScale3D(FVector(ScaleVal));
+    MeshComp->RegisterComponent();
 
     return MeshComp;
 }

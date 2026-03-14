@@ -3,15 +3,15 @@
 
 class FMpqManager;
 class FWowAssetCache;
-class UProceduralMeshComponent;
 class UStaticMesh;
+class UStaticMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
 struct FAdtDoodadPlacement;
 struct FM2Data;
 
 /**
  * Manages M2 doodad placement.
- * Supports both ProceduralMeshComponent (per-instance) and HISMC (instanced) modes.
+ * Supports both UStaticMeshComponent (per-instance) and HISMC (instanced) modes.
  */
 class WOWWORLD_API FWowDoodadManager
 {
@@ -19,13 +19,13 @@ public:
     /** Parse M2 data from MPQ (cached). Returns shared pointer to parsed data. */
     static TSharedPtr<FM2Data> GetOrParseM2(const FString& M2Path, FMpqManager* Mpq);
 
-    /** Spawn doodad instances for a tile as ProceduralMeshComponents on the parent actor */
+    /** Spawn doodad instances for a tile as UStaticMeshComponents on the parent actor */
     static void SpawnDoodads(AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
                              const TArray<FString>& DoodadPaths, FMpqManager* Mpq, FWowAssetCache* Cache);
 
-    /** Spawn a single doodad and return the ProceduralMeshComponent (for distance-based streaming) */
-    static UProceduralMeshComponent* SpawnSingleDoodad(AActor* ParentActor, const FAdtDoodadPlacement& Placement,
-                                                        const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache);
+    /** Spawn a single doodad and return the UStaticMeshComponent (for distance-based streaming) */
+    static UStaticMeshComponent* SpawnSingleDoodad(AActor* ParentActor, const FAdtDoodadPlacement& Placement,
+                                                    const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache);
 
     /**
      * Spawn all doodads for a tile using HISMC instancing.
@@ -50,9 +50,4 @@ private:
     /** Create a UStaticMesh from M2 geometry data */
     static UStaticMesh* CreateStaticMeshFromM2(const FM2Data& Data, const FString& M2Path,
                                                 FMpqManager* Mpq, FWowAssetCache* Cache);
-
-    /** Create a ProceduralMeshComponent from M2 data */
-    static UProceduralMeshComponent* CreateM2MeshComponent(AActor* Owner, const FM2Data& Data,
-                                                            const FString& M2Path, FMpqManager* Mpq,
-                                                            FWowAssetCache* Cache, FName CompName);
 };

@@ -7,7 +7,7 @@
 #include "Formats/WdtTypes.h"
 #include "Formats/WdlParser.h"
 #include "Formats/WdlTypes.h"
-#include "ProceduralMeshComponent.h"
+// ProceduralMeshComponent removed — all world rendering uses UStaticMesh
 #include "Coord/WowCoordinate.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -1152,12 +1152,18 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     Root->RegisterComponent();
     Lod1Actor->SetRootComponent(Root);
 
-    UProceduralMeshComponent* MeshComp = NewObject<UProceduralMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
-    MeshComp->SetupAttachment(Root);
-    MeshComp->RegisterComponent();
-    MeshComp->SetCastShadow(false);
-    MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    // Build a single UStaticMesh with one polygon group per chunk
+    FMeshDescription MeshDesc;
+    FStaticMeshAttributes SMAttributes(MeshDesc);
+    SMAttributes.Register();
 
+    TVertexAttributesRef<FVector3f> VertexPositions = SMAttributes.GetVertexPositions();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = SMAttributes.GetVertexInstanceNormals();
+    TVertexInstanceAttributesRef<FVector3f> VertexInstanceTangents = SMAttributes.GetVertexInstanceTangents();
+    TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = SMAttributes.GetVertexInstanceBinormalSigns();
+    TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = SMAttributes.GetVertexInstanceUVs();
+
+    TArray<UMaterialInterface*> Lod1Materials;
     int32 SectionIndex = 0;
     int32 TexturedSections = 0;
     UMaterialInterface* DefaultLod1Material = FWowTerrainMaterial::GetBaseMaterial();
@@ -1172,45 +1178,88 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
         FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(ChunkData, TX, TY);
         if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0) continue;
 
-        TArray<FLinearColor> Colors;
-        TArray<FProcMeshTangent> Tangents;
-        Colors.Reserve(MeshData.VertexColors.Num());
-        Tangents.Reserve(MeshData.Normals.Num());
+        FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
 
-        for (const FColor& Color : MeshData.VertexColors)
+        TArray<FVertexInstanceID> ChunkVertInstIDs;
+        ChunkVertInstIDs.SetNum(MeshData.Vertices.Num());
+
+        for (int32 v = 0; v < MeshData.Vertices.Num(); ++v)
         {
-            Colors.Add(FLinearColor(Color));
+            const FVector& P = MeshData.Vertices[v];
+            FVertexID VertID = MeshDesc.CreateVertex();
+            VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
+
+            FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+            ChunkVertInstIDs[v] = InstID;
+
+            FVector3f N = (v < MeshData.Normals.Num())
+                ? FVector3f(MeshData.Normals[v]) : FVector3f(0, 0, 1);
+            N.Normalize();
+            VertexInstanceNormals[InstID] = N;
+
+            FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
+            if (T.SizeSquared() < 0.001f)
+                T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
+            T.Normalize();
+            VertexInstanceTangents[InstID] = T;
+            VertexInstanceBinormalSigns[InstID] = 1.0f;
+
+            FVector2f UV = (v < MeshData.UVs.Num())
+                ? FVector2f(MeshData.UVs[v]) : FVector2f(0, 0);
+            VertexInstanceUVs.Set(InstID, 0, UV);
         }
 
-        for (const FVector& Normal : MeshData.Normals)
+        for (int32 t = 0; t < MeshData.Indices.Num(); t += 3)
         {
-            FVector Tangent = FVector::CrossProduct(Normal, FVector(0, 1, 0));
-            if (Tangent.SizeSquared() < 0.001f)
-            {
-                Tangent = FVector::CrossProduct(Normal, FVector(1, 0, 0));
-            }
-            Tangent.Normalize();
-            Tangents.Add(FProcMeshTangent(Tangent, false));
+            TArray<FVertexInstanceID> TriVerts;
+            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t]]);
+            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 1]]);
+            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 2]]);
+            MeshDesc.CreatePolygon(PolyGroup, TriVerts);
         }
-
-        MeshComp->CreateMeshSection_LinearColor(
-            SectionIndex, MeshData.Vertices, MeshData.Indices,
-            MeshData.Normals, MeshData.UVs, Colors, Tangents, false);
 
         UMaterialInstanceDynamic* ChunkMaterial = FWowTerrainMaterial::CreateChunkMaterial(
             ChunkData, AdtData, MpqManager.Get(), AssetCache.Get(), Lod1Actor);
 
         if (ChunkMaterial)
         {
-            MeshComp->SetMaterial(SectionIndex, ChunkMaterial);
+            Lod1Materials.Add(ChunkMaterial);
             TexturedSections++;
         }
-        else if (DefaultLod1Material)
+        else
         {
-            MeshComp->SetMaterial(SectionIndex, DefaultLod1Material);
+            Lod1Materials.Add(DefaultLod1Material);
         }
 
         SectionIndex++;
+    }
+
+    if (SectionIndex > 0)
+    {
+        UStaticMesh* SM = NewObject<UStaticMesh>();
+        SM->AddToRoot();
+
+        TArray<const FMeshDescription*> MeshDescs;
+        MeshDescs.Add(&MeshDesc);
+        UStaticMesh::FBuildMeshDescriptionsParams Params;
+        Params.bBuildSimpleCollision = false;
+        Params.bFastBuild = true;
+        SM->BuildFromMeshDescriptions(MeshDescs, Params);
+
+        for (int32 s = 0; s < Lod1Materials.Num(); ++s)
+        {
+            if (Lod1Materials[s])
+            {
+                SM->SetMaterial(s, Lod1Materials[s]);
+            }
+        }
+
+        UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
+        MeshComp->SetStaticMesh(SM);
+        MeshComp->SetupAttachment(Root);
+        MeshComp->RegisterComponent();
+        MeshComp->SetCastShadow(false);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     }
 
     Lod1Tiles.Add(TileKey(TX, TY), Lod1Actor);
@@ -1270,7 +1319,7 @@ void AWowWorldManager::UpdateObjectStreaming()
                 }
                 for (uint32 Id : ToDespawn)
                 {
-                    TObjectPtr<UProceduralMeshComponent>* Comp = Tile->SpawnedDoodads.Find(Id);
+                    TObjectPtr<UStaticMeshComponent>* Comp = Tile->SpawnedDoodads.Find(Id);
                     if (Comp && *Comp)
                     {
                         (*Comp)->DestroyComponent();
@@ -1303,7 +1352,7 @@ void AWowWorldManager::UpdateObjectStreaming()
                 if (DistSq > DoodadRadiusSq) continue;
 
                 // Spawn it
-                UProceduralMeshComponent* Comp = FWowDoodadManager::SpawnSingleDoodad(
+                UStaticMeshComponent* Comp = FWowDoodadManager::SpawnSingleDoodad(
                     Tile, Placement, M2Path, Tile->CachedMpq, Tile->CachedCache);
                 if (Comp)
                 {

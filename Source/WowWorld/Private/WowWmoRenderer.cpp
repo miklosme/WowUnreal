@@ -10,7 +10,6 @@
 #include "Coord/WowCoordinate.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Formats/AdtTypes.h"
-#include "ProceduralMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "MeshDescription.h"
