@@ -10,7 +10,10 @@
 #include "ProceduralMeshComponent.h"
 #include "Coord/WowCoordinate.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/Material.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "WowDoodadManager.h"
+#include "WowTerrainMaterial.h"
 #include "WowWmoRenderer.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Async/Async.h"
@@ -19,6 +22,350 @@
 #include "WowTerrainMeshBuilder.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
+
+namespace
+{
+constexpr uint8 WdlTransition_North = 1 << 0;
+constexpr uint8 WdlTransition_South = 1 << 1;
+constexpr uint8 WdlTransition_West = 1 << 2;
+constexpr uint8 WdlTransition_East = 1 << 3;
+constexpr int32 WdlTransitionSamples = 16 * 8 + 1;
+constexpr float WdlTransitionDepthOffset = 15.0f;
+
+int32 OuterVertexIndex(int32 X, int32 Y)
+{
+    return Y * 17 + X;
+}
+
+int32 GetTileDistance(const FIntPoint& CameraTile, int32 TX, int32 TY)
+{
+    return FMath::Max(FMath::Abs(TX - CameraTile.X), FMath::Abs(TY - CameraTile.Y));
+}
+
+float GetChunkOuterHeight(const FAdtChunkData& Chunk, int32 OuterX, int32 OuterY)
+{
+    return Chunk.WorldZ + Chunk.Heights[OuterVertexIndex(OuterX, OuterY)];
+}
+
+bool IsNeighborInLod1Range(const FWdtData* WdtData, const FIntPoint& CameraTile, int32 LoadRadius, int32 Lod1Radius, int32 TX, int32 TY)
+{
+    if (!WdtData || TX < 0 || TX >= 64 || TY < 0 || TY >= 64 || !WdtData->TileExists[TX][TY])
+    {
+        return false;
+    }
+
+    const int32 Distance = GetTileDistance(CameraTile, TX, TY);
+    return Distance > LoadRadius && Distance <= Lod1Radius;
+}
+
+uint8 DetermineWdlTransitionEdges(const FWdtData* WdtData, const FIntPoint& CameraTile, int32 LoadRadius, int32 Lod1Radius, int32 TX, int32 TY)
+{
+    uint8 EdgeMask = 0;
+    if (IsNeighborInLod1Range(WdtData, CameraTile, LoadRadius, Lod1Radius, TX, TY - 1))
+    {
+        EdgeMask |= WdlTransition_North;
+    }
+    if (IsNeighborInLod1Range(WdtData, CameraTile, LoadRadius, Lod1Radius, TX, TY + 1))
+    {
+        EdgeMask |= WdlTransition_South;
+    }
+    if (IsNeighborInLod1Range(WdtData, CameraTile, LoadRadius, Lod1Radius, TX - 1, TY))
+    {
+        EdgeMask |= WdlTransition_West;
+    }
+    if (IsNeighborInLod1Range(WdtData, CameraTile, LoadRadius, Lod1Radius, TX + 1, TY))
+    {
+        EdgeMask |= WdlTransition_East;
+    }
+    return EdgeMask;
+}
+
+bool LoadTileAdtForTransition(FMpqManager* Mpq, const FString& MapName, bool bBigAlpha, int32 TX, int32 TY, FAdtData& OutAdtData)
+{
+    if (!Mpq)
+    {
+        return false;
+    }
+
+    const FString AdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s_%d_%d.adt"), *MapName, *MapName, TX, TY);
+    TArray<uint8> AdtRaw;
+    if (!Mpq->ReadFile(AdtPath, AdtRaw))
+    {
+        return false;
+    }
+
+    OutAdtData = FAdtParser::Parse(AdtRaw, bBigAlpha);
+    return OutAdtData.bIsValid;
+}
+
+void BuildNorthEdgeHeights(const FAdtData& AdtData, TArray<float>& OutHeights)
+{
+    OutHeights.Reset();
+    OutHeights.Reserve(WdlTransitionSamples);
+
+    for (int32 ChunkX = 0; ChunkX < 16; ++ChunkX)
+    {
+        const FAdtChunkData& Chunk = AdtData.Chunks[ChunkX];
+        for (int32 SampleX = 0; SampleX < 8; ++SampleX)
+        {
+            OutHeights.Add(GetChunkOuterHeight(Chunk, SampleX, 0));
+        }
+    }
+
+    OutHeights.Add(GetChunkOuterHeight(AdtData.Chunks[15], 8, 0));
+}
+
+void BuildSouthEdgeHeights(const FAdtData& AdtData, TArray<float>& OutHeights)
+{
+    OutHeights.Reset();
+    OutHeights.Reserve(WdlTransitionSamples);
+
+    for (int32 ChunkX = 0; ChunkX < 16; ++ChunkX)
+    {
+        const FAdtChunkData& Chunk = AdtData.Chunks[15 * 16 + ChunkX];
+        for (int32 SampleX = 0; SampleX < 8; ++SampleX)
+        {
+            OutHeights.Add(GetChunkOuterHeight(Chunk, SampleX, 8));
+        }
+    }
+
+    OutHeights.Add(GetChunkOuterHeight(AdtData.Chunks[15 * 16 + 15], 8, 8));
+}
+
+void BuildWestEdgeHeights(const FAdtData& AdtData, TArray<float>& OutHeights)
+{
+    OutHeights.Reset();
+    OutHeights.Reserve(WdlTransitionSamples);
+
+    for (int32 ChunkY = 0; ChunkY < 16; ++ChunkY)
+    {
+        const FAdtChunkData& Chunk = AdtData.Chunks[ChunkY * 16];
+        for (int32 SampleY = 0; SampleY < 8; ++SampleY)
+        {
+            OutHeights.Add(GetChunkOuterHeight(Chunk, 0, SampleY));
+        }
+    }
+
+    OutHeights.Add(GetChunkOuterHeight(AdtData.Chunks[15 * 16], 0, 8));
+}
+
+void BuildEastEdgeHeights(const FAdtData& AdtData, TArray<float>& OutHeights)
+{
+    OutHeights.Reset();
+    OutHeights.Reserve(WdlTransitionSamples);
+
+    for (int32 ChunkY = 0; ChunkY < 16; ++ChunkY)
+    {
+        const FAdtChunkData& Chunk = AdtData.Chunks[ChunkY * 16 + 15];
+        for (int32 SampleY = 0; SampleY < 8; ++SampleY)
+        {
+            OutHeights.Add(GetChunkOuterHeight(Chunk, 8, SampleY));
+        }
+    }
+
+    OutHeights.Add(GetChunkOuterHeight(AdtData.Chunks[15 * 16 + 15], 8, 8));
+}
+
+float SampleWdlRowHeight(const FWdlTileData& TileData, int32 Row, int32 SampleIndex)
+{
+    if (SampleIndex >= WdlTransitionSamples - 1)
+    {
+        return static_cast<float>(TileData.Height17[Row][16]);
+    }
+
+    const int32 Segment = FMath::Clamp(SampleIndex / 8, 0, 15);
+    const float Alpha = static_cast<float>(SampleIndex % 8) / 8.0f;
+    return FMath::Lerp(
+        static_cast<float>(TileData.Height17[Row][Segment]),
+        static_cast<float>(TileData.Height17[Row][Segment + 1]),
+        Alpha);
+}
+
+float SampleWdlColumnHeight(const FWdlTileData& TileData, int32 Column, int32 SampleIndex)
+{
+    if (SampleIndex >= WdlTransitionSamples - 1)
+    {
+        return static_cast<float>(TileData.Height17[16][Column]);
+    }
+
+    const int32 Segment = FMath::Clamp(SampleIndex / 8, 0, 15);
+    const float Alpha = static_cast<float>(SampleIndex % 8) / 8.0f;
+    return FMath::Lerp(
+        static_cast<float>(TileData.Height17[Segment][Column]),
+        static_cast<float>(TileData.Height17[Segment + 1][Column]),
+        Alpha);
+}
+
+void ComputeSectionNormals(const TArray<FVector>& Vertices, const TArray<int32>& Indices, TArray<FVector>& OutNormals)
+{
+    OutNormals.Init(FVector::ZeroVector, Vertices.Num());
+
+    for (int32 Index = 0; Index + 2 < Indices.Num(); Index += 3)
+    {
+        const FVector& A = Vertices[Indices[Index]];
+        const FVector& B = Vertices[Indices[Index + 1]];
+        const FVector& C = Vertices[Indices[Index + 2]];
+        const FVector FaceNormal = FVector::CrossProduct(B - A, C - A).GetSafeNormal();
+
+        OutNormals[Indices[Index]] += FaceNormal;
+        OutNormals[Indices[Index + 1]] += FaceNormal;
+        OutNormals[Indices[Index + 2]] += FaceNormal;
+    }
+
+    for (FVector& Normal : OutNormals)
+    {
+        Normal = Normal.GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+    }
+}
+
+int32 AddWdlTransitionSection(
+    UProceduralMeshComponent* Mesh,
+    int32 SectionIndex,
+    const FWdlTileData& TileData,
+    int32 TX,
+    int32 TY,
+    uint8 Edge,
+    const TArray<float>& OuterHeights,
+    UMaterialInterface* Material)
+{
+    if (!Mesh || OuterHeights.Num() != WdlTransitionSamples)
+    {
+        return SectionIndex;
+    }
+
+    TArray<FVector> Vertices;
+    TArray<int32> Indices;
+    TArray<FVector> Normals;
+    TArray<FVector2D> UVs;
+    TArray<FLinearColor> Colors;
+    TArray<FProcMeshTangent> Tangents;
+
+    Vertices.Reserve(WdlTransitionSamples * 2);
+    UVs.Reserve(WdlTransitionSamples * 2);
+    Indices.Reserve((WdlTransitionSamples - 1) * 6);
+
+    const float TileNgX = TX * FWowCoordinate::TILE_SIZE;
+    const float TileNgZ = TY * FWowCoordinate::TILE_SIZE;
+    const float FineStep = FWowCoordinate::UNIT_SIZE;
+    const float CoarseStep = FWowCoordinate::CHUNK_SIZE;
+
+    for (int32 SampleIndex = 0; SampleIndex < WdlTransitionSamples; ++SampleIndex)
+    {
+        const float Offset = SampleIndex * FineStep;
+
+        float OuterX = TileNgX;
+        float OuterZ = TileNgZ;
+        float InnerX = TileNgX;
+        float InnerZ = TileNgZ;
+        float InnerHeight = 0.0f;
+
+        switch (Edge)
+        {
+        case WdlTransition_North:
+            OuterX += Offset;
+            InnerX += Offset;
+            InnerZ += CoarseStep;
+            InnerHeight = SampleWdlRowHeight(TileData, 1, SampleIndex);
+            break;
+        case WdlTransition_South:
+            OuterX += Offset;
+            OuterZ += FWowCoordinate::TILE_SIZE;
+            InnerX += Offset;
+            InnerZ += FWowCoordinate::TILE_SIZE - CoarseStep;
+            InnerHeight = SampleWdlRowHeight(TileData, 15, SampleIndex);
+            break;
+        case WdlTransition_West:
+            OuterZ += Offset;
+            InnerX += CoarseStep;
+            InnerZ += Offset;
+            InnerHeight = SampleWdlColumnHeight(TileData, 1, SampleIndex);
+            break;
+        case WdlTransition_East:
+            OuterX += FWowCoordinate::TILE_SIZE;
+            OuterZ += Offset;
+            InnerX += FWowCoordinate::TILE_SIZE - CoarseStep;
+            InnerZ += Offset;
+            InnerHeight = SampleWdlColumnHeight(TileData, 15, SampleIndex);
+            break;
+        default:
+            return SectionIndex;
+        }
+
+        FVector OuterVertex = FWowCoordinate::AdtToUE(OuterX, OuterHeights[SampleIndex], OuterZ);
+        FVector InnerVertex = FWowCoordinate::AdtToUE(InnerX, InnerHeight, InnerZ);
+        OuterVertex.Z -= WdlTransitionDepthOffset;
+        InnerVertex.Z -= WdlTransitionDepthOffset;
+
+        Vertices.Add(OuterVertex);
+        UVs.Add(FVector2D(static_cast<float>(SampleIndex) / (WdlTransitionSamples - 1), 0.0f));
+    }
+
+    for (int32 SampleIndex = 0; SampleIndex < WdlTransitionSamples; ++SampleIndex)
+    {
+        const float Offset = SampleIndex * FineStep;
+
+        float InnerX = TileNgX;
+        float InnerZ = TileNgZ;
+        float InnerHeight = 0.0f;
+
+        switch (Edge)
+        {
+        case WdlTransition_North:
+            InnerX += Offset;
+            InnerZ += CoarseStep;
+            InnerHeight = SampleWdlRowHeight(TileData, 1, SampleIndex);
+            break;
+        case WdlTransition_South:
+            InnerX += Offset;
+            InnerZ += FWowCoordinate::TILE_SIZE - CoarseStep;
+            InnerHeight = SampleWdlRowHeight(TileData, 15, SampleIndex);
+            break;
+        case WdlTransition_West:
+            InnerX += CoarseStep;
+            InnerZ += Offset;
+            InnerHeight = SampleWdlColumnHeight(TileData, 1, SampleIndex);
+            break;
+        case WdlTransition_East:
+            InnerX += FWowCoordinate::TILE_SIZE - CoarseStep;
+            InnerZ += Offset;
+            InnerHeight = SampleWdlColumnHeight(TileData, 15, SampleIndex);
+            break;
+        default:
+            return SectionIndex;
+        }
+
+        FVector InnerVertex = FWowCoordinate::AdtToUE(InnerX, InnerHeight, InnerZ);
+        InnerVertex.Z -= WdlTransitionDepthOffset;
+        Vertices.Add(InnerVertex);
+        UVs.Add(FVector2D(static_cast<float>(SampleIndex) / (WdlTransitionSamples - 1), 1.0f));
+    }
+
+    for (int32 SampleIndex = 0; SampleIndex < WdlTransitionSamples - 1; ++SampleIndex)
+    {
+        const int32 TopLeft = SampleIndex;
+        const int32 TopRight = SampleIndex + 1;
+        const int32 BottomLeft = WdlTransitionSamples + SampleIndex;
+        const int32 BottomRight = BottomLeft + 1;
+
+        Indices.Add(TopLeft);
+        Indices.Add(BottomLeft);
+        Indices.Add(TopRight);
+
+        Indices.Add(TopRight);
+        Indices.Add(BottomLeft);
+        Indices.Add(BottomRight);
+    }
+
+    ComputeSectionNormals(Vertices, Indices, Normals);
+    Mesh->CreateMeshSection_LinearColor(SectionIndex, Vertices, Indices, Normals, UVs, Colors, Tangents, false);
+    if (Material)
+    {
+        Mesh->SetMaterial(SectionIndex, Material);
+    }
+
+    return SectionIndex + 1;
+}
+}
 
 AWowWorldManager::AWowWorldManager() { PrimaryActorTick.bCanEverTick = true; PrimaryActorTick.TickInterval = 0.5f; }
 
@@ -545,13 +892,6 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
 
             FVector UEPos = FWowCoordinate::AdtToUE(NgX, NgY, NgZ);
 
-            // Lower edge vertices slightly to prevent gaps at LOD boundaries
-            bool bIsEdge = (Row == 0 || Row == 16 || Col == 0 || Col == 16);
-            if (bIsEdge)
-            {
-                UEPos.Z -= 50.0f; // Drop edge verts 0.5m to tuck under adjacent LOD
-            }
-
             Vertices.Add(UEPos);
             UVs.Add(FVector2D((float)Col / 16.0f, (float)Row / 16.0f));
         }
@@ -624,6 +964,50 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     // Disable collision and shadow for distant terrain
     Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     Mesh->SetCastShadow(false);
+
+    const uint8 TransitionEdges = DetermineWdlTransitionEdges(WdtData.Get(), LastCameraTile, LoadRadius, Lod1Radius, TX, TY);
+    if (TransitionEdges != 0)
+    {
+        FAdtData TransitionAdtData;
+        if (LoadTileAdtForTransition(MpqManager.Get(), MapName, WdtData ? WdtData->bUseBigAlpha : false, TX, TY, TransitionAdtData))
+        {
+            int32 TransitionSectionIndex = 1;
+            int32 TransitionSectionCount = 0;
+            TArray<float> EdgeHeights;
+            UMaterialInterface* TransitionMaterial = Mat ? static_cast<UMaterialInterface*>(Mat) : static_cast<UMaterialInterface*>(UMaterial::GetDefaultMaterial(MD_Surface));
+
+            if ((TransitionEdges & WdlTransition_North) != 0)
+            {
+                BuildNorthEdgeHeights(TransitionAdtData, EdgeHeights);
+                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_North, EdgeHeights, TransitionMaterial);
+                TransitionSectionCount++;
+            }
+            if ((TransitionEdges & WdlTransition_South) != 0)
+            {
+                BuildSouthEdgeHeights(TransitionAdtData, EdgeHeights);
+                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_South, EdgeHeights, TransitionMaterial);
+                TransitionSectionCount++;
+            }
+            if ((TransitionEdges & WdlTransition_West) != 0)
+            {
+                BuildWestEdgeHeights(TransitionAdtData, EdgeHeights);
+                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_West, EdgeHeights, TransitionMaterial);
+                TransitionSectionCount++;
+            }
+            if ((TransitionEdges & WdlTransition_East) != 0)
+            {
+                BuildEastEdgeHeights(TransitionAdtData, EdgeHeights);
+                TransitionSectionIndex = AddWdlTransitionSection(Mesh, TransitionSectionIndex, TileData, TX, TY, WdlTransition_East, EdgeHeights, TransitionMaterial);
+                TransitionSectionCount++;
+            }
+
+            UE_LOG(LogWowWorld, Log, TEXT("Spawned WDL tile %d,%d with %d transition strip sections"), TX, TY, TransitionSectionCount);
+        }
+        else
+        {
+            UE_LOG(LogWowWorld, Warning, TEXT("Failed to load ADT border data for WDL transition tile %d,%d"), TX, TY);
+        }
+    }
 
     WdlTiles.Add(TileKey(TX, TY), WdlActor);
 
@@ -709,37 +1093,63 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     MeshComp->SetCastShadow(false);
     MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Simple green-brown material for LOD 1 terrain (same as WDL)
-    UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
-        UMaterial::GetDefaultMaterial(MD_Surface), Lod1Actor);
-    if (Mat)
+    int32 SectionIndex = 0;
+    int32 TexturedSections = 0;
+    UMaterialInterface* DefaultLod1Material = FWowTerrainMaterial::GetBaseMaterial();
+    if (!DefaultLod1Material)
     {
-        Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.35f, 0.42f, 0.22f, 1.0f));
+        DefaultLod1Material = UMaterial::GetDefaultMaterial(MD_Surface);
     }
 
-    int32 SectionIndex = 0;
     for (int32 i = 0; i < 256; ++i)
     {
-        FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(AdtData.Chunks[i], TX, TY);
+        const FAdtChunkData& ChunkData = AdtData.Chunks[i];
+        FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(ChunkData, TX, TY);
         if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0) continue;
 
-        TArray<FLinearColor> EmptyColors;
-        TArray<FProcMeshTangent> EmptyTangents;
+        TArray<FLinearColor> Colors;
+        TArray<FProcMeshTangent> Tangents;
+        Colors.Reserve(MeshData.VertexColors.Num());
+        Tangents.Reserve(MeshData.Normals.Num());
+
+        for (const FColor& Color : MeshData.VertexColors)
+        {
+            Colors.Add(FLinearColor(Color));
+        }
+
+        for (const FVector& Normal : MeshData.Normals)
+        {
+            FVector Tangent = FVector::CrossProduct(Normal, FVector(0, 1, 0));
+            if (Tangent.SizeSquared() < 0.001f)
+            {
+                Tangent = FVector::CrossProduct(Normal, FVector(1, 0, 0));
+            }
+            Tangent.Normalize();
+            Tangents.Add(FProcMeshTangent(Tangent, false));
+        }
 
         MeshComp->CreateMeshSection_LinearColor(
             SectionIndex, MeshData.Vertices, MeshData.Indices,
-            MeshData.Normals, MeshData.UVs, EmptyColors, EmptyTangents, false);
+            MeshData.Normals, MeshData.UVs, Colors, Tangents, false);
 
-        if (Mat)
+        UMaterialInstanceDynamic* ChunkMaterial = FWowTerrainMaterial::CreateChunkMaterial(
+            ChunkData, AdtData, MpqManager.Get(), AssetCache.Get(), Lod1Actor);
+
+        if (ChunkMaterial)
         {
-            MeshComp->SetMaterial(SectionIndex, Mat);
+            MeshComp->SetMaterial(SectionIndex, ChunkMaterial);
+            TexturedSections++;
+        }
+        else if (DefaultLod1Material)
+        {
+            MeshComp->SetMaterial(SectionIndex, DefaultLod1Material);
         }
 
         SectionIndex++;
     }
 
     Lod1Tiles.Add(TileKey(TX, TY), Lod1Actor);
-    UE_LOG(LogWowWorld, Verbose, TEXT("Spawned LOD 1 tile %d,%d (%d sections)"), TX, TY, SectionIndex);
+    UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d sections, %d textured)"), TX, TY, SectionIndex, TexturedSections);
 }
 
 void AWowWorldManager::UpdateObjectStreaming()
