@@ -4,6 +4,7 @@
 #include "WowGameplayController.generated.h"
 
 class UWowConnectionManager;
+class UWowUIManager;
 struct FWowEntity;
 
 UCLASS()
@@ -19,6 +20,10 @@ public:
     /** Connection manager for sending movement packets */
     UPROPERTY()
     TObjectPtr<UWowConnectionManager> ConnectionManager;
+
+    /** UI manager for event dispatch */
+    UPROPERTY()
+    TObjectPtr<UWowUIManager> UIManager;
 
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();
@@ -46,6 +51,9 @@ private:
     // Server position correction
     FVector LastServerPosition = FVector::ZeroVector;
     float ServerCorrectionThreshold = 500.0f; // 5 WoW yards — teleport if diverged
+
+    // Opcode → UI event forwarding
+    void OnOpcodeReceived(uint16 Opcode);
 
     // Targeting
     void OnLeftClick();

@@ -8,6 +8,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLootOpened, uint64 /*LootGuid*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnOpcodeReceived, uint16 /*Opcode*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestAccepted, uint32 /*QuestId*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestComplete, uint32 /*QuestId*/);
 DECLARE_MULTICAST_DELEGATE(FOnTalentsUpdated);
@@ -133,6 +134,9 @@ public:
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
+
+    /** Fired for every processed SMSG opcode — wire to EventSystem for UI events */
+    FOnOpcodeReceived OnOpcodeReceived;
 
 private:
     // Handler function pointer type

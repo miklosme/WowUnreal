@@ -4,6 +4,8 @@
 #include "WowEntity.h"
 #include "WowOpcodes.h"
 #include "WowPlayerCharacter.h"
+#include "WowUIManager.h"
+#include "WowEventSystem.h"
 #include "GameFramework/Character.h"
 #include "Coord/WowCoordinate.h"
 
@@ -19,6 +21,12 @@ void AWowGameplayController::BeginPlay()
 {
 	Super::BeginPlay();
 	SetInputMode(FInputModeGameOnly());
+
+	// Cache UIManager early so OnUpdate ticks even without networking
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		UIManager = GI->GetSubsystem<UWowUIManager>();
+	}
 }
 
 void AWowGameplayController::SetupInputComponent()
@@ -41,6 +49,16 @@ void AWowGameplayController::BindEntityEvents()
 	// Listen for entity updates — sync local player position from server
 	ConnectionManager->PacketHandler.EntityManager.OnEntityUpdated.AddUObject(
 		this, &AWowGameplayController::OnEntityUpdated);
+
+	// Forward SMSG opcodes to UI event system
+	ConnectionManager->PacketHandler.OnOpcodeReceived.AddUObject(
+		this, &AWowGameplayController::OnOpcodeReceived);
+
+	// Cache UIManager for tick dispatch
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		UIManager = GI->GetSubsystem<UWowUIManager>();
+	}
 }
 
 void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation)
@@ -112,6 +130,12 @@ void AWowGameplayController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// Dispatch OnUpdate to all WoW UI frames each tick
+	if (UIManager && UIManager->GetEventSystem())
+	{
+		UIManager->GetEventSystem()->TickOnUpdate(DeltaTime);
+	}
+
 	if (!ConnectionManager) return;
 
 	// Movement heartbeat — send position to server while moving
@@ -147,6 +171,20 @@ void AWowGameplayController::SendMovementUpdate()
 	float Orientation = FMath::DegreesToRadians(P->GetActorRotation().Yaw);
 
 	ConnectionManager->SendMovement(WowOpcode::MSG_MOVE_HEARTBEAT, WowPos, Orientation, 0);
+}
+
+void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
+{
+	if (!UIManager) return;
+
+	FWowEventSystem* EventSystem = UIManager->GetEventSystem();
+	if (!EventSystem) return;
+
+	FString EventName = FWowEventSystem::OpcodeToEvent(Opcode);
+	if (!EventName.IsEmpty())
+	{
+		EventSystem->FireEvent(EventName);
+	}
 }
 
 void AWowGameplayController::OnLeftClick()

@@ -169,6 +169,12 @@ void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, co
 	}
 	FrameScripts.Add(ScriptName, Ref);
 
+	// Track frames with OnUpdate handlers for tick dispatch
+	if (ScriptName == TEXT("OnUpdate"))
+	{
+		OnUpdateFrames.Add(Handle);
+	}
+
 	UE_LOG(LogWowEvent, Verbose, TEXT("Compiled script [%lld] %s (ref %d)"), Handle, *ScriptName, Ref);
 #endif
 }
@@ -246,6 +252,9 @@ void FWowEventSystem::RemoveFrameScripts(int64 Handle)
 		ScriptRefs.Remove(Handle);
 	}
 
+	// Remove from OnUpdate tracking
+	OnUpdateFrames.Remove(Handle);
+
 	// Remove frame object ref
 	if (int32* FrameRef = FrameObjectRefs.Find(Handle))
 	{
@@ -271,6 +280,60 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 
 	UE_LOG(LogWowEvent, Verbose, TEXT("Compiled %d scripts for frame [%lld] %s"),
 		Def.Scripts.Num(), Handle, *Def.Name);
+}
+
+void FWowEventSystem::TickOnUpdate(float DeltaTime)
+{
+#if HAS_LUA
+	if (!LuaVM || !LuaVM->IsInitialized() || OnUpdateFrames.Num() == 0)
+	{
+		return;
+	}
+
+	lua_State* L = LuaVM->GetState();
+	if (!L) return;
+
+	TArray<int64> Handles = OnUpdateFrames.Array();
+
+	for (int64 Handle : Handles)
+	{
+		TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
+		if (!FrameScripts) continue;
+
+		int32* ScriptRef = FrameScripts->Find(TEXT("OnUpdate"));
+		if (!ScriptRef) continue;
+
+		// Push the compiled OnUpdate function
+		lua_rawgeti(L, LUA_REGISTRYINDEX, *ScriptRef);
+		if (!lua_isfunction(L, -1))
+		{
+			lua_pop(L, 1);
+			continue;
+		}
+
+		// Push self (frame table)
+		int32* FrameRef = FrameObjectRefs.Find(Handle);
+		if (FrameRef)
+		{
+			lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
+		}
+		else
+		{
+			lua_newtable(L);
+		}
+
+		// Push elapsed time
+		lua_pushnumber(L, static_cast<double>(DeltaTime));
+
+		// Call: func(self, elapsed)
+		if (lua_pcall(L, 2, 0, 0) != 0)
+		{
+			UE_LOG(LogWowEvent, Error, TEXT("OnUpdate error [frame %lld]: %s"),
+				Handle, UTF8_TO_TCHAR(lua_tostring(L, -1)));
+			lua_pop(L, 1);
+		}
+	}
+#endif
 }
 
 FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)

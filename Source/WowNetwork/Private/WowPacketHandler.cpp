@@ -80,6 +80,9 @@ void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
         UE_LOG(LogWowPacket, Verbose, TEXT("Unhandled opcode 0x%04X (%s) — %d bytes"),
             Opcode, WowOpcode::GetName(Opcode), Data.Num());
     }
+
+    // Notify subscribers (EventSystem wires this to fire WoW UI events)
+    OnOpcodeReceived.Broadcast(Opcode);
 }
 
 // ── SMSG_LOGIN_VERIFY_WORLD ──────────────────────────────────────────────────

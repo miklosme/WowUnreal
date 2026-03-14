@@ -40,6 +40,9 @@ public:
 	/** Compile all scripts from a frame definition */
 	void CompileFrameScripts(int64 Handle, const FWowFrameDef& Def);
 
+	/** Dispatch OnUpdate handlers on all frames that have one (call every tick) */
+	void TickOnUpdate(float DeltaTime);
+
 	/** Map a server opcode to a WoW event name */
 	static FString OpcodeToEvent(uint16 Opcode);
 
@@ -55,4 +58,7 @@ private:
 
 	/** Lua frame object references: Handle -> LuaRef */
 	TMap<int64, int32> FrameObjectRefs;
+
+	/** Frames that have an OnUpdate script handler */
+	TSet<int64> OnUpdateFrames;
 };
