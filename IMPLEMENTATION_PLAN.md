@@ -25,7 +25,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] WDT parser (tile existence grid, MPHD flags)
 - [x] M2 parser (vertices, indices from .skin, textures, render passes, bones)
 - [x] WMO parser (root: materials, doodad sets, portals; groups: geometry, batches)
-- [ ] DBC table loading (Map, AreaTable, Light, LightParams)
+- [?] DBC table loading (Map, AreaTable, Light, LightParams)
 
 ## Phase 3: Terrain Rendering ✅ DONE
 - [x] BLP → UTexture2D factory (DXT passthrough to GPU)

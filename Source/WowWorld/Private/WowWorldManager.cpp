@@ -9,6 +9,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "WowDoodadManager.h"
 #include "WowWmoRenderer.h"
+#include "Formats/Dbc/DbcStore.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 
@@ -28,6 +29,9 @@ void AWowWorldManager::BeginPlay()
         return;
     }
     UE_LOG(LogWowWorld, Log, TEXT("World Manager ready: %s"), *MapName);
+
+    // Load DBC tables
+    FDbcStore::Get().LoadAll(*MpqManager);
 
     // Load WDT for the map
     FString WdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s.wdt"), *MapName, *MapName);
