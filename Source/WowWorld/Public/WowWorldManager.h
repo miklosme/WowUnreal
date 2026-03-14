@@ -4,6 +4,7 @@
 #include "Mpq/MpqManager.h"
 #include "WowAssetCache.h"
 #include "Formats/WdtTypes.h"
+#include "Formats/WdlTypes.h"
 #include "Formats/AdtTypes.h"
 #include "Async/Future.h"
 #include "WowWorldManager.generated.h"
@@ -48,6 +49,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
     int32 UnloadRadius = 4;
 
+    /** Radius in tiles for WDL distant terrain (LOD 2) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    int32 WdlRadius = 12;
+
+    /** Distance beyond WdlRadius to unload WDL tiles */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
+    int32 WdlUnloadRadius = 15;
+
     /** Initial tile to load for testing (Elwynn Forest area) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Debug")
     int32 DebugTileX = 32;
@@ -83,9 +92,14 @@ private:
     TUniquePtr<FMpqManager> MpqManager;
     TUniquePtr<FWowAssetCache> AssetCache;
     TUniquePtr<FWdtData> WdtData;
+    TUniquePtr<FWdlData> WdlData;
 
     UPROPERTY()
     TMap<int64, TObjectPtr<AWowTerrainTile>> LoadedTiles;
+
+    /** WDL distant terrain actors (LOD 2) */
+    UPROPERTY()
+    TMap<int64, TObjectPtr<AActor>> WdlTiles;
 
     FIntPoint LastCameraTile = FIntPoint(-9999, -9999);
 
@@ -108,6 +122,8 @@ private:
     void UnloadTile(int32 TX, int32 TY);
     void UpdateStreaming();
     void UpdateObjectStreaming();
+    void UpdateWdlStreaming(const FIntPoint& CameraTile);
+    void SpawnWdlTile(int32 TX, int32 TY);
     bool IsTileLoaded(int32 TX, int32 TY) const;
     bool IsTilePending(int32 TX, int32 TY) const;
     static int64 TileKey(int32 TX, int32 TY) { return ((int64)TX << 32) | (int64)(uint32)TY; }

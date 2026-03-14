@@ -74,7 +74,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [?] SavedVariables persistence (Lua table serializer, WTF directory layout, load-before-addon/save-on-shutdown)
 
 ## Phase 9: Polish
-- [ ] Terrain LOD + WDL distant terrain
+- [?] Terrain LOD + WDL distant terrain (WDL parser, 17x17 mesh per tile, distance-based streaming)
 - [ ] Water rendering (MH2O)
 - [ ] Sky/fog from DBC Light tables
 - [ ] Skeletal mesh + animation pipeline

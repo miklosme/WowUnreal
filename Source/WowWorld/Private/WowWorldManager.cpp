@@ -5,6 +5,9 @@
 #include "Formats/AdtParser.h"
 #include "Formats/WdtParser.h"
 #include "Formats/WdtTypes.h"
+#include "Formats/WdlParser.h"
+#include "Formats/WdlTypes.h"
+#include "ProceduralMeshComponent.h"
 #include "Coord/WowCoordinate.h"
 #include "Kismet/GameplayStatics.h"
 #include "WowDoodadManager.h"
@@ -73,6 +76,19 @@ void AWowWorldManager::BeginPlay()
         UE_LOG(LogWowWorld, Warning, TEXT("Failed to load WDT: %s"), *WdtPath);
     }
 
+    // Load WDL for distant terrain
+    FString WdlPath = FString::Printf(TEXT("World\\Maps\\%s\\%s.wdl"), *MapName, *MapName);
+    TArray<uint8> WdlRaw;
+    if (MpqManager->ReadFile(WdlPath, WdlRaw))
+    {
+        WdlData = MakeUnique<FWdlData>(FWdlParser::Parse(WdlRaw));
+        UE_LOG(LogWowWorld, Log, TEXT("Loaded WDL for %s (valid=%d)"), *MapName, WdlData->bIsValid ? 1 : 0);
+    }
+    else
+    {
+        UE_LOG(LogWowWorld, Warning, TEXT("No WDL file found: %s"), *WdlPath);
+    }
+
     // Load a 3x3 grid of tiles around the debug tile
     for (int32 DX = -1; DX <= 1; ++DX)
     {
@@ -125,7 +141,16 @@ void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
         }
     }
     LoadedTiles.Empty();
+
+    // Destroy WDL tiles
+    for (auto& Pair : WdlTiles)
+    {
+        if (Pair.Value) Pair.Value->Destroy();
+    }
+    WdlTiles.Empty();
+
     WdtData.Reset();
+    WdlData.Reset();
 
     if (AssetCache) AssetCache->Clear();
     if (MpqManager) MpqManager->Shutdown();
@@ -330,6 +355,9 @@ void AWowWorldManager::UpdateStreaming()
     if (CameraTile == LastCameraTile) return;
     LastCameraTile = CameraTile;
 
+    // Update WDL distant terrain
+    UpdateWdlStreaming(CameraTile);
+
     UE_LOG(LogWowWorld, Verbose, TEXT("Camera tile: %d,%d"), CameraTile.X, CameraTile.Y);
 
     // Load tiles within radius (async to avoid main-thread stalls)
@@ -396,6 +424,161 @@ void AWowWorldManager::UpdateStreaming()
         }
         LoadedTiles.Remove(Key);
     }
+}
+
+void AWowWorldManager::UpdateWdlStreaming(const FIntPoint& CameraTile)
+{
+    if (!WdlData || !WdlData->bIsValid) return;
+
+    // Load WDL tiles in range (beyond LOD 0 radius, up to WdlRadius)
+    for (int32 DX = -WdlRadius; DX <= WdlRadius; ++DX)
+    {
+        for (int32 DY = -WdlRadius; DY <= WdlRadius; ++DY)
+        {
+            int32 TX = CameraTile.X + DX;
+            int32 TY = CameraTile.Y + DY;
+            if (TX < 0 || TX >= 64 || TY < 0 || TY >= 64) continue;
+
+            // Skip tiles that have full-detail ADT loaded or pending
+            if (IsTileLoaded(TX, TY) || IsTilePending(TX, TY)) continue;
+
+            // Skip tiles already loaded as WDL
+            int64 Key = TileKey(TX, TY);
+            if (WdlTiles.Contains(Key)) continue;
+
+            // Must have WDL data for this tile
+            if (!WdlData->HasTile(TX, TY)) continue;
+
+            SpawnWdlTile(TX, TY);
+        }
+    }
+
+    // Unload WDL tiles beyond unload radius or that now have full ADT loaded
+    TArray<int64> ToUnload;
+    for (auto& Pair : WdlTiles)
+    {
+        int32 TX = (int32)(Pair.Key >> 32);
+        int32 TY = (int32)(Pair.Key & 0xFFFFFFFF);
+        int32 Dist = FMath::Max(FMath::Abs(TX - CameraTile.X), FMath::Abs(TY - CameraTile.Y));
+
+        // Unload if too far or if full-detail tile is now loaded
+        if (Dist > WdlUnloadRadius || IsTileLoaded(TX, TY))
+        {
+            ToUnload.Add(Pair.Key);
+        }
+    }
+    for (int64 Key : ToUnload)
+    {
+        TObjectPtr<AActor>* Found = WdlTiles.Find(Key);
+        if (Found && *Found) (*Found)->Destroy();
+        WdlTiles.Remove(Key);
+    }
+}
+
+void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
+{
+    if (!WdlData || !WdlData->HasTile(TX, TY)) return;
+
+    const FWdlTileData& TileData = *WdlData->Tiles[TY][TX];
+
+    // Build a 17x17 mesh from WDL heights
+    TArray<FVector> Vertices;
+    TArray<int32> Indices;
+    TArray<FVector> Normals;
+    TArray<FVector2D> UVs;
+
+    Vertices.Reserve(17 * 17);
+    UVs.Reserve(17 * 17);
+
+    // WDL height_17 covers the full tile in a 17x17 grid
+    // Each step = TILE_SIZE / 16
+    float StepSize = FWowCoordinate::TILE_SIZE / 16.0f;
+
+    // Tile origin in ADT space: NgX = TX * TILE_SIZE, NgZ = TY * TILE_SIZE
+    float TileNgX = TX * FWowCoordinate::TILE_SIZE;
+    float TileNgZ = TY * FWowCoordinate::TILE_SIZE;
+
+    for (int32 Row = 0; Row < 17; Row++)
+    {
+        for (int32 Col = 0; Col < 17; Col++)
+        {
+            float NgX = TileNgX + Col * StepSize;
+            float NgZ = TileNgZ + Row * StepSize;
+            float NgY = (float)TileData.Height17[Row][Col];
+
+            FVector UEPos = FWowCoordinate::AdtToUE(NgX, NgY, NgZ);
+            Vertices.Add(UEPos);
+            UVs.Add(FVector2D((float)Col / 16.0f, (float)Row / 16.0f));
+        }
+    }
+
+    // Build triangle indices (two triangles per quad)
+    Indices.Reserve(16 * 16 * 6);
+    for (int32 Row = 0; Row < 16; Row++)
+    {
+        for (int32 Col = 0; Col < 16; Col++)
+        {
+            int32 TL = Row * 17 + Col;
+            int32 TR = TL + 1;
+            int32 BL = TL + 17;
+            int32 BR = BL + 1;
+
+            Indices.Add(TL);
+            Indices.Add(BL);
+            Indices.Add(TR);
+
+            Indices.Add(TR);
+            Indices.Add(BL);
+            Indices.Add(BR);
+        }
+    }
+
+    // Compute flat normals per vertex (simple average of adjacent face normals)
+    Normals.SetNumZeroed(Vertices.Num());
+    for (int32 i = 0; i < Indices.Num(); i += 3)
+    {
+        FVector& V0 = Vertices[Indices[i]];
+        FVector& V1 = Vertices[Indices[i + 1]];
+        FVector& V2 = Vertices[Indices[i + 2]];
+        FVector FaceNormal = FVector::CrossProduct(V1 - V0, V2 - V0).GetSafeNormal();
+        Normals[Indices[i]] += FaceNormal;
+        Normals[Indices[i + 1]] += FaceNormal;
+        Normals[Indices[i + 2]] += FaceNormal;
+    }
+    for (FVector& N : Normals) N = N.GetSafeNormal();
+
+    // Spawn actor with ProceduralMeshComponent
+    FActorSpawnParameters SpawnParams;
+    SpawnParams.Name = *FString::Printf(TEXT("WdlTile_%d_%d"), TX, TY);
+    AActor* WdlActor = GetWorld()->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+    if (!WdlActor) return;
+
+    UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(WdlActor, TEXT("WdlMesh"));
+    Mesh->RegisterComponent();
+    WdlActor->SetRootComponent(Mesh);
+
+    TArray<FVector2D> EmptyUV2;
+    TArray<FLinearColor> EmptyColors;
+    TArray<FProcMeshTangent> EmptyTangents;
+
+    Mesh->CreateMeshSection_LinearColor(0, Vertices, Indices, Normals, UVs, EmptyColors, EmptyTangents, false);
+
+    // Simple green-brown material for distant terrain
+    UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
+        UMaterial::GetDefaultMaterial(MD_Surface), WdlActor);
+    if (Mat)
+    {
+        Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
+        Mesh->SetMaterial(0, Mat);
+    }
+
+    // Disable collision and shadow for distant terrain
+    Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    Mesh->SetCastShadow(false);
+
+    WdlTiles.Add(TileKey(TX, TY), WdlActor);
+
+    UE_LOG(LogWowWorld, Verbose, TEXT("Spawned WDL tile %d,%d (%d verts)"), TX, TY, Vertices.Num());
 }
 
 void AWowWorldManager::UpdateObjectStreaming()
