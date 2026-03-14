@@ -202,6 +202,7 @@ namespace
             const FMclyEntry& Layer = Layers[LayerIdx];
 
             // Seek to the layer's alpha data (offset relative to MCAL data start)
+            if (McalDataStart + Layer.OfsAlpha >= R.Size) continue;
             R.Seek(McalDataStart + Layer.OfsAlpha);
 
             TArray<uint8> AlphaMap;

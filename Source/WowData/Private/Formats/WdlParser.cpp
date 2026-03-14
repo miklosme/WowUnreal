@@ -85,6 +85,9 @@ FWdlData FWdlParser::Parse(const TArray<uint8>& Data)
 			const uint8* HeightData = TilePtr + 8;
 			if (HeightData + TileSize > End) continue;
 
+			constexpr int32 ExpectedSize = (17 * 17 + 16 * 16) * sizeof(int16);
+			if (TileSize < ExpectedSize) continue;
+
 			TSharedPtr<FWdlTileData> Tile = MakeShared<FWdlTileData>();
 
 			// Read 17x17 outer heights (int16)
