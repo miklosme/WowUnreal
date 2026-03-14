@@ -33,6 +33,12 @@ public:
     /** Send keep-alive heartbeat */
     UFUNCTION(BlueprintCallable) void SendKeepAlive();
 
+    /** Set target selection */
+    UFUNCTION(BlueprintCallable) void SendSetSelection(int64 TargetGuid);
+
+    /** Get current target GUID */
+    UFUNCTION(BlueprintCallable) int64 GetTargetGuid() const { return TargetGuid; }
+
     /** Send a raw packet (for advanced use) */
     void SendRawPacket(uint32 Opcode, const TArray<uint8>& Data = {});
 
@@ -61,4 +67,5 @@ private:
     TArray<uint8> SessionKey;
     TArray<FWowRealmInfo> CachedRealms;
     TArray<FWowCharacterInfo> CachedCharacters;
+    int64 TargetGuid = 0;
 };

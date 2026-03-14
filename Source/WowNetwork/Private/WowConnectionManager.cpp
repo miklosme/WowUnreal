@@ -263,6 +263,21 @@ void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, 
     UE_LOG(LogWowNet, Log, TEXT("Sent chat (type=%d): %s"), Type, *Message);
 }
 
+void UWowConnectionManager::SendSetSelection(int64 InTargetGuid)
+{
+    if (!WorldSocket.IsValid()) return;
+
+    TargetGuid = InTargetGuid;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    uint64 G = static_cast<uint64>(InTargetGuid);
+    FMemory::Memcpy(Data.GetData(), &G, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_SET_SELECTION, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Set target: GUID %lld"), InTargetGuid);
+}
+
 void UWowConnectionManager::SendKeepAlive()
 {
     if (!WorldSocket.IsValid()) return;

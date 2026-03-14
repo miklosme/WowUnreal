@@ -8,6 +8,7 @@ namespace WowOpcode
     // ── Client → Server ──────────────────────────────────────────────────────
     inline constexpr uint16 CMSG_CHAR_ENUM              = 0x0037;
     inline constexpr uint16 CMSG_PLAYER_LOGIN           = 0x003D;
+    inline constexpr uint16 CMSG_SET_SELECTION            = 0x013D;
     inline constexpr uint16 CMSG_MESSAGECHAT            = 0x0095;
     inline constexpr uint16 CMSG_CAST_SPELL             = 0x012E;
     inline constexpr uint16 CMSG_ATTACKSWING            = 0x0141;

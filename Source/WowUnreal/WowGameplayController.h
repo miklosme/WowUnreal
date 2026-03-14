@@ -4,6 +4,7 @@
 #include "WowGameplayController.generated.h"
 
 class UWowConnectionManager;
+struct FWowEntity;
 
 UCLASS()
 class WOWUNREAL_API AWowGameplayController : public APlayerController
@@ -18,6 +19,9 @@ public:
     UPROPERTY()
     TObjectPtr<UWowConnectionManager> ConnectionManager;
 
+    /** Wire entity events from the packet handler (call after setting ConnectionManager) */
+    void BindEntityEvents();
+
 private:
     // Movement sync
     void SendMovementUpdate();
@@ -28,4 +32,9 @@ private:
     // Keep-alive
     float KeepAliveTimer = 0.0f;
     float KeepAliveInterval = 30.0f;
+
+    // Server position sync
+    void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z);
+    void OnEntityUpdated(const FWowEntity& Entity);
+    bool bHasServerPosition = false;
 };

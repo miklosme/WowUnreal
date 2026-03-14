@@ -76,7 +76,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Screenshot manager (viewport capture)
 - [x] HUD (tile coords, FPS, load status)
 - [?] Replace the viewer fly camera with gameplay movement and chase camera from `specs/movement.md` — AWowPlayerCharacter (ACharacter + spring arm + chase camera), AWowGameplayController (movement sync, keep-alive), WASD movement, jump, camera orbit/zoom; builds and runs
-- [ ] Add targeting, interaction, and server-synced movement state
+- [?] Add targeting, interaction, and server-synced movement state — CMSG_SET_SELECTION, server spawn position teleport via LOGIN_VERIFY_WORLD, entity update listener for local player, movement sync gated by bHasServerPosition; builds
 
 ## Phase 8: WoW UI System
 - [x] Lua 5.1 VM with basic sandboxed globals
