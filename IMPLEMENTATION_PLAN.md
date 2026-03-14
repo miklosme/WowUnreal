@@ -39,7 +39,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] TerrainTile actor (256 chunk meshes + materials)
 - [x] World manager with WDT loading and tile streaming
 - [x] Single tile test rendering (build/run audit still loads and renders terrain tiles)
-- [?] Fix terrain material compile/fallback warnings on Metal (suppressed spurious LoadObject warning, extracted shared ChunkId.h to fix unity build collisions, runtime alpha samplers now compile on SF_METAL_SM6) — verified March 14, 2026: build succeeds, runtime no longer logs Metal terrain material compile/fallback warnings, screenshot `Saved/Screenshots/terrain_material_metal_verify.png`
+- [x] Fix terrain material compile/fallback warnings on Metal (suppressed spurious LoadObject warning, extracted shared ChunkId.h to fix unity build collisions, runtime alpha samplers now compile on SF_METAL_SM6) — verified March 14, 2026: `WowUnrealEditor` build succeeds, runtime logs `LogTerrainMat` material creation/compile on Metal without fallback warnings, screenshot `Saved/Screenshots/terrain_material_metal_verify_recheck.png`
 
 ## Phase 4: World Streaming
 - [x] Camera-based tile streaming (load/unload with hysteresis)
