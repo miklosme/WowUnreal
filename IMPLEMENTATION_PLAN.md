@@ -126,7 +126,7 @@ The full world terrain map is too heavy and slow for testing isolated features. 
 - [?] Add a scene selector or launch arg (`-testscene=X`): implemented in WowViewerGameMode::BeginPlay with 5 modes (default, character, terrain, wmo, ui); WowWorldManager::BeginPlay checks `-testscene=` to skip terrain or disable streaming; validated with build + runtime March 14, 2026
 
 ## Phase 12: Character / Audio / Gameplay (use character test scene)
-- [ ] Implement character rendering + equipment system from `specs/character.md`
+- [?] Implement character rendering + equipment system: added M2 attachment point + submesh parsing to M2Parser, created WowCharacterBuilder (race/gender model loading via ChrRaces.dbc, creature display ID loading), WowCharacterTexture (skin texture from CharSections.dbc), WowEquipmentManager (weapon M2 loading and bone attachment); character test scene spawns Human M/F + Orc M models; builds and renders March 14, 2026
 - [ ] Implement audio system from `specs/audio.md`
 - [ ] Implement login, character select, and character creation screens from `specs/overview.md`
 - [ ] Implement gameplay/UI systems still only listed in `specs/overview.md` (combat, inventory, quests, talents, social, maps)

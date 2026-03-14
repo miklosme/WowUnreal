@@ -75,6 +75,24 @@ struct WOWDATA_API FM2AnimationData
     TArray<FM2BoneTrack> BoneTracks; // one per bone
 };
 
+struct WOWDATA_API FM2Attachment
+{
+    uint32 Id = 0;           // Attachment point ID (0=right hand, 1=left hand, 5=right shoulder, etc.)
+    int32 Bone = -1;         // Bone index this attachment is parented to
+    FVector Position = FVector::ZeroVector; // Position relative to the bone
+};
+
+struct WOWDATA_API FM2Submesh
+{
+    uint16 Id = 0;           // Geoset ID (used for equipment geoset swaps)
+    uint16 StartVertex = 0;
+    uint16 NumVertices = 0;
+    uint16 StartTriangle = 0;
+    uint16 NumTriangles = 0;
+    FVector CenterMass = FVector::ZeroVector;
+    float Radius = 0.0f;
+};
+
 struct WOWDATA_API FM2Data
 {
     TArray<FM2Vertex> Vertices;
@@ -86,6 +104,9 @@ struct WOWDATA_API FM2Data
     TArray<FM2Bone> Bones;
     TArray<FM2AnimSequence> Animations;
     TArray<FM2AnimationData> AnimationTracks; // parsed keyframe data per animation
+    TArray<FM2Attachment> Attachments;
+    TArray<FM2Submesh> Submeshes;          // geoset info from skin file
+    TArray<int16> AttachmentLookup;        // attachment ID → index in Attachments
     uint32 NumBones = 0;
     bool bIsValid = false;
 

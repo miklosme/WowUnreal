@@ -17,6 +17,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "HAL/IConsoleManager.h"
 #include "Materials/Material.h"
+#include "WowCharacterBuilder.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
@@ -198,7 +199,24 @@ void AWowViewerGameMode::SetupCharacterTestScene(UWorld* World)
     }
 
     // Spawn world manager for MPQ access (terrain loading skipped via -testscene check in WM::BeginPlay)
-    SpawnWorldManager(World);
+    AWowWorldManager* WM = SpawnWorldManager(World);
+
+    // Spawn test character models — Human Male and Female for visual verification
+    if (WM && WM->GetMpqManager() && WM->GetAssetCache())
+    {
+        FWowCharacterBuilder::SpawnCharacter(World, WM->GetMpqManager(), WM->GetAssetCache(),
+            FWowCharacterBuilder::ERace::Human, FWowCharacterBuilder::EGender::Male,
+            FVector(0.0f, 0.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+
+        FWowCharacterBuilder::SpawnCharacter(World, WM->GetMpqManager(), WM->GetAssetCache(),
+            FWowCharacterBuilder::ERace::Human, FWowCharacterBuilder::EGender::Female,
+            FVector(0.0f, 300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+
+        // Spawn an Orc for variety
+        FWowCharacterBuilder::SpawnCharacter(World, WM->GetMpqManager(), WM->GetAssetCache(),
+            FWowCharacterBuilder::ERace::Orc, FWowCharacterBuilder::EGender::Male,
+            FVector(0.0f, -300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+    }
 }
 
 void AWowViewerGameMode::SetupTerrainTestScene(UWorld* World)

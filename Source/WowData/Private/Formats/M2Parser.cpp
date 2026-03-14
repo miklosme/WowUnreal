@@ -185,6 +185,14 @@ struct FM2AnimSequenceRaw
 	uint16 AliasNext;
 };
 
+struct FM2AttachmentRaw
+{
+    uint32 Id;
+    uint32 Bone;
+    float Position[3];
+    uint8 EnabledBlock[20]; // AnimBlock — ignored
+};
+
 #pragma pack(pop)
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -633,9 +641,58 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         }
     }
 
+    // ── Parse attachments ────────────────────────────────────────────────
+    const FM2AttachmentRaw* RawAttachments = nullptr;
+    if (Header.nAttachments > 0 && SafeRead(M2Base, M2Size, Header.ofsAttachments, Header.nAttachments, RawAttachments))
+    {
+        Result.Attachments.SetNum(Header.nAttachments);
+        for (uint32 i = 0; i < Header.nAttachments; i++)
+        {
+            const FM2AttachmentRaw& Src = RawAttachments[i];
+            FM2Attachment& Dst = Result.Attachments[i];
+            Dst.Id = Src.Id;
+            Dst.Bone = static_cast<int32>(Src.Bone);
+            Dst.Position = FVector(Src.Position[0], Src.Position[1], Src.Position[2]);
+        }
+        UE_LOG(LogM2, Log, TEXT("  Parsed %d attachments"), Result.Attachments.Num());
+    }
+
+    // ── Parse attachment lookup ─────────────────────────────────────────
+    const int16* RawAttachLookup = nullptr;
+    if (Header.nAttachmentLookup > 0 && SafeRead(M2Base, M2Size, Header.ofsAttachmentLookup, Header.nAttachmentLookup, RawAttachLookup))
+    {
+        Result.AttachmentLookup.SetNum(Header.nAttachmentLookup);
+        FMemory::Memcpy(Result.AttachmentLookup.GetData(), RawAttachLookup, Header.nAttachmentLookup * sizeof(int16));
+    }
+
+    // ── Parse submeshes from skin file ──────────────────────────────────
+    if (SkinData.Num() >= static_cast<int32>(sizeof(FM2SkinHeader)))
+    {
+        const FM2SkinHeader* SkinHeader = reinterpret_cast<const FM2SkinHeader*>(SkinData.GetData());
+        const FM2SkinSubmesh* RawSubmeshes = nullptr;
+        if (SkinHeader->nSubmeshes > 0 && SafeRead(SkinData.GetData(), SkinData.Num(), SkinHeader->ofsSubmeshes, SkinHeader->nSubmeshes, RawSubmeshes))
+        {
+            Result.Submeshes.SetNum(SkinHeader->nSubmeshes);
+            for (uint32 i = 0; i < SkinHeader->nSubmeshes; i++)
+            {
+                const FM2SkinSubmesh& Src = RawSubmeshes[i];
+                FM2Submesh& Dst = Result.Submeshes[i];
+                Dst.Id = Src.ID;
+                Dst.StartVertex = Src.StartVertex;
+                Dst.NumVertices = Src.nVertices;
+                Dst.StartTriangle = Src.StartTriangle;
+                Dst.NumTriangles = Src.nTriangles;
+                Dst.CenterMass = FVector(Src.CenterMass[0], Src.CenterMass[1], Src.CenterMass[2]);
+                Dst.Radius = Src.Radius;
+            }
+            UE_LOG(LogM2, Log, TEXT("  Parsed %d submeshes from skin"), Result.Submeshes.Num());
+        }
+    }
+
     Result.bIsValid = true;
-    UE_LOG(LogM2, Log, TEXT("M2 '%s' parsed: %d verts, %d indices, %d passes, %d textures"),
+    UE_LOG(LogM2, Log, TEXT("M2 '%s' parsed: %d verts, %d indices, %d passes, %d textures, %d attachments, %d submeshes"),
         *ModelName, Result.Vertices.Num(), Result.Indices.Num(),
-        Result.RenderPasses.Num(), Result.TexturePaths.Num());
+        Result.RenderPasses.Num(), Result.TexturePaths.Num(),
+        Result.Attachments.Num(), Result.Submeshes.Num());
     return Result;
 }
