@@ -1,5 +1,6 @@
 #include "WowConnectionManager.h"
 #include "Net/WowAuthSocket.h"
+#include "Net/WowWorldSocket.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowNet, Log, All);
 
@@ -16,6 +17,7 @@ void UWowConnectionManager::Login(const FString& U, const FString& P, const FStr
     // Disconnect any existing session
     Disconnect();
 
+    CachedAccountName = U;
     SetState(EWowSessionState::AuthConnecting);
 
     AuthSocket = MakeShared<FWowAuthSocket>();
@@ -77,22 +79,94 @@ void UWowConnectionManager::SelectRealm(int32 I)
     const FWowRealmInfo& Realm = CachedRealms[I];
     UE_LOG(LogWowNet, Log, TEXT("Selected realm: %s (%s:%d)"), *Realm.Name, *Realm.Address, Realm.Port);
 
-    // World socket connection will be implemented later
     SetState(EWowSessionState::WorldConnecting);
+
+    // Disconnect auth socket -- no longer needed
+    if (AuthSocket.IsValid())
+    {
+        AuthSocket->Disconnect();
+        AuthSocket.Reset();
+    }
+
+    // Create and connect world socket
+    WorldSocket = MakeShared<FWowWorldSocket>();
+    WorldSocket->OnAuthResult.BindUObject(this, &UWowConnectionManager::OnWorldAuthResult);
+    WorldSocket->OnCharacterList.BindUObject(this, &UWowConnectionManager::OnWorldCharacterList);
+
+    if (!WorldSocket->Connect(Realm.Address, Realm.Port, CachedAccountName, SessionKey))
+    {
+        UE_LOG(LogWowNet, Error, TEXT("Failed to connect to world server %s:%d"), *Realm.Address, Realm.Port);
+        SetState(EWowSessionState::Error);
+        OnError.Broadcast(TEXT("Failed to connect to world server"));
+        WorldSocket.Reset();
+        return;
+    }
+
+    UE_LOG(LogWowNet, Log, TEXT("Connecting to world server %s:%d ..."), *Realm.Address, Realm.Port);
+}
+
+void UWowConnectionManager::OnWorldAuthResult(bool bSuccess)
+{
+    if (bSuccess)
+    {
+        UE_LOG(LogWowNet, Log, TEXT("World server authenticated"));
+        SetState(EWowSessionState::WorldAuthenticated);
+    }
+    else
+    {
+        UE_LOG(LogWowNet, Error, TEXT("World server authentication failed"));
+        SetState(EWowSessionState::Error);
+        OnError.Broadcast(TEXT("World server authentication failed"));
+        WorldSocket.Reset();
+    }
+}
+
+void UWowConnectionManager::OnWorldCharacterList(const TArray<FWowCharacterInfo>& Characters)
+{
+    UE_LOG(LogWowNet, Log, TEXT("Received %d characters from world server"), Characters.Num());
+    CachedCharacters = Characters;
+    SetState(EWowSessionState::WorldHaveCharList);
+    OnCharacterList.Broadcast(Characters);
 }
 
 void UWowConnectionManager::RequestCharacterList()
 {
-    UE_LOG(LogWowNet, Log, TEXT("Char list"));
+    UE_LOG(LogWowNet, Log, TEXT("Requesting character list"));
+
+    if (!WorldSocket.IsValid())
+    {
+        UE_LOG(LogWowNet, Error, TEXT("No world socket connection"));
+        OnError.Broadcast(TEXT("Not connected to world server"));
+        return;
+    }
+
+    SetState(EWowSessionState::WorldRequestingCharList);
+    WorldSocket->SendCharEnum();
 }
 
 void UWowConnectionManager::EnterWorld(uint64 G)
 {
-    UE_LOG(LogWowNet, Log, TEXT("Enter: %llu"), G);
+    UE_LOG(LogWowNet, Log, TEXT("Enter world: GUID %llu"), G);
+
+    if (!WorldSocket.IsValid())
+    {
+        UE_LOG(LogWowNet, Error, TEXT("No world socket connection"));
+        OnError.Broadcast(TEXT("Not connected to world server"));
+        return;
+    }
+
+    SetState(EWowSessionState::WorldEnteringWorld);
+    WorldSocket->SendPlayerLogin(G);
 }
 
 void UWowConnectionManager::Disconnect()
 {
+    if (WorldSocket.IsValid())
+    {
+        WorldSocket->Disconnect();
+        WorldSocket.Reset();
+    }
+
     if (AuthSocket.IsValid())
     {
         AuthSocket->Disconnect();
@@ -101,6 +175,8 @@ void UWowConnectionManager::Disconnect()
 
     SessionKey.Empty();
     CachedRealms.Empty();
+    CachedCharacters.Empty();
+    CachedAccountName.Empty();
 
     SetState(EWowSessionState::Disconnected);
 }

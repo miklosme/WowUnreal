@@ -4,6 +4,7 @@
 #include "WowConnectionManager.generated.h"
 
 class FWowAuthSocket;
+class FWowWorldSocket;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSessionStateChanged, EWowSessionState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRealmList, const TArray<FWowRealmInfo>&, Realms);
@@ -22,6 +23,9 @@ public:
     UFUNCTION(BlueprintCallable) void Disconnect();
     UFUNCTION(BlueprintCallable) EWowSessionState GetState() const { return State; }
 
+    /** Get the cached character list (valid after WorldHaveCharList state) */
+    UFUNCTION(BlueprintCallable) TArray<FWowCharacterInfo> GetCachedCharacters() const { return CachedCharacters; }
+
     UPROPERTY(BlueprintAssignable) FOnSessionStateChanged OnStateChanged;
     UPROPERTY(BlueprintAssignable) FOnRealmList OnRealmList;
     UPROPERTY(BlueprintAssignable) FOnCharacterList OnCharacterList;
@@ -32,8 +36,13 @@ private:
 
     void OnAuthResultReceived(bool bSuccess);
     void OnRealmListReceived(const TArray<FWowRealmInfo>& Realms);
+    void OnWorldAuthResult(bool bSuccess);
+    void OnWorldCharacterList(const TArray<FWowCharacterInfo>& Characters);
 
     TSharedPtr<FWowAuthSocket> AuthSocket;
+    TSharedPtr<FWowWorldSocket> WorldSocket;
+    FString CachedAccountName;
     TArray<uint8> SessionKey;
     TArray<FWowRealmInfo> CachedRealms;
+    TArray<FWowCharacterInfo> CachedCharacters;
 };
