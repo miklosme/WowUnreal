@@ -1,4 +1,5 @@
 #include "WowFrameManager.h"
+#include "WowEventSystem.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Button.h"
@@ -30,6 +31,18 @@ int64 FWowFrameManager::FindFrame(const FString& Name) const
 {
 	const int64* Handle = NameToHandle.Find(Name);
 	return Handle ? *Handle : -1;
+}
+
+FString FWowFrameManager::GetFrameName(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? Entry->Def.Name : FString();
+}
+
+const FWowFrameDef* FWowFrameManager::GetFrameDef(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? &Entry->Def : nullptr;
 }
 
 void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
@@ -348,6 +361,17 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	if (!Resolved.Name.IsEmpty())
 	{
 		NameToHandle.Add(Resolved.Name, Handle);
+	}
+
+	// Compile script handlers and create Lua frame object
+	if (EventSystem && Resolved.Scripts.Num() > 0)
+	{
+		EventSystem->CompileFrameScripts(Handle, Resolved);
+	}
+	else if (EventSystem && !Resolved.Name.IsEmpty())
+	{
+		// Even without scripts, create the Lua frame object for named frames
+		EventSystem->CreateFrameObject(Handle, Resolved.Name);
 	}
 
 	// Create child frames recursively

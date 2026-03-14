@@ -1,4 +1,17 @@
 #include "WowEventSystem.h"
+#include "WowLuaVM.h"
+#include "WowFrameTypes.h"
+
+#if __has_include("lua.h")
+extern "C" {
+#include "lua.h"
+#include "lauxlib.h"
+#include "lualib.h"
+}
+#define HAS_LUA 1
+#else
+#define HAS_LUA 0
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowEvent, Log, All);
 
@@ -47,18 +60,210 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 
 	UE_LOG(LogWowEvent, Verbose, TEXT("Firing event %s to %d frames"), *EventName, Handles->Num());
 
-	// Event dispatch will be integrated with the Lua VM and frame manager
-	// For now, just log the dispatch
-	for (int64 Handle : *Handles)
+#if HAS_LUA
+	if (!LuaVM || !LuaVM->IsInitialized())
 	{
-		UE_LOG(LogWowEvent, Verbose, TEXT("  -> Frame %lld"), Handle);
+		return;
 	}
+
+	lua_State* L = LuaVM->GetState();
+	if (!L)
+	{
+		return;
+	}
+
+	// Copy handles — handlers may modify the registration set during iteration
+	TArray<int64> HandlesCopy = Handles->Array();
+
+	for (int64 Handle : HandlesCopy)
+	{
+		// Look up compiled OnEvent function
+		TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
+		if (!FrameScripts) continue;
+
+		int32* ScriptRef = FrameScripts->Find(TEXT("OnEvent"));
+		if (!ScriptRef) continue;
+
+		// Push the compiled OnEvent function
+		lua_rawgeti(L, LUA_REGISTRYINDEX, *ScriptRef);
+		if (!lua_isfunction(L, -1))
+		{
+			lua_pop(L, 1);
+			continue;
+		}
+
+		// Push self (frame table)
+		int32* FrameRef = FrameObjectRefs.Find(Handle);
+		if (FrameRef)
+		{
+			lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
+		}
+		else
+		{
+			lua_newtable(L); // fallback empty table
+		}
+
+		// Push event name
+		FTCHARToUTF8 UTF8Event(*EventName);
+		lua_pushstring(L, UTF8Event.Get());
+
+		// Push args
+		for (const FString& Arg : Args)
+		{
+			FTCHARToUTF8 UTF8Arg(*Arg);
+			lua_pushstring(L, UTF8Arg.Get());
+		}
+
+		// Call: func(self, event, arg1, arg2, ...)
+		int32 NumArgs = 2 + Args.Num();
+		if (lua_pcall(L, NumArgs, 0, 0) != 0)
+		{
+			UE_LOG(LogWowEvent, Error, TEXT("OnEvent error [frame %lld] %s: %s"),
+				Handle, *EventName, UTF8_TO_TCHAR(lua_tostring(L, -1)));
+			lua_pop(L, 1);
+		}
+	}
+#endif
+}
+
+void FWowEventSystem::SetFrameScript(int64 Handle, const FString& ScriptName, const FString& Code)
+{
+#if HAS_LUA
+	if (!LuaVM || Code.IsEmpty()) return;
+
+	lua_State* L = LuaVM->GetState();
+	if (!L) return;
+
+	// Compile: function(self, event, ...) <code> end
+	FString Wrapped = FString::Printf(TEXT("return function(self, event, ...) %s end"), *Code);
+	FTCHARToUTF8 UTF8Code(*Wrapped);
+	FString ChunkName = FString::Printf(TEXT("=[%lld]:%s"), Handle, *ScriptName);
+	FTCHARToUTF8 UTF8Chunk(*ChunkName);
+
+	if (luaL_loadbuffer(L, UTF8Code.Get(), UTF8Code.Length(), UTF8Chunk.Get()) != 0)
+	{
+		UE_LOG(LogWowEvent, Error, TEXT("Script compile error [%lld] %s: %s"),
+			Handle, *ScriptName, UTF8_TO_TCHAR(lua_tostring(L, -1)));
+		lua_pop(L, 1);
+		return;
+	}
+
+	// Execute the chunk to get the function on the stack
+	if (lua_pcall(L, 0, 1, 0) != 0)
+	{
+		UE_LOG(LogWowEvent, Error, TEXT("Script load error [%lld] %s: %s"),
+			Handle, *ScriptName, UTF8_TO_TCHAR(lua_tostring(L, -1)));
+		lua_pop(L, 1);
+		return;
+	}
+
+	// Store the function as a registry reference
+	int32 Ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+	// Remove old ref if any
+	TMap<FString, int32>& FrameScripts = ScriptRefs.FindOrAdd(Handle);
+	if (int32* OldRef = FrameScripts.Find(ScriptName))
+	{
+		luaL_unref(L, LUA_REGISTRYINDEX, *OldRef);
+	}
+	FrameScripts.Add(ScriptName, Ref);
+
+	UE_LOG(LogWowEvent, Verbose, TEXT("Compiled script [%lld] %s (ref %d)"), Handle, *ScriptName, Ref);
+#endif
+}
+
+void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName)
+{
+#if HAS_LUA
+	if (!LuaVM) return;
+
+	lua_State* L = LuaVM->GetState();
+	if (!L) return;
+
+	// Create a Lua table to represent this frame
+	lua_newtable(L);
+
+	// Store the handle
+	lua_pushinteger(L, Handle);
+	lua_setfield(L, -2, "__handle");
+
+	// Store the name
+	if (!FrameName.IsEmpty())
+	{
+		FTCHARToUTF8 UTF8Name(*FrameName);
+		lua_pushstring(L, UTF8Name.Get());
+		lua_setfield(L, -2, "__name");
+	}
+
+	// Store as registry ref
+	int32 Ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+	// Clean up old ref
+	if (int32* OldRef = FrameObjectRefs.Find(Handle))
+	{
+		luaL_unref(L, LUA_REGISTRYINDEX, *OldRef);
+	}
+	FrameObjectRefs.Add(Handle, Ref);
+
+	// Also register as a global variable if the frame has a name
+	if (!FrameName.IsEmpty())
+	{
+		lua_rawgeti(L, LUA_REGISTRYINDEX, Ref);
+		FTCHARToUTF8 UTF8Name(*FrameName);
+		lua_setglobal(L, UTF8Name.Get());
+	}
+
+	UE_LOG(LogWowEvent, Verbose, TEXT("Created frame object [%lld] %s"), Handle, *FrameName);
+#endif
+}
+
+void FWowEventSystem::RemoveFrameScripts(int64 Handle)
+{
+#if HAS_LUA
+	if (!LuaVM) return;
+	lua_State* L = LuaVM->GetState();
+	if (!L) return;
+
+	// Remove script refs
+	if (TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle))
+	{
+		for (auto& Pair : *FrameScripts)
+		{
+			luaL_unref(L, LUA_REGISTRYINDEX, Pair.Value);
+		}
+		ScriptRefs.Remove(Handle);
+	}
+
+	// Remove frame object ref
+	if (int32* FrameRef = FrameObjectRefs.Find(Handle))
+	{
+		luaL_unref(L, LUA_REGISTRYINDEX, *FrameRef);
+		FrameObjectRefs.Remove(Handle);
+	}
+#endif
+}
+
+void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
+{
+	// Create the Lua frame object first
+	CreateFrameObject(Handle, Def.Name);
+
+	// Compile each script handler from the frame definition
+	for (const FWowScriptHandler& Script : Def.Scripts)
+	{
+		if (!Script.Code.IsEmpty())
+		{
+			SetFrameScript(Handle, Script.Event, Script.Code);
+		}
+	}
+
+	UE_LOG(LogWowEvent, Verbose, TEXT("Compiled %d scripts for frame [%lld] %s"),
+		Def.Scripts.Num(), Handle, *Def.Name);
 }
 
 FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 {
 	// WoW 3.3.5 (build 12340) SMSG opcodes mapped to UI event names.
-	// These are the most commonly used mappings.
 	switch (Opcode)
 	{
 	// Character / login
