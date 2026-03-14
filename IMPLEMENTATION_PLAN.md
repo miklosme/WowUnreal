@@ -29,7 +29,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 
 ## Phase 3: Terrain Rendering ✅ DONE
 - [x] BLP → UTexture2D factory (DXT passthrough to GPU)
-- [?] Master terrain splat material (4 layers + 3 alpha maps)
+- [x] Master terrain splat material (4 layers + 3 alpha maps)
 - [x] Terrain mesh builder (145-vertex chunks → ProceduralMesh)
 - [x] TerrainTile actor (256 chunk meshes + materials)
 - [x] World manager with WDT loading and tile streaming
