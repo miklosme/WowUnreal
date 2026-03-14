@@ -30,7 +30,7 @@ public:
     TObjectPtr<UInputAction> SpeedAction;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-    float FlySpeed = 1000.0f;
+    float FlySpeed = 20000.0f;  // 200 m/s default, use mouse wheel to adjust
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
     float SprintMultiplier = 3.0f;
