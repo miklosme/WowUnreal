@@ -79,7 +79,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [?] Sky/fog from DBC Light tables (SkyManager with time-of-day, sun/moon, height fog, dawn/dusk colors)
 - [?] Skeletal mesh + animation pipeline (M2 bone hierarchy + animation sequence parsing, skeletal mesh builder pending)
 - [?] Memory budget enforcement (cache stats, stale entry purging, budget tracking in HUD)
-- [ ] Runtime Virtual Textures for terrain
+- [?] Runtime Virtual Textures for terrain (URuntimeVirtualTexture + volume component in WorldManager, terrain meshes write to RVT, material graph RVT output node)
 
 ## Test Server
 - Host: 127.0.0.1

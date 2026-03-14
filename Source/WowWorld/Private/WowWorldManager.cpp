@@ -14,6 +14,8 @@
 #include "WowWmoRenderer.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Async/Async.h"
+#include "VT/RuntimeVirtualTexture.h"
+#include "Components/RuntimeVirtualTextureComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 
@@ -88,6 +90,9 @@ void AWowWorldManager::BeginPlay()
     {
         UE_LOG(LogWowWorld, Warning, TEXT("No WDL file found: %s"), *WdlPath);
     }
+
+    // Set up Runtime Virtual Texture for terrain
+    SetupRuntimeVirtualTexture();
 
     // Load a 3x3 grid of tiles around the debug tile
     for (int32 DX = -1; DX <= 1; ++DX)
@@ -235,6 +240,7 @@ void AWowWorldManager::LoadTile(int32 TX, int32 TY)
     if (Tile)
     {
         Tile->BuildFromAdtData(AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds);
+        if (TerrainRVT) Tile->ApplyRuntimeVirtualTexture(TerrainRVT);
         LoadedTiles.Add(TileKey(TX, TY), Tile);
     }
 }
@@ -306,6 +312,7 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
     if (Tile)
     {
         Tile->BuildFromAdtData(*AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds);
+        if (TerrainRVT) Tile->ApplyRuntimeVirtualTexture(TerrainRVT);
         LoadedTiles.Add(TileKey(TX, TY), Tile);
     }
 }
@@ -372,6 +379,9 @@ void AWowWorldManager::UpdateStreaming()
 
     // Update WDL distant terrain
     UpdateWdlStreaming(CameraTile);
+
+    // Keep RVT volume centered on camera
+    UpdateRVTBounds(CameraTile);
 
     UE_LOG(LogWowWorld, Verbose, TEXT("Camera tile: %d,%d"), CameraTile.X, CameraTile.Y);
 
@@ -766,4 +776,47 @@ void AWowWorldManager::UpdateObjectStreaming()
             }
         }
     }
+}
+
+void AWowWorldManager::SetupRuntimeVirtualTexture()
+{
+    // Create the Runtime Virtual Texture object
+    // Uses defaults: BaseColor_Normal_Specular, TileCount=8 (256), TileSize=2 (256px)
+    TerrainRVT = NewObject<URuntimeVirtualTexture>(this, TEXT("TerrainRVT"));
+    if (!TerrainRVT)
+    {
+        UE_LOG(LogWowWorld, Warning, TEXT("Failed to create Runtime Virtual Texture"));
+        return;
+    }
+
+    // Create the RVT volume component that defines world bounds
+    RVTVolumeComponent = NewObject<URuntimeVirtualTextureComponent>(this, TEXT("RVTVolume"));
+    if (RVTVolumeComponent)
+    {
+        RVTVolumeComponent->SetupAttachment(GetRootComponent());
+        RVTVolumeComponent->RegisterComponent();
+        RVTVolumeComponent->SetVirtualTexture(TerrainRVT);
+
+        // Set initial bounds covering loaded terrain area
+        // Scale defines the volume extents - RVT bounds come from CalcBounds using transform
+        float TileSizeUE = FWowCoordinate::TILE_SIZE * 100.0f; // ADT units to UE cm
+        float CoverageHalfSize = (LoadRadius + 1) * TileSizeUE;
+        FVector TileCenter = FWowCoordinate::TileToWorld(DebugTileX, DebugTileY);
+
+        RVTVolumeComponent->SetWorldLocation(TileCenter);
+        RVTVolumeComponent->SetWorldScale3D(FVector(CoverageHalfSize * 2.0f, CoverageHalfSize * 2.0f, 100000.0f));
+
+        UE_LOG(LogWowWorld, Log, TEXT("RVT volume at %s, coverage %.0f cm"), *TileCenter.ToString(), CoverageHalfSize);
+    }
+
+    UE_LOG(LogWowWorld, Log, TEXT("Runtime Virtual Texture created for terrain"));
+}
+
+void AWowWorldManager::UpdateRVTBounds(const FIntPoint& CameraTile)
+{
+    if (!RVTVolumeComponent) return;
+
+    // Recenter RVT volume on the camera tile
+    FVector TileCenter = FWowCoordinate::TileToWorld(CameraTile.X, CameraTile.Y);
+    RVTVolumeComponent->SetWorldLocation(FVector(TileCenter.X, TileCenter.Y, 0.0f));
 }

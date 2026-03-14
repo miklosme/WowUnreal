@@ -6,6 +6,7 @@
 #include "WowDoodadManager.h"
 #include "WowWmoRenderer.h"
 #include "WowWaterRenderer.h"
+#include "VT/RuntimeVirtualTexture.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerrainTile, Log, All);
 
@@ -149,4 +150,26 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d instanced doodad HISMCs, %d WMO placements for streaming"),
         TX, TY, InstancedDoodads.Num(), WmoPlacements.Num());
+}
+
+void AWowTerrainTile::ApplyRuntimeVirtualTexture(URuntimeVirtualTexture* RVT)
+{
+    if (!RVT) return;
+
+    // Configure all terrain chunk meshes to render into the RVT
+    for (UProceduralMeshComponent* Mesh : ChunkMeshes)
+    {
+        if (Mesh)
+        {
+            Mesh->RuntimeVirtualTextures.AddUnique(RVT);
+            Mesh->VirtualTextureLodBias = 0;
+            Mesh->VirtualTextureCullMips = 0;
+            Mesh->VirtualTextureMinCoverage = 1;
+            Mesh->VirtualTextureRenderPassType = ERuntimeVirtualTextureMainPassType::Always;
+            Mesh->MarkRenderStateDirty();
+        }
+    }
+
+    UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: Applied RVT to %d chunk meshes"),
+        TileCoord.X, TileCoord.Y, ChunkMeshes.Num());
 }

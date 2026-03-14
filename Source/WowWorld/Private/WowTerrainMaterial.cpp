@@ -13,6 +13,7 @@
 #include "Materials/MaterialExpressionDivide.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionRuntimeVirtualTextureOutput.h"
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerrainMat, Log, All);
@@ -238,6 +239,14 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
 
     // --- Connect final lerp output to BaseColor ---
     CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, Lerp3);
+
+    // --- Runtime Virtual Texture output ---
+    // This allows the terrain to render into an RVT for LOD/caching
+    auto* RVTOutput = NewObject<UMaterialExpressionRuntimeVirtualTextureOutput>(CachedMat);
+    RVTOutput->MaterialExpressionEditorX = 400;
+    RVTOutput->MaterialExpressionEditorY = 0;
+    RVTOutput->BaseColor.Connect(0, Lerp3); // BaseColor output to RVT
+    Exprs.AddExpression(RVTOutput);
 
     // Compile the material
     CachedMat->PreEditChange(nullptr);

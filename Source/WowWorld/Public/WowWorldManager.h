@@ -10,6 +10,8 @@
 #include "WowWorldManager.generated.h"
 
 class AWowTerrainTile;
+class URuntimeVirtualTexture;
+class URuntimeVirtualTextureComponent;
 
 /** Result of an async tile load (MPQ read + ADT parse on background thread) */
 struct FPendingTileLoad
@@ -31,6 +33,9 @@ public:
 
     FMpqManager* GetMpqManager() const { return MpqManager.Get(); }
     FWowAssetCache* GetAssetCache() const { return AssetCache.Get(); }
+
+    /** Get the terrain RVT for mesh components to write to */
+    URuntimeVirtualTexture* GetTerrainRVT() const { return TerrainRVT; }
 
     /** HUD info accessors */
     int32 GetLoadedTileCount() const { return LoadedTiles.Num(); }
@@ -101,6 +106,14 @@ private:
     UPROPERTY()
     TMap<int64, TObjectPtr<AActor>> WdlTiles;
 
+    /** Runtime Virtual Texture for terrain */
+    UPROPERTY()
+    TObjectPtr<URuntimeVirtualTexture> TerrainRVT;
+
+    /** RVT volume component defining the virtual texture bounds */
+    UPROPERTY()
+    TObjectPtr<URuntimeVirtualTextureComponent> RVTVolumeComponent;
+
     FIntPoint LastCameraTile = FIntPoint(-9999, -9999);
 
     /** Track spawned WMO unique IDs to avoid duplicates across tiles */
@@ -124,6 +137,8 @@ private:
     void UpdateObjectStreaming();
     void UpdateWdlStreaming(const FIntPoint& CameraTile);
     void SpawnWdlTile(int32 TX, int32 TY);
+    void SetupRuntimeVirtualTexture();
+    void UpdateRVTBounds(const FIntPoint& CameraTile);
     bool IsTileLoaded(int32 TX, int32 TY) const;
     bool IsTilePending(int32 TX, int32 TY) const;
     static int64 TileKey(int32 TX, int32 TY) { return ((int64)TX << 32) | (int64)(uint32)TY; }

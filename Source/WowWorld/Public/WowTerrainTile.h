@@ -9,6 +9,7 @@ struct FAdtData;
 class FMpqManager;
 class FWowAssetCache;
 class UHierarchicalInstancedStaticMeshComponent;
+class URuntimeVirtualTexture;
 
 UCLASS()
 class WOWWORLD_API AWowTerrainTile : public AActor
@@ -17,6 +18,7 @@ class WOWWORLD_API AWowTerrainTile : public AActor
 public:
     AWowTerrainTile();
     void BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY, FMpqManager* Mpq, FWowAssetCache* Cache, TSet<uint32>* SpawnedWmoIds = nullptr);
+    void ApplyRuntimeVirtualTexture(URuntimeVirtualTexture* RVT);
     FIntPoint GetTileCoord() const { return TileCoord; }
 
     // ---- Distance-based streaming data ----
