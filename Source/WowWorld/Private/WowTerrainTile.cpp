@@ -9,6 +9,7 @@
 #include "VT/RuntimeVirtualTexture.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 
@@ -152,7 +153,14 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         UStaticMesh::FBuildMeshDescriptionsParams Params;
         Params.bBuildSimpleCollision = false;
         Params.bFastBuild = true;
+        Params.bAllowCpuAccess = true;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
+
+        // Enable complex collision (use render mesh as collision)
+        if (SM->GetBodySetup())
+        {
+            SM->GetBodySetup()->CollisionTraceFlag = CTF_UseComplexAsSimple;
+        }
 
         // Assign materials to each section
         for (int32 s = 0; s < SectionMaterials.Num(); ++s)
@@ -169,7 +177,9 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         MeshComp->SetupAttachment(RootScene);
         MeshComp->RegisterComponent();
         MeshComp->SetCastShadow(false);
-        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        MeshComp->SetCollisionObjectType(ECC_WorldStatic);
+        MeshComp->SetCollisionResponseToAllChannels(ECR_Block);
 
         ChunkMeshes.Add(MeshComp);
         UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d sections, %d textured, %d/%d have heights, %d skipped"),
