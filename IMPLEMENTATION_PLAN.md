@@ -46,7 +46,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] WDT-driven tile existence
 - [x] Async tile loader (background thread with `TFuture`, game-thread finalization)
 - [x] Multi-tile viewer streaming works during runtime audit
-- [?] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions — implemented March 14, 2026: BuildChunkMeshLOD1 (81-vert simplified chunks), WDL MAHO hole parsing (687/687 tiles with holes), 3-tier LOD streaming (LOD0→LOD1→LOD2), edge skirt geometry; verified: build succeeds, runtime loads WDL with MAHO holes, no errors
+- [ ] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions — reopened March 14, 2026 verification: `WowUnrealEditor` build succeeds, runtime loads WDL with MAHO holes, and screenshot `Saved/Screenshots/terrain_lod_verify_recheck.png` captures distant terrain, but `SpawnLod1Tile()` still uses a flat fallback material instead of the terrain splat material required by `specs/terrain-lod.md`, and the current transition logic is only a lowered WDL edge skirt rather than stitched/smoothed LOD boundaries
 - [ ] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent`
 
 ## Phase 5: Static Objects
