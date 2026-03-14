@@ -71,9 +71,9 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     FVector UEPos = FWowCoordinate::AdtToUE(Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
     WmoActor->SetActorLocation(UEPos);
 
-    // Rotation: simple yaw only for now (most WMOs only rotate around vertical)
-    // Negate Y rotation because our coordinate system flips an axis
-    WmoActor->SetActorRotation(FRotator(0.0f, -Placement.Rotation.Y, 0.0f));
+    // Full 3-axis rotation: WoW MODF rotation (Rx, Ry, Rz) → UE FRotator
+    WmoActor->SetActorRotation(FWowCoordinate::WowRotationToUE(
+        Placement.Rotation.X, Placement.Rotation.Y, Placement.Rotation.Z));
 
     // Scale (WMOs can have scale too)
     float ScaleVal = (Placement.Scale == 0) ? 1.0f : Placement.Scale / 1024.0f;
