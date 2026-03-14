@@ -66,7 +66,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Auth socket (TCP, full handshake, realm list)
 - [x] World socket handshake, encrypted packet framing, and character enumeration
 - [x] Connection manager state machine with delegate wiring
-- [?] Implement the packet handler/entity system from `specs/networking.md` (`SMSG_LOGIN_VERIFY_WORLD`, `SMSG_UPDATE_OBJECT`, `SMSG_COMPRESSED_UPDATE_OBJECT`, `SMSG_DESTROY_OBJECT`, movement, chat, spells, action buttons) — builds, loads, wired into ConnectionManager via OnPacket delegate; needs live server test
+- [ ] Implement the packet handler/entity system from `specs/networking.md` (`SMSG_LOGIN_VERIFY_WORLD`, `SMSG_UPDATE_OBJECT`, `SMSG_COMPRESSED_UPDATE_OBJECT`, `SMSG_DESTROY_OBJECT`, movement, chat, spells, action buttons) — March 14, 2026 verification reopened: `WowUnrealEditor` builds and live logs show `AUTH_OK`, `LOGIN_VERIFY_WORLD`, spell/action-button packets, and `UPDATE_OBJECT` / `COMPRESSED_UPDATE_OBJECT` entity traffic, but mandatory visual verification still fails because the available screenshots (`Saved/Screenshots/networking_verify_live_test.png`, `Saved/Screenshots/networking_packet_entity_live_verify_clean.png`, and OS captures) are black, and screenshot runs continue to hit `FinalPreExposure > 0.0f` before a usable world image is captured
 - [?] Add world-state data structures (`WowPacketHandler`, `WowEntityManager`, `WowEntity`, `WowUpdateFields`, handler files) — all files created, entity registry with events, packet reader, update field parsing
 - [?] Add gameplay CMSG flows beyond login/char enum (movement, chat, combat/spells, heartbeat) — SendMovement, SendChatMessage, SendKeepAlive, TIME_SYNC_RESP auto-reply; builds, needs live server test
 
