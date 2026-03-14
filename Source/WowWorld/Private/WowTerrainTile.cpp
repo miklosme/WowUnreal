@@ -29,11 +29,12 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     TileCoord = FIntPoint(TX, TY);
     if (!Data.bIsValid) return;
 
-    // Don't set actor location to tile center - vertices are already in absolute world space
-    // (WowToUE produces absolute positions from WoW world coordinates)
+    // Set actor to tile center, vertices will be in local space relative to this
+    FVector TileCenter = FWowCoordinate::TileToWorld(TX, TY);
+    SetActorLocation(TileCenter);
 
-    UE_LOG(LogTemp, Log, TEXT("Tile %d,%d: %d textures, %d doodads, %d WMOs"),
-        TX, TY, Data.TexturePaths.Num(), Data.DoodadPlacements.Num(), Data.WmoPlacements.Num());
+    UE_LOG(LogTemp, Log, TEXT("Tile %d,%d at world pos %s: %d textures, %d doodads, %d WMOs"),
+        TX, TY, *TileCenter.ToString(), Data.TexturePaths.Num(), Data.DoodadPlacements.Num(), Data.WmoPlacements.Num());
 
     UMaterialInterface* DefaultMat = GetDefaultTerrainMaterial();
 
@@ -94,6 +95,16 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
             Tangents,                // Tangents
             true                     // Create collision
         );
+
+        // Log first chunk's first vertex for debugging
+        if (i == 0 && MeshData.Vertices.Num() > 0)
+        {
+            UE_LOG(LogTemp, Log, TEXT("Tile %d,%d chunk 0 vertex 0: %s (local), actor at %s"),
+                TX, TY, *MeshData.Vertices[0].ToString(), *GetActorLocation().ToString());
+            UE_LOG(LogTemp, Log, TEXT("  Chunk 0: %d verts, %d indices, WowPos(%f, %f, %f)"),
+                MeshData.Vertices.Num(), MeshData.Indices.Num(),
+                Chunk.WorldX, Chunk.WorldY, Chunk.WorldZ);
+        }
 
         // Try to create a textured material from BLP data; fall back to default
         UMaterialInstanceDynamic* ChunkMaterial = FWowTerrainMaterial::CreateChunkMaterial(

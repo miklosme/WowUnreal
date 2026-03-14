@@ -50,12 +50,18 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
 {
     FTerrainChunkMeshData Result;
 
-    // Use the MCNK header's world position (stored by parser)
-    // WorldX = north position (WoW X axis), WorldY = west position (WoW Y axis)
-    // WorldZ = base height that MCVT values are relative to
-    const float ChunkWorldX = ChunkData.WorldX;
-    const float ChunkWorldY = ChunkData.WorldY;
-    const float ChunkWorldZ = ChunkData.WorldZ;
+    // Compute chunk position from tile + chunk indices (matching noggit3 approach)
+    // noggit3: xbase = tile.x * TILESIZE + chunk.ix * CHUNKSIZE (east-west)
+    //          zbase = tile.z * TILESIZE + chunk.iy * CHUNKSIZE (north-south)
+    // In noggit3 coords: X=east, Y=up, Z=south
+    // Our tile indices: TileX maps to noggit3 tile.x, TileY maps to noggit3 tile.z
+    const float Xbase = TileX * FWowCoordinate::TILE_SIZE + ChunkData.IndexX * FWowCoordinate::CHUNK_SIZE;
+    const float Zbase = TileY * FWowCoordinate::TILE_SIZE + ChunkData.IndexY * FWowCoordinate::CHUNK_SIZE;
+    const float Ybase = ChunkData.WorldZ; // Height from MCNK header
+
+    // Tile center in noggit3 space for relative positioning
+    const float TileCenterX = TileX * FWowCoordinate::TILE_SIZE + FWowCoordinate::TILE_SIZE * 0.5f;
+    const float TileCenterZ = TileY * FWowCoordinate::TILE_SIZE + FWowCoordinate::TILE_SIZE * 0.5f;
 
     // Build 145 vertices
     Result.Vertices.SetNum(145);
@@ -102,15 +108,30 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             GridY = (float)(Row / 2);
         }
 
-        // WoW world position for this vertex
-        // In WoW, X decreases going south and Y decreases going east
-        // The grid extends from the chunk origin going south (decreasing X) and east (decreasing Y)
-        float WowX = ChunkWorldX - (GridY * FWowCoordinate::UNIT_SIZE);
-        float WowY = ChunkWorldY - (GridX * FWowCoordinate::UNIT_SIZE);
-        float WowZ = ChunkWorldZ + ChunkData.Heights[i]; // Heights are relative to base Z
+        // Noggit3 vertex position: (xbase + xOffset, ybase + height, zbase + zOffset)
+        // where xOffset = gridX * UNITSIZE, zOffset = gridY * 0.5 * UNITSIZE...
+        // Actually noggit3 iterates j(0..16)/i(0..8or7) and uses:
+        //   xpos = i * UNITSIZE (+ 0.5*UNITSIZE if inner row)
+        //   zpos = j * 0.5 * UNITSIZE
+        // Our GridX/GridY already account for this offset pattern.
+        float NoggitX = Xbase + GridX * FWowCoordinate::UNIT_SIZE;  // east-west
+        float NoggitY = Ybase + ChunkData.Heights[i];                // up
+        float NoggitZ = Zbase + GridY * FWowCoordinate::UNIT_SIZE;  // north-south
 
-        // Convert to UE coordinates
-        Result.Vertices[i] = FWowCoordinate::WowToUE(WowX, WowY, WowZ);
+        // Make relative to tile center
+        float RelX = NoggitX - TileCenterX;
+        float RelZ = NoggitZ - TileCenterZ;
+
+        // Convert noggit3 (X=east, Y=up, Z=south) to UE (X=forward, Y=right, Z=up)
+        // UE.X = noggit3.Z * SCALE (south in noggit = forward-ish)
+        // UE.Y = noggit3.X * SCALE (east in noggit = right)
+        // UE.Z = noggit3.Y * SCALE (up = up)
+        // But we need to negate to match WoW orientation properly
+        Result.Vertices[i] = FVector(
+            -RelZ * FWowCoordinate::SCALE,   // north-south (negate: noggit Z=south, UE X=north)
+            RelX * FWowCoordinate::SCALE,    // east-west
+            NoggitY * FWowCoordinate::SCALE  // height (absolute, not relative)
+        );
 
         // Convert normal from WoW space to UE space
         // WoW normals are in (X, Y, Z) WoW space; apply same transform as WowToUE

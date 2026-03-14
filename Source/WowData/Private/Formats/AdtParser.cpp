@@ -1,4 +1,5 @@
 #include "Formats/AdtParser.h"
+#include "Coord/WowCoordinate.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogAdt, Log, All);
 
@@ -345,9 +346,13 @@ namespace
         Chunk.IndexY = static_cast<int32>(Iy);
         Chunk.AreaId = AreaId;
         Chunk.Holes  = HolesLow;
-        Chunk.WorldX = XPos;
-        Chunk.WorldY = YPos;
-        Chunk.WorldZ = ZPos;
+        // Position: noggit3 calculates from tile/chunk indices, NOT from header floats.
+        // header.ypos (stored 3rd) is the only value used directly (height base).
+        // header.zpos and header.xpos are derived values = ZEROPOINT - actual_pos.
+        // We store the height and let the mesh builder compute XY from indices.
+        Chunk.WorldX = 0.0f;   // Will be computed from tile/chunk indices in mesh builder
+        Chunk.WorldY = 0.0f;   // Will be computed from tile/chunk indices in mesh builder
+        Chunk.WorldZ = YPos;   // Height base (ypos from header, stored as 3rd float)
 
         const bool bDoNotFixAlpha = (Flags & MCNK_FLAG_DO_NOT_FIX_ALPHA) != 0;
 

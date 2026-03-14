@@ -68,6 +68,24 @@ void AWowWorldManager::BeginPlay()
 
     // Load an initial test tile
     LoadTile(DebugTileX, DebugTileY);
+
+    // Teleport player above the loaded terrain
+    // The tile actor is at TileToWorld position, vertices are local to that
+    // First chunk (0,0) starts at local offset ~(-26667, -26667, height*100)
+    // The height for Elwynn is ~236 WoW units = 23600 UE cm
+    FVector TileCenter = FWowCoordinate::TileToWorld(DebugTileX, DebugTileY);
+    TileCenter.Z = 30000.0f;  // 300m, above typical terrain height of ~236m
+
+    UE_LOG(LogWowWorld, Log, TEXT("Tile actor at: %s, teleporting player to Z=30000 above it"), *TileCenter.ToString());
+
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (PC && PC->GetPawn())
+    {
+        PC->GetPawn()->SetActorLocation(TileCenter);
+        // Look straight down to see terrain
+        PC->SetControlRotation(FRotator(-89.0f, 0.0f, 0.0f));
+        UE_LOG(LogWowWorld, Log, TEXT("Teleported player to: %s, looking down"), *TileCenter.ToString());
+    }
 }
 
 void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
