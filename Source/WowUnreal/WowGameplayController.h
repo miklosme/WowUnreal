@@ -14,6 +14,7 @@ public:
     AWowGameplayController();
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaTime) override;
+    virtual void SetupInputComponent() override;
 
     /** Connection manager for sending movement packets */
     UPROPERTY()
@@ -21,6 +22,10 @@ public:
 
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();
+
+    /** Currently targeted entity GUID */
+    UPROPERTY()
+    uint64 TargetGuid = 0;
 
 private:
     // Movement sync
@@ -37,4 +42,12 @@ private:
     void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);
     void OnEntityUpdated(const FWowEntity& Entity);
     bool bHasServerPosition = false;
+
+    // Server position correction
+    FVector LastServerPosition = FVector::ZeroVector;
+    float ServerCorrectionThreshold = 500.0f; // 5 WoW yards — teleport if diverged
+
+    // Targeting
+    void OnLeftClick();
+    void TryTargetUnderCursor();
 };
