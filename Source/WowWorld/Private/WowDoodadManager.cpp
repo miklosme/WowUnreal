@@ -232,9 +232,8 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
         FVector UEPos = FWowCoordinate::NoggitToUE(
             Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
 
-        // Rotation: MDDF stores rotation in degrees
-        // For now use a simple mapping
-        FRotator UERot = FRotator(0.0f, -Placement.Rotation.Y, 0.0f);
+        // noggit3 rotation: from_model_rotation(rX, rY, rZ) = (-rZ, rY - 90, rX)
+        FRotator UERot = FRotator(Placement.Rotation.X, -Placement.Rotation.Y + 90.0f, Placement.Rotation.Z);
 
         // Scale
         float ScaleVal = Placement.GetScaleFloat();

@@ -65,7 +65,12 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     // MODF positions are in noggit3 space (X=east, Y=up, Z=south)
     FVector UEPos = FWowCoordinate::NoggitToUE(
         Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
-    FRotator UERot = FRotator(0.0f, -Placement.Rotation.Y, 0.0f);
+    // noggit3 rotation: from_model_rotation(rX, rY, rZ) = (-rZ, rY - 90, rX)
+    // Applied as YZX euler. In UE after our coord transform:
+    // UE Yaw = -(rY - 90) = -rY + 90 (noggit3 Y-axis maps to UE yaw)
+    // UE Pitch = rX (noggit3 X-axis)
+    // UE Roll = rZ (noggit3 Z-axis)
+    FRotator UERot = FRotator(Placement.Rotation.X, -Placement.Rotation.Y + 90.0f, Placement.Rotation.Z);
 
     WmoActor->SetActorLocation(UEPos);
     WmoActor->SetActorRotation(UERot);
