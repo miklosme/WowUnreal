@@ -64,7 +64,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [?] HUD (tile coords, FPS, load status — AHUD canvas overlay with WorldManager stats)
 
 ## Phase 8: WoW UI System
-- [ ] Lua 5.1 VM with sandboxed globals
+- [?] Lua 5.1 VM with sandboxed globals (already implemented: FWowLuaVM with io/os/debug/require removed)
 - [ ] XML frame parser (FrameXML, templates, Include/Script directives)
 - [ ] Frame manager (19 frame types → UMG widgets)
 - [ ] Anchor layout system + strata ordering
