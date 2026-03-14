@@ -65,5 +65,5 @@ struct WOWDATA_API FWowCoordinate
         return FVector(MAP_ORIGIN - NgZ, MAP_ORIGIN - NgX, NgY);
     }
 
-    static FRotator WowRotationToUE(float RX, float RY, float RZ) { return FRotator(RX, -RZ, RY); }
+    static FRotator WowRotationToUE(float RX, float RY, float RZ) { return FRotator(RY - 90.0f, RX, -RZ); }
 };
