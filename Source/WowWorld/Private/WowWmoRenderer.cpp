@@ -139,13 +139,12 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WoW model files are Z-up RH. UE is Z-up LH.
-            // Negate Y to fix both handedness (lighting) and N/S mirror.
+            // WoW Z-up RH → UE Z-up LH: negate X to fix E/W mirror + handedness
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(P.X, -P.Y, P.Z) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(-P.X, P.Y, P.Z) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(GroupData.Normals[i].X, -GroupData.Normals[i].Y, GroupData.Normals[i].Z)
+                ? FVector(-GroupData.Normals[i].X, GroupData.Normals[i].Y, GroupData.Normals[i].Z)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;
