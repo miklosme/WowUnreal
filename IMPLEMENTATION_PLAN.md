@@ -71,7 +71,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [?] WoW Lua API (~50 core functions: globals, string/table/math aliases, unit stubs, client info, error handling)
 - [?] Event system (59 SMSG → WoW event mappings — FWowEventSystem with register/unregister/fire, needs Lua integration)
 - [?] TOC parser + addon loader with dependency resolution (FWowAddonLoader: ParseToc, DiscoverAddons, LoadAddon with XML+Lua execution)
-- [ ] SavedVariables persistence
+- [?] SavedVariables persistence (Lua table serializer, WTF directory layout, load-before-addon/save-on-shutdown)
 
 ## Phase 9: Polish
 - [ ] Terrain LOD + WDL distant terrain

@@ -2,6 +2,7 @@
 #include "Mpq/MpqManager.h"
 #include "WowLuaVM.h"
 #include "WowFrameXmlParser.h"
+#include "WowSavedVariables.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowAddon, Log, All);
 
@@ -189,6 +190,10 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 	}
 
 	UE_LOG(LogWowAddon, Log, TEXT("Loading addon: %s (%s) - %d files"), *AddonName, *Toc.Title, Toc.Files.Num());
+
+	// Load saved variables before addon code runs
+	FWowSavedVariables::LoadForAddon(LuaVM->GetState(), AddonName, Toc);
+	FWowSavedVariables::RegisterAddon(AddonName, Toc);
 
 	FString BasePath = FString::Printf(TEXT("Interface\\AddOns\\%s\\"), *AddonName);
 

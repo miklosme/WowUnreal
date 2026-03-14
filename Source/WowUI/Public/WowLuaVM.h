@@ -10,6 +10,8 @@ public:
     ~FWowLuaVM();
     bool Initialize();
     void Shutdown();
+    /** Save all addon SavedVariables to disk */
+    void SaveAllVariables();
     bool ExecuteString(const FString& Code, const FString& ChunkName = TEXT("="));
     bool ExecuteBuffer(const TArray<uint8>& Buffer, const FString& ChunkName);
     void FireEvent(const FString& EventName, const TArray<FString>& Args = {});

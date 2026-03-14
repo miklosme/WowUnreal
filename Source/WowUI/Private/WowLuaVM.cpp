@@ -1,5 +1,6 @@
 #include "WowLuaVM.h"
 #include "LuaApi/LuaApiRegistry.h"
+#include "WowSavedVariables.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLua, Log, All);
 
@@ -39,7 +40,19 @@ bool FWowLuaVM::Initialize()
 void FWowLuaVM::Shutdown()
 {
 #if HAS_LUA
-    if (L) { lua_close(L); L = nullptr; }
+    if (L)
+    {
+        FWowSavedVariables::SaveAll(L);
+        lua_close(L);
+        L = nullptr;
+    }
+#endif
+}
+
+void FWowLuaVM::SaveAllVariables()
+{
+#if HAS_LUA
+    if (L) FWowSavedVariables::SaveAll(L);
 #endif
 }
 
