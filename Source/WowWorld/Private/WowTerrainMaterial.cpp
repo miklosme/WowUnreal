@@ -9,6 +9,10 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionLinearInterpolate.h"
+#include "Materials/MaterialExpressionDivide.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionConstant.h"
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerrainMat, Log, All);
@@ -120,7 +124,7 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     static UMaterial* CachedMat = nullptr;
     if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
 
-    // Try loading our custom material asset first
+    // Try loading a hand-authored material asset first
     CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowTerrain"));
     if (CachedMat)
     {
@@ -129,36 +133,119 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     }
 
 #if WITH_EDITOR
-    // No custom material found - create one programmatically with a BaseTexture parameter.
-    // This uses editor-only APIs to build a material graph and compile it.
-    UE_LOG(LogTerrainMat, Log, TEXT("Creating runtime terrain material with TextureSampleParameter2D"));
+    // Build the full 4-layer terrain splat material graph programmatically.
+    // Layout:
+    //   UV0 (0..8 tiling) → ground texture samplers
+    //   UV0 / 8.0 (0..1)  → alpha map samplers
+    //   Lerp chain: Base → Layer1 (Alpha1) → Layer2 (Alpha2) → Layer3 (Alpha3) → BaseColor
+    UE_LOG(LogTerrainMat, Log, TEXT("Creating 4-layer terrain splat material"));
 
     CachedMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowTerrainRuntime"));
     CachedMat->SetShadingModel(MSM_DefaultLit);
     CachedMat->TwoSided = false;
 
-    // Create a texture sample parameter named "BaseTexture"
-    UMaterialExpressionTextureSampleParameter2D* TexParam =
-        NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
-    TexParam->ParameterName = FName(TEXT("BaseTexture"));
-    TexParam->SamplerType = SAMPLERTYPE_Color;
-    // Default to white so the material compiles even without a texture set
-    TexParam->Texture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
-    TexParam->MaterialExpressionEditorX = -400;
-    TexParam->MaterialExpressionEditorY = 0;
+    UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
+    UTexture2D* BlackTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/Black"));
 
-    CachedMat->GetExpressionCollection().AddExpression(TexParam);
+    auto& Exprs = CachedMat->GetExpressionCollection();
 
-    // Connect the RGB output of the texture sample to BaseColor
-    CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, TexParam);
+    // --- TexCoord node (UV0) for alpha map UV computation ---
+    auto* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(CachedMat);
+    TexCoord->CoordinateIndex = 0;
+    TexCoord->MaterialExpressionEditorX = -900;
+    TexCoord->MaterialExpressionEditorY = 600;
+    Exprs.AddExpression(TexCoord);
 
-    // Trigger material compilation
+    // --- Divide UV0 by 8.0 to get alpha UVs (0..1 range) ---
+    auto* DivConst = NewObject<UMaterialExpressionConstant>(CachedMat);
+    DivConst->R = 8.0f;
+    DivConst->MaterialExpressionEditorX = -900;
+    DivConst->MaterialExpressionEditorY = 700;
+    Exprs.AddExpression(DivConst);
+
+    auto* AlphaUVDiv = NewObject<UMaterialExpressionDivide>(CachedMat);
+    AlphaUVDiv->MaterialExpressionEditorX = -750;
+    AlphaUVDiv->MaterialExpressionEditorY = 600;
+    AlphaUVDiv->A.Connect(0, TexCoord);
+    AlphaUVDiv->B.Connect(0, DivConst);
+    Exprs.AddExpression(AlphaUVDiv);
+
+    // --- 4 ground texture samplers (use default UV0 for tiling) ---
+    const TCHAR* GroundParamNames[] = {
+        TEXT("BaseTexture"), TEXT("Layer1Texture"), TEXT("Layer2Texture"), TEXT("Layer3Texture")
+    };
+    UMaterialExpressionTextureSampleParameter2D* GroundSamplers[4];
+
+    for (int32 i = 0; i < 4; ++i)
+    {
+        auto* Sampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
+        Sampler->ParameterName = FName(GroundParamNames[i]);
+        Sampler->SamplerType = SAMPLERTYPE_Color;
+        Sampler->Texture = (i == 0) ? WhiteTex : BlackTex;
+        Sampler->MaterialExpressionEditorX = -600;
+        Sampler->MaterialExpressionEditorY = i * 200;
+        Exprs.AddExpression(Sampler);
+        GroundSamplers[i] = Sampler;
+    }
+
+    // --- 3 alpha map samplers (sample with computed alpha UVs) ---
+    const TCHAR* AlphaParamNames[] = {
+        TEXT("Alpha1"), TEXT("Alpha2"), TEXT("Alpha3")
+    };
+    UMaterialExpressionTextureSampleParameter2D* AlphaSamplers[3];
+
+    for (int32 i = 0; i < 3; ++i)
+    {
+        auto* Sampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
+        Sampler->ParameterName = FName(AlphaParamNames[i]);
+        Sampler->SamplerType = SAMPLERTYPE_LinearGrayscale;
+        Sampler->Texture = BlackTex; // Default black = no blending
+        Sampler->MaterialExpressionEditorX = -600;
+        Sampler->MaterialExpressionEditorY = 800 + i * 200;
+        // Wire alpha UVs into the sampler
+        Sampler->Coordinates.Connect(0, AlphaUVDiv);
+        Exprs.AddExpression(Sampler);
+        AlphaSamplers[i] = Sampler;
+    }
+
+    // --- Lerp chain: blend layers using alpha maps ---
+    // Lerp1 = lerp(Base, Layer1, Alpha1)
+    auto* Lerp1 = NewObject<UMaterialExpressionLinearInterpolate>(CachedMat);
+    Lerp1->MaterialExpressionEditorX = -200;
+    Lerp1->MaterialExpressionEditorY = 0;
+    Lerp1->A.Connect(0, GroundSamplers[0]); // Base RGB
+    Lerp1->B.Connect(0, GroundSamplers[1]); // Layer1 RGB
+    Lerp1->Alpha.Connect(0, AlphaSamplers[0]); // Alpha1 R
+    Exprs.AddExpression(Lerp1);
+
+    // Lerp2 = lerp(Lerp1, Layer2, Alpha2)
+    auto* Lerp2 = NewObject<UMaterialExpressionLinearInterpolate>(CachedMat);
+    Lerp2->MaterialExpressionEditorX = -0;
+    Lerp2->MaterialExpressionEditorY = 100;
+    Lerp2->A.Connect(0, Lerp1);
+    Lerp2->B.Connect(0, GroundSamplers[2]); // Layer2 RGB
+    Lerp2->Alpha.Connect(0, AlphaSamplers[1]); // Alpha2 R
+    Exprs.AddExpression(Lerp2);
+
+    // Lerp3 = lerp(Lerp2, Layer3, Alpha3)
+    auto* Lerp3 = NewObject<UMaterialExpressionLinearInterpolate>(CachedMat);
+    Lerp3->MaterialExpressionEditorX = 200;
+    Lerp3->MaterialExpressionEditorY = 200;
+    Lerp3->A.Connect(0, Lerp2);
+    Lerp3->B.Connect(0, GroundSamplers[3]); // Layer3 RGB
+    Lerp3->Alpha.Connect(0, AlphaSamplers[2]); // Alpha3 R
+    Exprs.AddExpression(Lerp3);
+
+    // --- Connect final lerp output to BaseColor ---
+    CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, Lerp3);
+
+    // Compile the material
     CachedMat->PreEditChange(nullptr);
     CachedMat->PostEditChange();
 
-    UE_LOG(LogTerrainMat, Log, TEXT("Runtime terrain material created and compiled"));
+    UE_LOG(LogTerrainMat, Log, TEXT("4-layer terrain splat material created and compiled"));
 #else
-    // In non-editor builds, fall back to BasicShapeMaterial
+    // Non-editor builds: fall back to BasicShapeMaterial
     CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
     UE_LOG(LogTerrainMat, Warning, TEXT("No custom terrain material; using BasicShapeMaterial fallback"));
 #endif
