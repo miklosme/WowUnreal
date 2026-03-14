@@ -77,7 +77,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [?] Terrain LOD + WDL distant terrain (WDL parser, 17x17 mesh per tile, distance-based streaming)
 - [?] Water rendering (MH2O parser, per-chunk liquid meshes, existence bitmap filtering)
 - [?] Sky/fog from DBC Light tables (SkyManager with time-of-day, sun/moon, height fog, dawn/dusk colors)
-- [ ] Skeletal mesh + animation pipeline
+- [?] Skeletal mesh + animation pipeline (M2 bone hierarchy + animation sequence parsing, skeletal mesh builder pending)
 - [ ] Memory budget enforcement
 - [ ] Runtime Virtual Textures for terrain
 

@@ -151,6 +151,40 @@ struct FM2SkinTextureUnit
     uint16 TexAnimComboIndex;
 };
 
+struct FM2BoneRaw
+{
+	int32  KeyBoneId;
+	uint32 Flags;
+	int16  ParentBone;
+	uint16 SubmeshId;
+	uint16 Unk[2];
+	// Animation blocks follow (translation, rotation, scale) — we skip for now
+	// Each is 20 bytes (type, globalSeq, nTimestamps, ofsTimestamps, nValues, ofsValues)
+	uint8 TransBlock[20];
+	uint8 RotBlock[20];
+	uint8 ScaleBlock[20];
+	float PivotPoint[3];
+};
+
+struct FM2AnimSequenceRaw
+{
+	uint16 AnimationId;
+	uint16 SubAnimationId;
+	uint32 Length;
+	float  MoveSpeed;
+	uint32 Flags;
+	int16  Probability;
+	uint16 Padding;
+	uint32 MinRepetitions;
+	uint32 MaxRepetitions;
+	uint32 BlendTime;
+	float  BoundsMin[3];
+	float  BoundsMax[3];
+	float  BoundRadius;
+	int16  NextAnimation;
+	uint16 AliasNext;
+};
+
 #pragma pack(pop)
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -232,6 +266,43 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         Dst.TexCoord2 = FVector2D(Src.TexCoords2[0], Src.TexCoords2[1]);
         FMemory::Memcpy(Dst.BoneWeights, Src.BoneWeights, 4);
         FMemory::Memcpy(Dst.BoneIndices, Src.BoneIndices, 4);
+    }
+
+    // ── Read bones ───────────────────────────────────────────────────────
+    const FM2BoneRaw* RawBones = nullptr;
+    if (Header.nBones > 0 && SafeRead(M2Base, M2Size, Header.ofsBones, Header.nBones, RawBones))
+    {
+        Result.Bones.SetNum(Header.nBones);
+        for (uint32 i = 0; i < Header.nBones; i++)
+        {
+            const FM2BoneRaw& Src = RawBones[i];
+            FM2Bone& Dst = Result.Bones[i];
+            Dst.KeyBoneId = Src.KeyBoneId;
+            Dst.Flags = Src.Flags;
+            Dst.ParentBone = Src.ParentBone;
+            Dst.PivotPoint = FVector(Src.PivotPoint[0], Src.PivotPoint[1], Src.PivotPoint[2]);
+        }
+        UE_LOG(LogM2, Log, TEXT("  Parsed %d bones"), Result.Bones.Num());
+    }
+
+    // ── Read animation sequences ────────────────────────────────────────
+    const FM2AnimSequenceRaw* RawAnims = nullptr;
+    if (Header.nAnimations > 0 && SafeRead(M2Base, M2Size, Header.ofsAnimations, Header.nAnimations, RawAnims))
+    {
+        Result.Animations.SetNum(Header.nAnimations);
+        for (uint32 i = 0; i < Header.nAnimations; i++)
+        {
+            const FM2AnimSequenceRaw& Src = RawAnims[i];
+            FM2AnimSequence& Dst = Result.Animations[i];
+            Dst.AnimationId = Src.AnimationId;
+            Dst.SubAnimationId = Src.SubAnimationId;
+            Dst.Length = Src.Length;
+            Dst.MoveSpeed = Src.MoveSpeed;
+            Dst.Flags = Src.Flags;
+            Dst.NextAnimation = Src.NextAnimation;
+            Dst.AliasNext = Src.AliasNext;
+        }
+        UE_LOG(LogM2, Log, TEXT("  Parsed %d animation sequences"), Result.Animations.Num());
     }
 
     // ── Read textures ───────────────────────────────────────────────────
