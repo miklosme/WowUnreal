@@ -1,6 +1,7 @@
 #include "WowConnectionManager.h"
 #include "Net/WowAuthSocket.h"
 #include "Net/WowWorldSocket.h"
+#include "WowOpcodes.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowNet, Log, All);
 
@@ -93,6 +94,12 @@ void UWowConnectionManager::SelectRealm(int32 I)
     WorldSocket->OnAuthResult.BindUObject(this, &UWowConnectionManager::OnWorldAuthResult);
     WorldSocket->OnCharacterList.BindUObject(this, &UWowConnectionManager::OnWorldCharacterList);
 
+    // Route unhandled server packets through the packet handler (fires on game thread)
+    WorldSocket->OnPacket.BindLambda([this](uint16 Opcode, const TArray<uint8>& Data)
+    {
+        PacketHandler.HandlePacket(Opcode, Data);
+    });
+
     if (!WorldSocket->Connect(Realm.Address, Realm.Port, CachedAccountName, SessionKey))
     {
         UE_LOG(LogWowNet, Error, TEXT("Failed to connect to world server %s:%d"), *Realm.Address, Realm.Port);
@@ -155,6 +162,13 @@ void UWowConnectionManager::EnterWorld(int64 G)
         return;
     }
 
+    // Listen for LOGIN_VERIFY_WORLD to transition to InGame state
+    PacketHandler.OnLoginVerifyWorld.AddLambda([this](uint32 MapId, float X, float Y, float Z)
+    {
+        UE_LOG(LogWowNet, Log, TEXT("Entered world: map=%d pos=(%.1f, %.1f, %.1f)"), MapId, X, Y, Z);
+        SetState(EWowSessionState::WorldInGame);
+    });
+
     SetState(EWowSessionState::WorldEnteringWorld);
     WorldSocket->SendPlayerLogin(G);
 }
@@ -172,6 +186,9 @@ void UWowConnectionManager::Disconnect()
         AuthSocket->Disconnect();
         AuthSocket.Reset();
     }
+
+    PacketHandler.EntityManager.Clear();
+    PacketHandler.OnLoginVerifyWorld.Clear();
 
     SessionKey.Empty();
     CachedRealms.Empty();

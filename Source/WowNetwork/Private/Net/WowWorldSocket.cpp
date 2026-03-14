@@ -20,7 +20,6 @@ static constexpr uint16 CMSG_KEEP_ALIVE    = 0x0406;
 static constexpr uint16 SMSG_AUTH_CHALLENGE      = 0x01EC;
 static constexpr uint16 SMSG_AUTH_RESPONSE       = 0x01EE;
 static constexpr uint16 SMSG_CHAR_ENUM           = 0x003B;
-static constexpr uint16 SMSG_LOGIN_VERIFY_WORLD  = 0x0236;
 static constexpr uint16 SMSG_ADDON_INFO          = 0x02EF;
 static constexpr uint16 SMSG_WARDEN_DATA         = 0x02E6;
 

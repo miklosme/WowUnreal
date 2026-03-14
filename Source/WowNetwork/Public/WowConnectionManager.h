@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "WowSessionState.h"
+#include "WowPacketHandler.h"
 #include "WowConnectionManager.generated.h"
 
 class FWowAuthSocket;
@@ -25,6 +26,9 @@ public:
 
     /** Get the cached character list (valid after WorldHaveCharList state) */
     UFUNCTION(BlueprintCallable) TArray<FWowCharacterInfo> GetCachedCharacters() const { return CachedCharacters; }
+
+    /** Packet handler — dispatches SMSG opcodes and tracks entities */
+    FWowPacketHandler PacketHandler;
 
     UPROPERTY(BlueprintAssignable) FOnSessionStateChanged OnStateChanged;
     UPROPERTY(BlueprintAssignable) FOnRealmList OnRealmList;

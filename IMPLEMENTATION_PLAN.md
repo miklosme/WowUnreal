@@ -66,8 +66,8 @@ Current status: the project builds and launches as a world viewer, but several p
 - [x] Auth socket (TCP, full handshake, realm list)
 - [x] World socket handshake, encrypted packet framing, and character enumeration
 - [x] Connection manager state machine with delegate wiring
-- [ ] Implement the packet handler/entity system from `specs/networking.md` (`SMSG_LOGIN_VERIFY_WORLD`, `SMSG_UPDATE_OBJECT`, `SMSG_COMPRESSED_UPDATE_OBJECT`, `SMSG_DESTROY_OBJECT`, movement, chat, spells, action buttons)
-- [ ] Add world-state data structures (`WowPacketHandler`, `WowEntityManager`, `WowEntity`, `WowUpdateFields`, handler files)
+- [?] Implement the packet handler/entity system from `specs/networking.md` (`SMSG_LOGIN_VERIFY_WORLD`, `SMSG_UPDATE_OBJECT`, `SMSG_COMPRESSED_UPDATE_OBJECT`, `SMSG_DESTROY_OBJECT`, movement, chat, spells, action buttons) — builds, loads, wired into ConnectionManager via OnPacket delegate; needs live server test
+- [?] Add world-state data structures (`WowPacketHandler`, `WowEntityManager`, `WowEntity`, `WowUpdateFields`, handler files) — all files created, entity registry with events, packet reader, update field parsing
 - [ ] Add gameplay CMSG flows beyond login/char enum (movement, chat, combat/spells, heartbeat)
 
 ## Phase 7: Client Features

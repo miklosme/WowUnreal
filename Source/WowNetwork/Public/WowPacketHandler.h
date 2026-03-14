@@ -1,0 +1,124 @@
+#pragma once
+#include "CoreMinimal.h"
+#include "WowOpcodes.h"
+#include "WowEntityManager.h"
+
+DECLARE_MULTICAST_DELEGATE_FourParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
+
+// Simple byte-stream reader for packet payloads
+struct FPacketReader
+{
+    const uint8* Data;
+    int32 Size;
+    int32 Pos = 0;
+
+    FPacketReader(const TArray<uint8>& InData) : Data(InData.GetData()), Size(InData.Num()) {}
+    FPacketReader(const uint8* InData, int32 InSize) : Data(InData), Size(InSize) {}
+
+    bool CanRead(int32 Bytes) const { return Pos + Bytes <= Size; }
+    int32 Remaining() const { return Size - Pos; }
+
+    uint8 ReadU8() { return CanRead(1) ? Data[Pos++] : 0; }
+    uint16 ReadU16()
+    {
+        if (!CanRead(2)) return 0;
+        uint16 V = Data[Pos] | (uint16(Data[Pos + 1]) << 8);
+        Pos += 2;
+        return V;
+    }
+    uint32 ReadU32()
+    {
+        if (!CanRead(4)) return 0;
+        uint32 V;
+        FMemory::Memcpy(&V, Data + Pos, 4);
+        Pos += 4;
+        return V;
+    }
+    uint64 ReadU64()
+    {
+        if (!CanRead(8)) return 0;
+        uint64 V;
+        FMemory::Memcpy(&V, Data + Pos, 8);
+        Pos += 8;
+        return V;
+    }
+    float ReadFloat()
+    {
+        if (!CanRead(4)) return 0.0f;
+        float V;
+        FMemory::Memcpy(&V, Data + Pos, 4);
+        Pos += 4;
+        return V;
+    }
+    FString ReadCString()
+    {
+        FString Result;
+        while (Pos < Size && Data[Pos] != 0)
+        {
+            Result += static_cast<TCHAR>(Data[Pos++]);
+        }
+        if (Pos < Size) Pos++; // skip null
+        return Result;
+    }
+    void Skip(int32 Bytes) { Pos = FMath::Min(Pos + Bytes, Size); }
+
+    // Read packed GUID (variable-length encoding)
+    uint64 ReadPackedGuid()
+    {
+        uint8 Mask = ReadU8();
+        uint64 Guid = 0;
+        for (int32 i = 0; i < 8; ++i)
+        {
+            if (Mask & (1 << i))
+            {
+                Guid |= static_cast<uint64>(ReadU8()) << (i * 8);
+            }
+        }
+        return Guid;
+    }
+};
+
+class WOWNETWORK_API FWowPacketHandler
+{
+public:
+    FWowPacketHandler();
+
+    /** Handle an incoming server packet (called from game thread) */
+    void HandlePacket(uint16 Opcode, const TArray<uint8>& Data);
+
+    /** Entity manager — tracks all objects in the world */
+    FWowEntityManager EntityManager;
+
+    // Events
+    FOnLoginVerifyWorld OnLoginVerifyWorld;
+    FOnChatMessage OnChatMessage;
+
+private:
+    // Handler function pointer type
+    using HandlerFunc = void (FWowPacketHandler::*)(FPacketReader&);
+
+    // Dispatch table
+    TMap<uint16, HandlerFunc> Handlers;
+
+    // Individual handlers
+    void HandleLoginVerifyWorld(FPacketReader& R);
+    void HandleUpdateObject(FPacketReader& R);
+    void HandleCompressedUpdateObject(FPacketReader& R);
+    void HandleDestroyObject(FPacketReader& R);
+    void HandleMovement(FPacketReader& R);
+    void HandleMessageChat(FPacketReader& R);
+    void HandleInitialSpells(FPacketReader& R);
+    void HandleActionButtons(FPacketReader& R);
+    void HandleTimeSyncReq(FPacketReader& R);
+
+    // Internal parsing
+    void ParseUpdateBlock(FPacketReader& R);
+    void ParseMovementInfo(FPacketReader& R, FWowMovementInfo& Out);
+    void ParseUpdateFields(FPacketReader& R, FWowEntity& Entity);
+
+    // Stats
+    int32 EntitiesCreated = 0;
+    int32 EntitiesUpdated = 0;
+    int32 EntitiesDestroyed = 0;
+};
