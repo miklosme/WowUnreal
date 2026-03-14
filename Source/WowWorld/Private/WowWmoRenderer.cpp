@@ -142,15 +142,13 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WoW model vertices: right-handed, Y-up (X=right, Y=up, Z=back)
-            // UE: left-handed, Z-up (X=forward, Y=right, Z=up)
-            // Convert: UE.X = WoW.Z (forward), UE.Y = WoW.X (right), UE.Z = WoW.Y (up)
-            // Negate X for handedness: UE = (WoW.Z, -WoW.X, WoW.Y)
+            // WoW model files are RH Z-up (X=east, Y=north, Z=up)
+            // UE is LH Z-up. Negate Y for handedness: UE = (X, -Y, Z) * SCALE
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(P.Z, -P.X, P.Y) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(P.X, -P.Y, P.Z) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(GroupData.Normals[i].Z, -GroupData.Normals[i].X, GroupData.Normals[i].Y)
+                ? FVector(GroupData.Normals[i].X, -GroupData.Normals[i].Y, GroupData.Normals[i].Z)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;
