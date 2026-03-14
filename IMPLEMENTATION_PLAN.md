@@ -109,6 +109,7 @@ Current status: the project builds and launches as a world viewer, but several p
 - [ ] Fix sky atmosphere incomplete rendering: sky gradient bands parsed but never rendered to material, cloud layers not implemented, LightFloatParams.dbc not parsed (fog distances hardcoded), wrapping no-op bug at WowSkyManager line 244
 - [ ] Fix credential store: passwords stored plaintext in JSON (WowCredentialStore.cpp:23,40), JSON parsing crashes on missing fields — use TryGetStringField() and consider platform keychain
 - [ ] Add packet validation: no opcode range validation in dispatch (WowPacketHandler.cpp:30-43), chat messages sent without 255-byte length limit, missing session key validation before world connect
+- [ ] Fix terrain rendering with no textures: terrain geometry renders but appears untextured in the last working (non-black) test — investigate splat material assignment, BLP texture loading, and UV/alpha map pipeline for terrain chunks
 
 ## Phase 11: Character / Audio / Gameplay
 - [ ] Implement character rendering + equipment system from `specs/character.md`
