@@ -30,6 +30,27 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case CMSG_PLAYER_LOGIN:             return TEXT("CMSG_PLAYER_LOGIN");
     case CMSG_CHAR_ENUM:                return TEXT("CMSG_CHAR_ENUM");
     case CMSG_KEEP_ALIVE:               return TEXT("CMSG_KEEP_ALIVE");
+
+    // Social / Guild / Friends
+    case SMSG_FRIEND_LIST:              return TEXT("SMSG_FRIEND_LIST");
+    case SMSG_FRIEND_STATUS:            return TEXT("SMSG_FRIEND_STATUS");
+    case SMSG_GUILD_ROSTER:             return TEXT("SMSG_GUILD_ROSTER");
+    case SMSG_GUILD_EVENT:              return TEXT("SMSG_GUILD_EVENT");
+    case SMSG_CHANNEL_NOTIFY:           return TEXT("SMSG_CHANNEL_NOTIFY");
+    case SMSG_GROUP_LIST:               return TEXT("SMSG_GROUP_LIST");
+    case SMSG_PARTY_COMMAND_RESULT:     return TEXT("SMSG_PARTY_COMMAND_RESULT");
+    case SMSG_WHO:                      return TEXT("SMSG_WHO");
+    case CMSG_FRIEND_LIST:              return TEXT("CMSG_FRIEND_LIST");
+    case CMSG_ADD_FRIEND:               return TEXT("CMSG_ADD_FRIEND");
+    case CMSG_DEL_FRIEND:               return TEXT("CMSG_DEL_FRIEND");
+    case CMSG_ADD_IGNORE:               return TEXT("CMSG_ADD_IGNORE");
+    case CMSG_DEL_IGNORE:               return TEXT("CMSG_DEL_IGNORE");
+    case SMSG_IGNORE_LIST:              return TEXT("SMSG_IGNORE_LIST");
+    case CMSG_GUILD_ROSTER:             return TEXT("CMSG_GUILD_ROSTER");
+    case CMSG_WHO:                      return TEXT("CMSG_WHO");
+    case CMSG_GROUP_INVITE:             return TEXT("CMSG_GROUP_INVITE");
+    case CMSG_GROUP_ACCEPT:             return TEXT("CMSG_GROUP_ACCEPT");
+
     default:                            return TEXT("UNKNOWN");
     }
 }

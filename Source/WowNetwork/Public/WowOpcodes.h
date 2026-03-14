@@ -82,6 +82,64 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_CHAR_ENUM               = 0x003B;
     inline constexpr uint16 SMSG_CHAR_DELETE              = 0x003C;
 
+    // Inventory system opcodes
+    inline constexpr uint16 CMSG_AUTOEQUIP_ITEM          = 0x010A;
+    inline constexpr uint16 CMSG_SWAP_INV_ITEM           = 0x010C;
+    inline constexpr uint16 CMSG_SWAP_ITEM               = 0x010D;
+    inline constexpr uint16 CMSG_DESTROYITEM             = 0x0111;
+    inline constexpr uint16 SMSG_INVENTORY_CHANGE_FAILURE = 0x0112;
+    inline constexpr uint16 CMSG_LOOT                    = 0x015D;
+    inline constexpr uint16 CMSG_LOOT_RELEASE            = 0x015E;
+    inline constexpr uint16 SMSG_LOOT_RESPONSE           = 0x0160;
+    inline constexpr uint16 SMSG_LOOT_RELEASE_RESPONSE   = 0x0161;
+    inline constexpr uint16 SMSG_ITEM_PUSH_RESULT        = 0x0166;
+    inline constexpr uint16 SMSG_SELL_ITEM               = 0x01A1;
+    inline constexpr uint16 SMSG_BUY_ITEM                = 0x01A2;
+
+    // Quest system opcodes
+    inline constexpr uint16 CMSG_QUESTGIVER_HELLO        = 0x0182;
+    inline constexpr uint16 SMSG_QUESTGIVER_STATUS       = 0x0183;
+    inline constexpr uint16 SMSG_QUESTGIVER_QUEST_LIST   = 0x0184;
+    inline constexpr uint16 SMSG_QUESTGIVER_QUEST_DETAILS = 0x0188;
+    inline constexpr uint16 CMSG_QUESTGIVER_ACCEPT_QUEST = 0x0189;
+    inline constexpr uint16 CMSG_QUESTGIVER_COMPLETE_QUEST = 0x018A;
+    inline constexpr uint16 SMSG_QUESTGIVER_REQUEST_ITEMS = 0x018B;
+    inline constexpr uint16 SMSG_QUESTGIVER_QUEST_COMPLETE = 0x018C;
+    inline constexpr uint16 SMSG_QUESTGIVER_OFFER_REWARD = 0x018D;
+    inline constexpr uint16 CMSG_QUESTGIVER_CHOOSE_REWARD = 0x018E;
+    inline constexpr uint16 SMSG_QUESTLOG_FULL           = 0x0195;
+    inline constexpr uint16 SMSG_QUEST_UPDATE_COMPLETE   = 0x0198;
+    inline constexpr uint16 SMSG_QUEST_UPDATE_ADD_KILL   = 0x0199;
+    inline constexpr uint16 CMSG_QUEST_QUERY             = 0x005C;
+    inline constexpr uint16 SMSG_QUEST_QUERY_RESPONSE    = 0x005D;
+
+    // Talent system opcodes
+    inline constexpr uint16 SMSG_LEARNED_SPELL           = 0x012B;
+    inline constexpr uint16 SMSG_REMOVED_SPELL           = 0x0203;
+    inline constexpr uint16 CMSG_LEARN_TALENT            = 0x0251;
+    inline constexpr uint16 SMSG_TALENTS_INFO            = 0x04C0;
+    inline constexpr uint16 CMSG_LEARN_TALENTS_MULTIPLE  = 0x04C1;
+
+    // ── Social / Guild / Friends ────────────────────────────────────────────────
+    inline constexpr uint16 SMSG_FRIEND_LIST             = 0x0067;
+    inline constexpr uint16 SMSG_FRIEND_STATUS           = 0x0068;
+    inline constexpr uint16 CMSG_FRIEND_LIST             = 0x0066;
+    inline constexpr uint16 CMSG_ADD_FRIEND              = 0x0069;
+    inline constexpr uint16 CMSG_DEL_FRIEND              = 0x006A;
+    inline constexpr uint16 CMSG_ADD_IGNORE              = 0x006C;
+    inline constexpr uint16 CMSG_DEL_IGNORE              = 0x006D;
+    inline constexpr uint16 SMSG_IGNORE_LIST             = 0x006B;
+    inline constexpr uint16 SMSG_GUILD_ROSTER            = 0x008A;
+    inline constexpr uint16 SMSG_GUILD_EVENT             = 0x0092;
+    inline constexpr uint16 CMSG_GUILD_ROSTER            = 0x0089;
+    inline constexpr uint16 SMSG_CHANNEL_NOTIFY          = 0x0099;
+    inline constexpr uint16 SMSG_WHO                     = 0x0063;
+    inline constexpr uint16 CMSG_WHO                     = 0x0062;
+    inline constexpr uint16 SMSG_GROUP_LIST              = 0x007D;
+    inline constexpr uint16 SMSG_PARTY_COMMAND_RESULT    = 0x007F;
+    inline constexpr uint16 CMSG_GROUP_INVITE            = 0x006E;
+    inline constexpr uint16 CMSG_GROUP_ACCEPT            = 0x0072;
+
     // Auth result codes
     inline constexpr uint8 AUTH_OK = 0x0C;
 

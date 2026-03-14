@@ -35,6 +35,28 @@ struct FAuraInfo
     bool bActive = false;
 };
 
+// WoW item information
+struct FWowItem
+{
+    uint64 Guid = 0;
+    uint32 Entry = 0;   // Item template ID
+    uint32 Count = 0;
+    uint8 Bag = 0;       // 255 = backpack
+    uint8 Slot = 0;
+    uint8 Quality = 0;   // 0=grey, 1=white, 2=green, 3=blue, 4=purple, 5=orange
+};
+
+// Loot item information
+struct FWowLootItem
+{
+    uint32 ItemId = 0;
+    uint32 Count = 0;
+    uint32 DisplayId = 0;
+    uint8 Quality = 0;
+    uint8 Index = 0;
+    bool bLooted = false;
+};
+
 // Base entity — represents any WoW object tracked by the client
 struct WOWNETWORK_API FWowEntity
 {
@@ -87,4 +109,54 @@ struct WOWNETWORK_API FWowEntity
     int32 GetLevel() const { return static_cast<int32>(GetField(UnitField::LEVEL)); }
     uint32 GetDisplayId() const { return GetField(UnitField::DISPLAYID); }
     uint32 GetNativeDisplayId() const { return GetField(UnitField::NATIVEDISPLAYID); }
+};
+
+// Quest objective tracking
+struct FWowQuestObjective
+{
+    uint32 CreatureOrGOId = 0;
+    uint32 Count = 0;
+    uint32 Required = 0;
+};
+
+// Quest log entry
+struct FWowQuestLogEntry
+{
+    uint32 QuestId = 0;
+    uint32 State = 0; // 0=not complete, 1=complete, 2=failed
+    TArray<FWowQuestObjective> Objectives;
+};
+
+// Talent information
+struct FWowTalentInfo
+{
+    uint32 TalentId = 0;
+    uint8 Rank = 0; // 0-5
+};
+
+// Friend information for the social system
+struct FWowFriendInfo
+{
+    uint64 Guid = 0;
+    FString Name;
+    uint8 Status = 0;    // 0=offline, 1=online, 2=AFK, 3=DND
+    uint32 AreaId = 0;
+    uint8 Level = 0;
+    uint8 Class = 0;
+    FString Note;
+};
+
+// Guild member information
+struct FWowGuildMember
+{
+    uint64 Guid = 0;
+    FString Name;
+    uint8 Status = 0;
+    uint8 Level = 0;
+    uint8 Class = 0;
+    uint32 ZoneId = 0;
+    uint8 RankId = 0;
+    FString RankName;
+    FString PublicNote;
+    FString OfficerNote;
 };

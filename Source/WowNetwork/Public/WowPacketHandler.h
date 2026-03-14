@@ -6,7 +6,14 @@
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLootOpened, uint64 /*LootGuid*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestAccepted, uint32 /*QuestId*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestComplete, uint32 /*QuestId*/);
+DECLARE_MULTICAST_DELEGATE(FOnTalentsUpdated);
+DECLARE_MULTICAST_DELEGATE(FOnFriendListUpdated);
+DECLARE_MULTICAST_DELEGATE(FOnGuildRosterUpdated);
+DECLARE_MULTICAST_DELEGATE(FOnGroupUpdated);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -95,10 +102,34 @@ public:
     /** Known spell IDs (populated from SMSG_INITIAL_SPELLS) */
     TSet<uint32> KnownSpells;
 
+    /** Quest log entries */
+    TArray<FWowQuestLogEntry> QuestLog;
+
+    /** Known talents */
+    TArray<FWowTalentInfo> Talents;
+
+    /** ── Social System ──────────────────────────────────────────────────── */
+    /** Friends list */
+    TArray<FWowFriendInfo> FriendsList;
+
+    /** Guild roster */
+    TArray<FWowGuildMember> GuildRoster;
+
+    /** Guild information */
+    FString GuildName;
+    FString GuildMotd;
+
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
     FOnSpellStart OnSpellStart;
+    FOnLootOpened OnLootOpened;
+    FOnQuestAccepted OnQuestAccepted;
+    FOnQuestComplete OnQuestComplete;
+    FOnTalentsUpdated OnTalentsUpdated;
+    FOnFriendListUpdated OnFriendListUpdated;
+    FOnGuildRosterUpdated OnGuildRosterUpdated;
+    FOnGroupUpdated OnGroupUpdated;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
@@ -125,6 +156,32 @@ private:
     void HandleAuraUpdate(FPacketReader& R);
     void HandlePowerUpdate(FPacketReader& R);
     void HandleMonsterMove(FPacketReader& R);
+    void HandleInventoryChangeFailure(FPacketReader& R);
+    void HandleLootResponse(FPacketReader& R);
+    void HandleLootReleaseResponse(FPacketReader& R);
+    void HandleItemPushResult(FPacketReader& R);
+
+    // Quest handlers
+    void HandleQuestgiverStatus(FPacketReader& R);
+    void HandleQuestgiverQuestDetails(FPacketReader& R);
+    void HandleQuestgiverOfferReward(FPacketReader& R);
+    void HandleQuestUpdateAddKill(FPacketReader& R);
+    void HandleQuestUpdateComplete(FPacketReader& R);
+
+    // Talent handlers
+    void HandleTalentsInfo(FPacketReader& R);
+    void HandleLearnedSpell(FPacketReader& R);
+    void HandleRemovedSpell(FPacketReader& R);
+
+    // ── Social / Guild / Friends handlers ──────────────────────────────────
+    void HandleFriendList(FPacketReader& R);
+    void HandleFriendStatus(FPacketReader& R);
+    void HandleGuildRoster(FPacketReader& R);
+    void HandleGuildEvent(FPacketReader& R);
+    void HandleChannelNotify(FPacketReader& R);
+    void HandleGroupList(FPacketReader& R);
+    void HandlePartyCommandResult(FPacketReader& R);
+    void HandleWho(FPacketReader& R);
 
     // Internal parsing
     void ParseUpdateBlock(FPacketReader& R);

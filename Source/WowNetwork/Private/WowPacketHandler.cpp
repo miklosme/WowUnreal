@@ -22,6 +22,34 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_POWER_UPDATE,             &FWowPacketHandler::HandlePowerUpdate);
     Handlers.Add(WowOpcode::SMSG_MONSTER_MOVE,             &FWowPacketHandler::HandleMonsterMove);
 
+    // Inventory system handlers
+    Handlers.Add(WowOpcode::SMSG_INVENTORY_CHANGE_FAILURE, &FWowPacketHandler::HandleInventoryChangeFailure);
+    Handlers.Add(WowOpcode::SMSG_LOOT_RESPONSE,            &FWowPacketHandler::HandleLootResponse);
+    Handlers.Add(WowOpcode::SMSG_LOOT_RELEASE_RESPONSE,    &FWowPacketHandler::HandleLootReleaseResponse);
+    Handlers.Add(WowOpcode::SMSG_ITEM_PUSH_RESULT,         &FWowPacketHandler::HandleItemPushResult);
+
+    // Quest system handlers
+    Handlers.Add(WowOpcode::SMSG_QUESTGIVER_STATUS,        &FWowPacketHandler::HandleQuestgiverStatus);
+    Handlers.Add(WowOpcode::SMSG_QUESTGIVER_QUEST_DETAILS, &FWowPacketHandler::HandleQuestgiverQuestDetails);
+    Handlers.Add(WowOpcode::SMSG_QUESTGIVER_OFFER_REWARD,  &FWowPacketHandler::HandleQuestgiverOfferReward);
+    Handlers.Add(WowOpcode::SMSG_QUEST_UPDATE_ADD_KILL,    &FWowPacketHandler::HandleQuestUpdateAddKill);
+    Handlers.Add(WowOpcode::SMSG_QUEST_UPDATE_COMPLETE,    &FWowPacketHandler::HandleQuestUpdateComplete);
+
+    // Talent system handlers
+    Handlers.Add(WowOpcode::SMSG_TALENTS_INFO,             &FWowPacketHandler::HandleTalentsInfo);
+    Handlers.Add(WowOpcode::SMSG_LEARNED_SPELL,            &FWowPacketHandler::HandleLearnedSpell);
+    Handlers.Add(WowOpcode::SMSG_REMOVED_SPELL,            &FWowPacketHandler::HandleRemovedSpell);
+
+    // ── Social / Guild / Friends handlers ──────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_FRIEND_LIST,              &FWowPacketHandler::HandleFriendList);
+    Handlers.Add(WowOpcode::SMSG_FRIEND_STATUS,            &FWowPacketHandler::HandleFriendStatus);
+    Handlers.Add(WowOpcode::SMSG_GUILD_ROSTER,             &FWowPacketHandler::HandleGuildRoster);
+    Handlers.Add(WowOpcode::SMSG_GUILD_EVENT,              &FWowPacketHandler::HandleGuildEvent);
+    Handlers.Add(WowOpcode::SMSG_CHANNEL_NOTIFY,           &FWowPacketHandler::HandleChannelNotify);
+    Handlers.Add(WowOpcode::SMSG_GROUP_LIST,               &FWowPacketHandler::HandleGroupList);
+    Handlers.Add(WowOpcode::SMSG_PARTY_COMMAND_RESULT,     &FWowPacketHandler::HandlePartyCommandResult);
+    Handlers.Add(WowOpcode::SMSG_WHO,                      &FWowPacketHandler::HandleWho);
+
     // Movement handlers — all use the same parser
     for (uint16 Op = WowOpcode::MSG_MOVE_START_FORWARD; Op <= WowOpcode::MSG_MOVE_SET_PITCH; ++Op)
     {
@@ -798,5 +826,432 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
     if (Entity)
     {
         EntityManager.OnEntityUpdated.Broadcast(*Entity);
+    }
+}
+
+// ── SMSG_INVENTORY_CHANGE_FAILURE ─────────────────────────────────────────
+// uint8 error code
+
+void FWowPacketHandler::HandleInventoryChangeFailure(FPacketReader& R)
+{
+    if (!R.CanRead(1)) return;
+
+    uint8 ErrorCode = R.ReadU8();
+
+    const TCHAR* ErrorMsg = TEXT("Unknown error");
+    switch (ErrorCode)
+    {
+    case 0:  ErrorMsg = TEXT("CANT_EQUIP_LEVEL_I"); break;
+    case 1:  ErrorMsg = TEXT("CANT_EQUIP_SKILL"); break;
+    case 2:  ErrorMsg = TEXT("ITEM_DOESNT_GO_TO_SLOT"); break;
+    case 3:  ErrorMsg = TEXT("BAG_FULL"); break;
+    case 4:  ErrorMsg = TEXT("NONEMPTY_BAG_OVER_OTHER_BAG"); break;
+    case 5:  ErrorMsg = TEXT("CANT_TRADE_EQUIP_BAGS"); break;
+    case 6:  ErrorMsg = TEXT("ONLY_AMMO_CAN_GO_HERE"); break;
+    case 7:  ErrorMsg = TEXT("NO_REQUIRED_PROFICIENCY"); break;
+    case 8:  ErrorMsg = TEXT("NO_EQUIPMENT_SLOT_AVAILABLE"); break;
+    case 9:  ErrorMsg = TEXT("YOU_CAN_NEVER_USE_THAT_ITEM"); break;
+    case 10: ErrorMsg = TEXT("YOU_CAN_NEVER_USE_THAT_ITEM2"); break;
+    case 11: ErrorMsg = TEXT("NO_EQUIPMENT_SLOT_AVAILABLE2"); break;
+    case 12: ErrorMsg = TEXT("CANT_EQUIP_WITH_TWOHANDED"); break;
+    case 13: ErrorMsg = TEXT("CANT_DUAL_WIELD"); break;
+    case 14: ErrorMsg = TEXT("ITEM_DOESNT_GO_INTO_BAG"); break;
+    case 15: ErrorMsg = TEXT("ITEM_DOESNT_GO_INTO_BAG2"); break;
+    case 16: ErrorMsg = TEXT("CANT_CARRY_MORE_OF_THIS"); break;
+    case 17: ErrorMsg = TEXT("NO_EQUIPMENT_SLOT_AVAILABLE3"); break;
+    case 18: ErrorMsg = TEXT("ITEM_CANT_STACK"); break;
+    case 19: ErrorMsg = TEXT("ITEM_CANT_BE_EQUIPPED"); break;
+    case 20: ErrorMsg = TEXT("ITEMS_CANT_BE_SWAPPED"); break;
+    case 21: ErrorMsg = TEXT("SLOT_IS_EMPTY"); break;
+    case 22: ErrorMsg = TEXT("ITEM_NOT_FOUND"); break;
+    case 23: ErrorMsg = TEXT("CANT_DROP_SOULBOUND"); break;
+    case 24: ErrorMsg = TEXT("OUT_OF_RANGE"); break;
+    case 25: ErrorMsg = TEXT("TRIED_TO_SPLIT_MORE_THAN_COUNT"); break;
+    case 26: ErrorMsg = TEXT("COULDNT_SPLIT_ITEMS"); break;
+    case 27: ErrorMsg = TEXT("MISSING_REAGENT"); break;
+    case 28: ErrorMsg = TEXT("NOT_ENOUGH_MONEY"); break;
+    case 29: ErrorMsg = TEXT("NOT_A_BAG"); break;
+    case 30: ErrorMsg = TEXT("CAN_ONLY_DO_WITH_EMPTY_BAGS"); break;
+    case 31: ErrorMsg = TEXT("DONT_OWN_THAT_ITEM"); break;
+    case 32: ErrorMsg = TEXT("CAN_EQUIP_ONLY1_QUIVER"); break;
+    case 33: ErrorMsg = TEXT("MUST_PURCHASE_THAT_BAG_SLOT"); break;
+    case 34: ErrorMsg = TEXT("TOO_FAR_AWAY_FROM_BANK"); break;
+    case 35: ErrorMsg = TEXT("ITEM_LOCKED"); break;
+    case 36: ErrorMsg = TEXT("YOU_ARE_STUNNED"); break;
+    case 37: ErrorMsg = TEXT("YOU_ARE_DEAD"); break;
+    case 38: ErrorMsg = TEXT("CANT_DO_RIGHT_NOW"); break;
+    case 39: ErrorMsg = TEXT("INT_BAG_ERROR"); break;
+    case 40: ErrorMsg = TEXT("CAN_EQUIP_ONLY1_BOLT"); break;
+    case 41: ErrorMsg = TEXT("CAN_EQUIP_ONLY1_AMMOPOUCH"); break;
+    case 42: ErrorMsg = TEXT("STACKABLE_CANT_BE_WRAPPED"); break;
+    case 43: ErrorMsg = TEXT("EQUIPPED_CANT_BE_WRAPPED"); break;
+    case 44: ErrorMsg = TEXT("WRAPPED_CANT_BE_WRAPPED"); break;
+    case 45: ErrorMsg = TEXT("BOUND_CANT_BE_WRAPPED"); break;
+    case 46: ErrorMsg = TEXT("UNIQUE_CANT_BE_WRAPPED"); break;
+    case 47: ErrorMsg = TEXT("BAGS_CANT_BE_WRAPPED"); break;
+    case 48: ErrorMsg = TEXT("ALREADY_LOOTED"); break;
+    case 49: ErrorMsg = TEXT("INVENTORY_FULL"); break;
+    case 50: ErrorMsg = TEXT("BANK_FULL"); break;
+    case 51: ErrorMsg = TEXT("ITEM_IS_CURRENTLY_SOLD_OUT"); break;
+    case 52: ErrorMsg = TEXT("BAG_FULL3"); break;
+    case 53: ErrorMsg = TEXT("ITEM_NOT_FOUND2"); break;
+    case 54: ErrorMsg = TEXT("ITEM_CANT_STACK2"); break;
+    case 55: ErrorMsg = TEXT("BAG_FULL4"); break;
+    case 56: ErrorMsg = TEXT("ITEM_SOLD_OUT"); break;
+    case 57: ErrorMsg = TEXT("OBJECT_IS_BUSY"); break;
+    case 58: ErrorMsg = TEXT("NONE"); break;
+    case 59: ErrorMsg = TEXT("NOT_IN_COMBAT"); break;
+    case 60: ErrorMsg = TEXT("NOT_WHILE_DISARMED"); break;
+    case 61: ErrorMsg = TEXT("BAG_FULL6"); break;
+    case 62: ErrorMsg = TEXT("CANT_EQUIP_RANK"); break;
+    case 63: ErrorMsg = TEXT("CANT_EQUIP_REPUTATION"); break;
+    case 64: ErrorMsg = TEXT("TOO_MANY_SPECIAL_BAGS"); break;
+    case 65: ErrorMsg = TEXT("LOOT_CANT_LOOT_THAT_NOW"); break;
+    }
+
+    UE_LOG(LogWowPacket, Warning, TEXT("INVENTORY_CHANGE_FAILURE: error=%d (%s)"), ErrorCode, ErrorMsg);
+}
+
+// ── SMSG_LOOT_RESPONSE ──────────────────────────────────────────────────
+// packed guid loot_guid, uint8 loot_type, uint32 gold, uint8 item_count, then for each item:
+// uint8 index, uint32 item_id, uint32 count, uint32 display_id, uint8 quality, ...
+
+void FWowPacketHandler::HandleLootResponse(FPacketReader& R)
+{
+    if (!R.CanRead(2)) return; // minimum: packed guid + loot type
+
+    uint64 LootGuid = R.ReadPackedGuid();
+
+    if (!R.CanRead(5)) return; // loot type + gold + item count
+    uint8 LootType = R.ReadU8();
+    uint32 Gold = R.ReadU32();
+    uint8 ItemCount = R.ReadU8();
+
+    TArray<FWowLootItem> Items;
+    Items.Reserve(ItemCount);
+
+    for (int32 i = 0; i < ItemCount; ++i)
+    {
+        if (!R.CanRead(14)) break; // index + item_id + count + display_id + quality (minimum)
+
+        FWowLootItem Item;
+        Item.Index = R.ReadU8();
+        Item.ItemId = R.ReadU32();
+        Item.Count = R.ReadU32();
+        Item.DisplayId = R.ReadU32();
+        Item.Quality = R.ReadU8();
+        Item.bLooted = false;
+
+        // Skip additional loot item data (there may be more fields depending on server implementation)
+        // For now, we have the essential fields
+        Items.Add(Item);
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("LOOT_RESPONSE: guid=%llu type=%d gold=%u items=%d"),
+           LootGuid, LootType, Gold, ItemCount);
+
+    OnLootOpened.Broadcast(LootGuid, Items);
+}
+
+// ── SMSG_LOOT_RELEASE_RESPONSE ──────────────────────────────────────────────
+// packed guid loot_guid, uint8 unknown
+
+void FWowPacketHandler::HandleLootReleaseResponse(FPacketReader& R)
+{
+    if (!R.CanRead(2)) return; // minimum: packed guid + unknown
+
+    uint64 LootGuid = R.ReadPackedGuid();
+
+    if (!R.CanRead(1)) return;
+    uint8 Unknown = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("LOOT_RELEASE_RESPONSE: guid=%llu (loot window closed)"), LootGuid);
+}
+
+// ── SMSG_ITEM_PUSH_RESULT ──────────────────────────────────────────────────
+// packed guid target_guid, uint8 created (0=existing item, 1=new), uint8 created2,
+// uint8 bag_slot, uint32 item_slot, uint32 item_id, uint32 random_property_id,
+// uint32 random_suffix, uint32 count, uint32 charges_count, uint8 charges1, uint8 charges2,
+// uint8 charges3, uint8 charges4, uint8 charges5, uint32 duration, (optional item bonuses)
+
+void FWowPacketHandler::HandleItemPushResult(FPacketReader& R)
+{
+    if (!R.CanRead(2)) return; // minimum: packed guid + created flag
+
+    uint64 TargetGuid = R.ReadPackedGuid();
+
+    if (!R.CanRead(18)) return; // created + created2 + bag + slot + item_id + other fields
+    uint8 Created = R.ReadU8();
+    uint8 Created2 = R.ReadU8();
+    uint8 BagSlot = R.ReadU8();
+    uint32 ItemSlot = R.ReadU32();
+    uint32 ItemId = R.ReadU32();
+    uint32 RandomPropertyId = R.ReadU32();
+
+    if (!R.CanRead(8)) return; // random_suffix + count
+    uint32 RandomSuffix = R.ReadU32();
+    uint32 Count = R.ReadU32();
+
+    // Skip remaining fields for now (charges, duration, etc.)
+
+    const TCHAR* CreatedMsg = (Created == 1) ? TEXT("new") : TEXT("existing");
+    UE_LOG(LogWowPacket, Log, TEXT("ITEM_PUSH_RESULT: target=%llu %s item=%u count=%u bag=%d slot=%u"),
+           TargetGuid, CreatedMsg, ItemId, Count, BagSlot, ItemSlot);
+}
+
+// ── ──────────────────────────────────────────────────────────────────────────
+// ── Social / Guild / Friends System Handlers ────────────────────────────────
+// ── ──────────────────────────────────────────────────────────────────────────
+
+// ── SMSG_FRIEND_LIST ─────────────────────────────────────────────────────────
+// uint8 count, for each friend: uint64 guid, uint8 status, if online: uint32 areaId, uint8 level, uint8 class
+
+void FWowPacketHandler::HandleFriendList(FPacketReader& R)
+{
+    if (!R.CanRead(1)) return;
+
+    uint8 Count = R.ReadU8();
+    FriendsList.Empty(Count);
+
+    UE_LOG(LogWowPacket, Log, TEXT("FRIEND_LIST: %d friends"), Count);
+
+    for (int32 i = 0; i < Count; ++i)
+    {
+        if (!R.CanRead(9)) break; // minimum: guid + status
+
+        FWowFriendInfo Friend;
+        Friend.Guid = R.ReadU64();
+        Friend.Status = R.ReadU8();
+
+        // If friend is online, read additional data
+        if (Friend.Status > 0) // online, AFK, DND
+        {
+            if (R.CanRead(6)) // areaId + level + class
+            {
+                Friend.AreaId = R.ReadU32();
+                Friend.Level = R.ReadU8();
+                Friend.Class = R.ReadU8();
+            }
+        }
+
+        FriendsList.Add(Friend);
+
+        UE_LOG(LogWowPacket, Verbose, TEXT("  Friend GUID=%llu status=%d level=%d"),
+               Friend.Guid, Friend.Status, Friend.Level);
+    }
+
+    OnFriendListUpdated.Broadcast();
+}
+
+// ── SMSG_FRIEND_STATUS ──────────────────────────────────────────────────────
+// uint8 resultType, uint64 guid, FString name (null-terminated)
+
+void FWowPacketHandler::HandleFriendStatus(FPacketReader& R)
+{
+    if (!R.CanRead(9)) return; // result type + guid
+
+    uint8 ResultType = R.ReadU8();
+    uint64 Guid = R.ReadU64();
+    FString Name = R.ReadCString();
+
+    const TCHAR* StatusMsg = TEXT("Unknown");
+    switch (ResultType)
+    {
+    case 0: StatusMsg = TEXT("offline"); break;
+    case 1: StatusMsg = TEXT("online"); break;
+    case 2: StatusMsg = TEXT("AFK"); break;
+    case 3: StatusMsg = TEXT("DND"); break;
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("FRIEND_STATUS: %s is now %s"), *Name, StatusMsg);
+}
+
+// ── SMSG_GUILD_ROSTER ───────────────────────────────────────────────────────
+// uint32 memberCount, FString motd, FString guildInfo, uint32 rankCount,
+// for each rank: uint32 rights + uint32 goldLimit
+// for each member: uint64 guid, uint8 status, FString name, uint32 rankId, uint8 level, uint8 class, uint8 gender, uint32 zoneId, FString publicNote, FString officerNote
+
+void FWowPacketHandler::HandleGuildRoster(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 MemberCount = R.ReadU32();
+    GuildMotd = R.ReadCString();
+    FString GuildInfo = R.ReadCString();
+
+    if (!R.CanRead(4)) return;
+    uint32 RankCount = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("GUILD_ROSTER: %d members, %d ranks"), MemberCount, RankCount);
+    UE_LOG(LogWowPacket, Verbose, TEXT("  MOTD: %s"), *GuildMotd);
+
+    // Read rank data (rights and gold limits)
+    for (uint32 i = 0; i < RankCount && R.CanRead(8); ++i)
+    {
+        uint32 Rights = R.ReadU32();
+        uint32 GoldLimit = R.ReadU32();
+        // Store rank info if needed later
+    }
+
+    GuildRoster.Empty(MemberCount);
+
+    // Read member data
+    for (uint32 i = 0; i < MemberCount; ++i)
+    {
+        if (!R.CanRead(9)) break; // minimum: guid + status
+
+        FWowGuildMember Member;
+        Member.Guid = R.ReadU64();
+        Member.Status = R.ReadU8();
+        Member.Name = R.ReadCString();
+
+        if (!R.CanRead(11)) break; // rankId + level + class + gender + zoneId
+        Member.RankId = R.ReadU32();
+        Member.Level = R.ReadU8();
+        Member.Class = R.ReadU8();
+        uint8 Gender = R.ReadU8(); // not stored in member struct
+        Member.ZoneId = R.ReadU32();
+
+        Member.PublicNote = R.ReadCString();
+        Member.OfficerNote = R.ReadCString();
+
+        GuildRoster.Add(Member);
+
+        UE_LOG(LogWowPacket, Verbose, TEXT("  Member: %s (level %d) rank=%d zone=%d"),
+               *Member.Name, Member.Level, Member.RankId, Member.ZoneId);
+    }
+
+    OnGuildRosterUpdated.Broadcast();
+}
+
+// ── SMSG_GUILD_EVENT ────────────────────────────────────────────────────────
+// uint8 eventType, uint8 stringCount, then read each string
+
+void FWowPacketHandler::HandleGuildEvent(FPacketReader& R)
+{
+    if (!R.CanRead(2)) return;
+
+    uint8 EventType = R.ReadU8();
+    uint8 StringCount = R.ReadU8();
+
+    TArray<FString> Strings;
+    Strings.Reserve(StringCount);
+
+    for (int32 i = 0; i < StringCount; ++i)
+    {
+        FString Str = R.ReadCString();
+        Strings.Add(Str);
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("GUILD_EVENT: type=%d strings=%d"), EventType, StringCount);
+    for (int32 i = 0; i < Strings.Num(); ++i)
+    {
+        UE_LOG(LogWowPacket, Verbose, TEXT("  String[%d]: %s"), i, *Strings[i]);
+    }
+}
+
+// ── SMSG_CHANNEL_NOTIFY ─────────────────────────────────────────────────────
+// uint8 type, FString channelName
+
+void FWowPacketHandler::HandleChannelNotify(FPacketReader& R)
+{
+    if (!R.CanRead(1)) return;
+
+    uint8 Type = R.ReadU8();
+    FString ChannelName = R.ReadCString();
+
+    UE_LOG(LogWowPacket, Log, TEXT("CHANNEL_NOTIFY: type=%d channel='%s'"), Type, *ChannelName);
+}
+
+// ── SMSG_GROUP_LIST ─────────────────────────────────────────────────────────
+// uint8 groupType, uint8 subgroup, uint8 flags, uint8 roles, uint64 guid (if LFG),
+// uint32 counter, uint32 memberCount, for each: FString name, uint64 guid, uint8 online, uint8 subgroup, uint8 flags, uint8 roles
+
+void FWowPacketHandler::HandleGroupList(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint8 GroupType = R.ReadU8();
+    uint8 Subgroup = R.ReadU8();
+    uint8 Flags = R.ReadU8();
+    uint8 Roles = R.ReadU8();
+
+    // Check if LFG (flags & some bit)
+    if (Flags & 0x10) // example flag for LFG
+    {
+        if (R.CanRead(8))
+        {
+            uint64 LFGGuid = R.ReadU64();
+        }
+    }
+
+    if (!R.CanRead(8)) return;
+    uint32 Counter = R.ReadU32();
+    uint32 MemberCount = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("GROUP_LIST: type=%d members=%d"), GroupType, MemberCount);
+
+    // Read member data
+    for (uint32 i = 0; i < MemberCount; ++i)
+    {
+        FString MemberName = R.ReadCString();
+
+        if (!R.CanRead(12)) break; // guid + online + subgroup + flags + roles
+        uint64 MemberGuid = R.ReadU64();
+        uint8 Online = R.ReadU8();
+        uint8 MemberSubgroup = R.ReadU8();
+        uint8 MemberFlags = R.ReadU8();
+        uint8 MemberRoles = R.ReadU8();
+
+        UE_LOG(LogWowPacket, Verbose, TEXT("  Member: %s (GUID=%llu online=%d)"),
+               *MemberName, MemberGuid, Online);
+    }
+
+    OnGroupUpdated.Broadcast();
+}
+
+// ── SMSG_PARTY_COMMAND_RESULT ──────────────────────────────────────────────
+// uint32 command, FString member, uint32 result
+
+void FWowPacketHandler::HandlePartyCommandResult(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 Command = R.ReadU32();
+    FString Member = R.ReadCString();
+
+    if (!R.CanRead(4)) return;
+    uint32 Result = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("PARTY_COMMAND_RESULT: command=%d member='%s' result=%d"),
+           Command, *Member, Result);
+}
+
+// ── SMSG_WHO ────────────────────────────────────────────────────────────────
+// uint32 displayCount, uint32 matchCount, for each: FString name, FString guildName,
+// uint32 level, uint32 classId, uint32 raceId, uint32 zoneId
+
+void FWowPacketHandler::HandleWho(FPacketReader& R)
+{
+    if (!R.CanRead(8)) return;
+
+    uint32 DisplayCount = R.ReadU32();
+    uint32 MatchCount = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("WHO: displaying %d of %d matches"), DisplayCount, MatchCount);
+
+    for (uint32 i = 0; i < DisplayCount; ++i)
+    {
+        FString Name = R.ReadCString();
+        FString GuildName = R.ReadCString();
+
+        if (!R.CanRead(16)) break; // level + class + race + zone
+        uint32 Level = R.ReadU32();
+        uint32 ClassId = R.ReadU32();
+        uint32 RaceId = R.ReadU32();
+        uint32 ZoneId = R.ReadU32();
+
+        UE_LOG(LogWowPacket, Verbose, TEXT("  %s <%s> level %d class=%d race=%d zone=%d"),
+               *Name, *GuildName, Level, ClassId, RaceId, ZoneId);
     }
 }
