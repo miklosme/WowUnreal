@@ -6,7 +6,9 @@
 namespace WowOpcode
 {
     // ── Client → Server ──────────────────────────────────────────────────────
+    inline constexpr uint16 CMSG_CHAR_CREATE            = 0x0036;
     inline constexpr uint16 CMSG_CHAR_ENUM              = 0x0037;
+    inline constexpr uint16 CMSG_CHAR_DELETE            = 0x0038;
     inline constexpr uint16 CMSG_PLAYER_LOGIN           = 0x003D;
     inline constexpr uint16 CMSG_SET_SELECTION            = 0x013D;
     inline constexpr uint16 CMSG_MESSAGECHAT            = 0x0095;
@@ -76,7 +78,9 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_TIME_SYNC_REQ           = 0x0390;
     inline constexpr uint16 SMSG_POWER_UPDATE            = 0x0480;
     inline constexpr uint16 SMSG_AURA_UPDATE             = 0x0496;
+    inline constexpr uint16 SMSG_CHAR_CREATE              = 0x003A;
     inline constexpr uint16 SMSG_CHAR_ENUM               = 0x003B;
+    inline constexpr uint16 SMSG_CHAR_DELETE              = 0x003C;
 
     // Auth result codes
     inline constexpr uint8 AUTH_OK = 0x0C;

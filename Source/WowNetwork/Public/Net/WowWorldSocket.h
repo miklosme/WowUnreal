@@ -21,6 +21,13 @@ public:
     /** Send CMSG_CHAR_ENUM to request character list */
     void SendCharEnum();
 
+    /** Send CMSG_CHAR_CREATE to create a new character */
+    void SendCharCreate(const FString& Name, uint8 Race, uint8 Class, uint8 Gender,
+        uint8 Skin, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair);
+
+    /** Send CMSG_CHAR_DELETE to delete a character */
+    void SendCharDelete(uint64 Guid);
+
     /** Send CMSG_PLAYER_LOGIN with character GUID */
     void SendPlayerLogin(uint64 Guid);
 

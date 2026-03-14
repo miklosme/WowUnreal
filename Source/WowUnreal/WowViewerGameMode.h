@@ -4,6 +4,7 @@
 #include "WowViewerGameMode.generated.h"
 
 class AWowWorldManager;
+class AWowLoginController;
 
 UCLASS()
 class WOWUNREAL_API AWowViewerGameMode : public AGameModeBase
@@ -24,4 +25,5 @@ private:
     void SetupTerrainTestScene(UWorld* World);
     void SetupWmoTestScene(UWorld* World);
     void SetupUITestScene(UWorld* World);
+    void SetupLoginScene(UWorld* World);
 };

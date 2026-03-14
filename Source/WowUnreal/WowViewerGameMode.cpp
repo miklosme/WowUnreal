@@ -19,6 +19,7 @@
 #include "Materials/Material.h"
 #include "WowCharacterBuilder.h"
 #include "WowAudioManager.h"
+#include "WowLoginController.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
@@ -132,10 +133,22 @@ void AWowViewerGameMode::BeginPlay()
     {
         SetupUITestScene(World);
     }
+    else if (TestScene == TEXT("login"))
+    {
+        SetupLoginScene(World);
+    }
     else
     {
-        // Default: full world
-        SetupDefaultScene(World);
+        // Default: full world with auto-login, or login screen if no -autologin flag
+        bool bAutoLogin = FParse::Param(FCommandLine::Get(), TEXT("autologin"));
+        if (bAutoLogin)
+        {
+            SetupDefaultScene(World);
+        }
+        else
+        {
+            SetupLoginScene(World);
+        }
     }
 }
 
@@ -287,4 +300,27 @@ void AWowViewerGameMode::SetupUITestScene(UWorld* World)
             }
         }
     }
+}
+
+void AWowViewerGameMode::SetupLoginScene(UWorld* World)
+{
+    UE_LOG(LogWowGameMode, Log, TEXT("Starting login screen scene"));
+
+    // Spawn sky for background
+    {
+        FActorSpawnParameters SkyParams;
+        SkyParams.Name = FName(TEXT("WowSkyManager"));
+        World->SpawnActor<AWowSkyManager>(AWowSkyManager::StaticClass(),
+            FVector::ZeroVector, FRotator::ZeroRotator, SkyParams);
+    }
+
+    SpawnDirectionalLight(World);
+
+    // No world manager needed for login — just UI over sky background
+
+    // Spawn the login flow controller (shows login screen UI)
+    FActorSpawnParameters LoginParams;
+    LoginParams.Name = FName(TEXT("WowLoginController"));
+    World->SpawnActor<AWowLoginController>(AWowLoginController::StaticClass(),
+        FVector::ZeroVector, FRotator::ZeroRotator, LoginParams);
 }

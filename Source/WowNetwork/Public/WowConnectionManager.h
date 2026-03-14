@@ -11,6 +11,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSessionStateChanged, EWowSessionS
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRealmList, const TArray<FWowRealmInfo>&, Realms);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharacterList, const TArray<FWowCharacterInfo>&, Characters);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWowError, const FString&, Msg);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharCreateResult, uint8, ResultCode);
 
 UCLASS(BlueprintType)
 class WOWNETWORK_API UWowConnectionManager : public UObject
@@ -21,6 +22,8 @@ public:
     UFUNCTION(BlueprintCallable) void SelectRealm(int32 Index);
     UFUNCTION(BlueprintCallable) void RequestCharacterList();
     UFUNCTION(BlueprintCallable) void EnterWorld(int64 Guid);
+    UFUNCTION(BlueprintCallable) void CreateCharacter(const FString& Name, uint8 Race, uint8 Class, uint8 Gender, uint8 Skin = 0, uint8 Face = 0, uint8 HairStyle = 0, uint8 HairColor = 0, uint8 FacialHair = 0);
+    UFUNCTION(BlueprintCallable) void DeleteCharacter(int64 Guid);
     UFUNCTION(BlueprintCallable) void Disconnect();
     UFUNCTION(BlueprintCallable) EWowSessionState GetState() const { return State; }
 
@@ -54,6 +57,9 @@ public:
     /** Get the cached character list (valid after WorldHaveCharList state) */
     UFUNCTION(BlueprintCallable) TArray<FWowCharacterInfo> GetCachedCharacters() const { return CachedCharacters; }
 
+    /** Get the cached realm list (valid after AuthHaveRealmList state) */
+    UFUNCTION(BlueprintCallable) TArray<FWowRealmInfo> GetCachedRealms() const { return CachedRealms; }
+
     /** Packet handler — dispatches SMSG opcodes and tracks entities */
     FWowPacketHandler PacketHandler;
 
@@ -61,6 +67,7 @@ public:
     UPROPERTY(BlueprintAssignable) FOnRealmList OnRealmList;
     UPROPERTY(BlueprintAssignable) FOnCharacterList OnCharacterList;
     UPROPERTY(BlueprintAssignable) FOnWowError OnError;
+    UPROPERTY(BlueprintAssignable) FOnCharCreateResult OnCharCreateResult;
 private:
     EWowSessionState State = EWowSessionState::Disconnected;
     void SetState(EWowSessionState S);

@@ -104,6 +104,18 @@ void UWowConnectionManager::SelectRealm(int32 I)
     // Route unhandled server packets through the packet handler (fires on game thread)
     WorldSocket->OnPacket.BindLambda([this](uint16 Opcode, const TArray<uint8>& Data)
     {
+        // Intercept char create/delete results
+        if (Opcode == WowOpcode::SMSG_CHAR_CREATE || Opcode == WowOpcode::SMSG_CHAR_DELETE)
+        {
+            uint8 Result = Data.Num() > 0 ? Data[0] : 0xFF;
+            OnCharCreateResult.Broadcast(Result);
+            // Auto-refresh character list on success (0x2F = CHAR_CREATE_SUCCESS, 0x3A = CHAR_DELETE_SUCCESS)
+            if (Result == 0x2F || Result == 0x3A)
+            {
+                RequestCharacterList();
+            }
+            return;
+        }
         PacketHandler.HandlePacket(Opcode, Data);
     });
 
@@ -189,6 +201,29 @@ void UWowConnectionManager::EnterWorld(int64 G)
 
     SetState(EWowSessionState::WorldEnteringWorld);
     WorldSocket->SendPlayerLogin(G);
+}
+
+void UWowConnectionManager::CreateCharacter(const FString& Name, uint8 Race, uint8 Class, uint8 Gender,
+    uint8 Skin, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair)
+{
+    if (!WorldSocket.IsValid())
+    {
+        OnError.Broadcast(TEXT("Not connected to world server"));
+        return;
+    }
+
+    WorldSocket->SendCharCreate(Name, Race, Class, Gender, Skin, Face, HairStyle, HairColor, FacialHair);
+}
+
+void UWowConnectionManager::DeleteCharacter(int64 Guid)
+{
+    if (!WorldSocket.IsValid())
+    {
+        OnError.Broadcast(TEXT("Not connected to world server"));
+        return;
+    }
+
+    WorldSocket->SendCharDelete(static_cast<uint64>(Guid));
 }
 
 void UWowConnectionManager::SendMovement(int32 Opcode, const FVector& Position, float Orientation, int32 MoveFlags)

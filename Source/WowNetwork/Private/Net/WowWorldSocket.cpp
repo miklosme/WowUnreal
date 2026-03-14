@@ -12,14 +12,18 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowWorld, Log, All);
 // ── Opcodes ────────────────────────────────────────────────────────────────────
 // Client -> Server
 static constexpr uint16 CMSG_AUTH_SESSION   = 0x01ED;
+static constexpr uint16 CMSG_CHAR_CREATE   = 0x0036;
 static constexpr uint16 CMSG_CHAR_ENUM     = 0x0037;
+static constexpr uint16 CMSG_CHAR_DELETE   = 0x0038;
 static constexpr uint16 CMSG_PLAYER_LOGIN  = 0x003D;
 static constexpr uint16 CMSG_KEEP_ALIVE    = 0x0406;
 
 // Server -> Client
 static constexpr uint16 SMSG_AUTH_CHALLENGE      = 0x01EC;
 static constexpr uint16 SMSG_AUTH_RESPONSE       = 0x01EE;
+static constexpr uint16 SMSG_CHAR_CREATE         = 0x003A;
 static constexpr uint16 SMSG_CHAR_ENUM           = 0x003B;
+static constexpr uint16 SMSG_CHAR_DELETE         = 0x003C;
 static constexpr uint16 SMSG_ADDON_INFO          = 0x02EF;
 static constexpr uint16 SMSG_WARDEN_DATA         = 0x02E6;
 
@@ -256,6 +260,20 @@ uint32 FWowWorldSocket::Run()
             case SMSG_CHAR_ENUM:
                 HandleCharEnum(Payload);
                 break;
+            case SMSG_CHAR_CREATE:
+            case SMSG_CHAR_DELETE:
+            {
+                // Result code is single byte: 0x2F = CHAR_CREATE_SUCCESS, etc.
+                uint8 Result = Payload.Num() > 0 ? Payload[0] : 0xFF;
+                UE_LOG(LogWowWorld, Log, TEXT("Received %s result: 0x%02X"),
+                    Opcode == SMSG_CHAR_CREATE ? TEXT("SMSG_CHAR_CREATE") : TEXT("SMSG_CHAR_DELETE"), Result);
+                // Forward to game thread for UI handling
+                AsyncTask(ENamedThreads::GameThread, [this, Opcode, Payload]()
+                {
+                    OnPacket.ExecuteIfBound(Opcode, Payload);
+                });
+                break;
+            }
             case SMSG_ADDON_INFO:
                 UE_LOG(LogWowWorld, Log, TEXT("Received SMSG_ADDON_INFO (%d bytes) -- ignored"), Payload.Num());
                 break;
@@ -546,6 +564,40 @@ void FWowWorldSocket::SendCharEnum()
 {
     UE_LOG(LogWowWorld, Log, TEXT("Sending CMSG_CHAR_ENUM"));
     SendPacket(CMSG_CHAR_ENUM);
+}
+
+void FWowWorldSocket::SendCharCreate(const FString& Name, uint8 Race, uint8 Class, uint8 Gender,
+    uint8 Skin, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair)
+{
+    // CMSG_CHAR_CREATE: name (null-terminated) + 9 bytes appearance
+    FTCHARToUTF8 Utf8Name(*Name);
+    int32 NameLen = Utf8Name.Length() + 1; // include null terminator
+
+    TArray<uint8> Data;
+    Data.SetNumZeroed(NameLen + 9);
+    FMemory::Memcpy(Data.GetData(), Utf8Name.Get(), NameLen);
+    Data[NameLen + 0] = Race;
+    Data[NameLen + 1] = Class;
+    Data[NameLen + 2] = Gender;
+    Data[NameLen + 3] = Skin;
+    Data[NameLen + 4] = Face;
+    Data[NameLen + 5] = HairStyle;
+    Data[NameLen + 6] = HairColor;
+    Data[NameLen + 7] = FacialHair;
+    Data[NameLen + 8] = 0; // OutfitId
+
+    UE_LOG(LogWowWorld, Log, TEXT("Sending CMSG_CHAR_CREATE: %s (Race=%d Class=%d Gender=%d)"), *Name, Race, Class, Gender);
+    SendPacket(CMSG_CHAR_CREATE, Data);
+}
+
+void FWowWorldSocket::SendCharDelete(uint64 Guid)
+{
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    UE_LOG(LogWowWorld, Log, TEXT("Sending CMSG_CHAR_DELETE for GUID %llu"), Guid);
+    SendPacket(CMSG_CHAR_DELETE, Data);
 }
 
 void FWowWorldSocket::SendPlayerLogin(uint64 Guid)
