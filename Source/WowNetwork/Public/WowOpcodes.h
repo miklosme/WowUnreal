@@ -14,6 +14,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_AUTH_SESSION            = 0x01ED;
     inline constexpr uint16 CMSG_SET_ACTIVE_MOVER       = 0x026A;
     inline constexpr uint16 CMSG_MOVE_TIME_SKIPPED      = 0x02CE;
+    inline constexpr uint16 CMSG_TIME_SYNC_RESP          = 0x0391;
     inline constexpr uint16 CMSG_KEEP_ALIVE             = 0x0406;
     inline constexpr uint16 CMSG_WORLD_STATE_UI_TIMER_UPDATE = 0x04F6;
 

@@ -5,6 +5,7 @@
 
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
+DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -93,6 +94,9 @@ public:
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
+
+    /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
+    FOnSendPacket OnSendPacket;
 
 private:
     // Handler function pointer type

@@ -539,6 +539,13 @@ void FWowPacketHandler::HandleTimeSyncReq(FPacketReader& R)
 {
     uint32 Counter = R.ReadU32();
     UE_LOG(LogWowPacket, Verbose, TEXT("TIME_SYNC_REQ: counter=%u"), Counter);
-    // We should respond with CMSG_TIME_SYNC_RESP but that requires SendPacket access
-    // This will be wired up when CMSG flows are added
+
+    // Respond with CMSG_TIME_SYNC_RESP: uint32 counter + uint32 clientTicks
+    TArray<uint8> Resp;
+    Resp.SetNumUninitialized(8);
+    FMemory::Memcpy(Resp.GetData(), &Counter, 4);
+    uint32 ClientTicks = FPlatformTime::Cycles(); // monotonic tick
+    FMemory::Memcpy(Resp.GetData() + 4, &ClientTicks, 4);
+
+    OnSendPacket.ExecuteIfBound(WowOpcode::CMSG_TIME_SYNC_RESP, Resp);
 }

@@ -24,6 +24,18 @@ public:
     UFUNCTION(BlueprintCallable) void Disconnect();
     UFUNCTION(BlueprintCallable) EWowSessionState GetState() const { return State; }
 
+    /** Send a movement packet to the server */
+    UFUNCTION(BlueprintCallable) void SendMovement(int32 Opcode, const FVector& Position, float Orientation, int32 MoveFlags);
+
+    /** Send a chat message */
+    UFUNCTION(BlueprintCallable) void SendChatMessage(const FString& Message, int32 Type = 1 /*SAY*/, const FString& Language = TEXT(""));
+
+    /** Send keep-alive heartbeat */
+    UFUNCTION(BlueprintCallable) void SendKeepAlive();
+
+    /** Send a raw packet (for advanced use) */
+    void SendRawPacket(uint32 Opcode, const TArray<uint8>& Data = {});
+
     /** Get the cached character list (valid after WorldHaveCharList state) */
     UFUNCTION(BlueprintCallable) TArray<FWowCharacterInfo> GetCachedCharacters() const { return CachedCharacters; }
 
