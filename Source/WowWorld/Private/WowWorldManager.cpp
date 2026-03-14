@@ -50,32 +50,19 @@ int32 OuterVertexIndex(int32 X, int32 Y)
 
 bool SaveViewportPng(const FString& OutputPath)
 {
-    if (!GEngine || !GEngine->GameViewport || !GEngine->GameViewport->Viewport)
-    {
-        return false;
-    }
+    // Metal SM6's GetViewportScreenShot fails (TextureRHI null ensure) and
+    // FScreenshotRequest captures from a render target without materials.
+    // Use macOS screencapture as a reliable fallback for validation screenshots.
+    FString AbsPath = FPaths::ConvertRelativePathToFull(OutputPath);
 
-    FViewport* Viewport = GEngine->GameViewport->Viewport;
-    const FIntPoint Size = Viewport->GetSizeXY();
-    if (Size.X <= 0 || Size.Y <= 0)
-    {
-        return false;
-    }
+    int32 RetCode = -1;
+    FString StdOut, StdErr;
+    FString Args = FString::Printf(TEXT("-x %s"), *AbsPath);
+    FPlatformProcess::ExecProcess(TEXT("/usr/sbin/screencapture"), *Args, &RetCode, &StdOut, &StdErr);
 
-    TArray<FColor> Pixels;
-    if (!GetViewportScreenShot(Viewport, Pixels))
-    {
-        return false;
-    }
-
-    for (FColor& Pixel : Pixels)
-    {
-        Pixel.A = 255;
-    }
-
-    TArray64<uint8> CompressedPng;
-    FImageUtils::PNGCompressImageArray(Size.X, Size.Y, TArrayView64<const FColor>(Pixels.GetData(), Pixels.Num()), CompressedPng);
-    return FFileHelper::SaveArrayToFile(CompressedPng, *OutputPath);
+    bool bExists = FPaths::FileExists(AbsPath);
+    UE_LOG(LogWowWorld, Log, TEXT("screencapture: ret=%d exists=%d path=%s"), RetCode, bExists ? 1 : 0, *AbsPath);
+    return bExists;
 }
 
 int32 GetTileDistance(const FIntPoint& CameraTile, int32 TX, int32 TY)
