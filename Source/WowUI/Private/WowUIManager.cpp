@@ -128,7 +128,32 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq)
 		}
 		case FWowXmlDirective::EType::Include:
 		{
-			// Includes within FrameXML should already be resolved by the parser
+			if (!Dir.FilePath.IsEmpty())
+			{
+				FString IncPath = TEXT("Interface\\FrameXML\\") + Dir.FilePath;
+				TArray<uint8> IncData;
+				if (Mpq->ReadFile(IncPath, IncData))
+				{
+					TArray<FWowXmlDirective> IncDirs = FWowFrameXmlParser::ParseXml(IncData, IncPath);
+					for (const FWowXmlDirective& IncDir : IncDirs)
+					{
+						if (IncDir.Type == FWowXmlDirective::EType::Script && !IncDir.FilePath.IsEmpty())
+						{
+							FString IncScriptPath = TEXT("Interface\\FrameXML\\") + IncDir.FilePath;
+							TArray<uint8> ScriptData;
+							if (Mpq->ReadFile(IncScriptPath, ScriptData))
+							{
+								LuaVM->ExecuteBuffer(ScriptData, IncScriptPath);
+							}
+						}
+						else if (IncDir.Type == FWowXmlDirective::EType::Frame && FrameManager)
+						{
+							FrameManager->CreateFrame(IncDir.FrameDef);
+							FrameCount++;
+						}
+					}
+				}
+			}
 			break;
 		}
 		case FWowXmlDirective::EType::Font:
@@ -142,12 +167,16 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq)
 	UE_LOG(LogWowUIManager, Log, TEXT("FrameXML: processed %d directives, created %d frames"),
 		FrameXmlDirectives.Num(), FrameCount);
 
-	// 2. Load addons (Blizzard + user addons) in dependency order
+	// 2. Fire VARIABLES_LOADED before addons load (WoW 3.3.5 boot order)
+	EventSystem->FireEvent(TEXT("VARIABLES_LOADED"));
+
+	// 3. Load addons (Blizzard + user addons) in dependency order
+	// Each addon fires ADDON_LOADED(addonName) after loading
 	FWowAddonLoader::LoadAllAddons(Mpq, LuaVM.Get(), FrameManager.Get(), EventSystem.Get());
 
-	// 3. Fire PLAYER_ENTERING_WORLD-like init event so frames can set up
-	EventSystem->FireEvent(TEXT("ADDON_LOADED"));
+	// 4. Fire login events in correct WoW order
 	EventSystem->FireEvent(TEXT("PLAYER_LOGIN"));
+	EventSystem->FireEvent(TEXT("PLAYER_ENTERING_WORLD"));
 
 	bUILoaded = true;
 

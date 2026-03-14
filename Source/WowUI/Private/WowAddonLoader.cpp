@@ -408,7 +408,25 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 						if (Mpq->ReadFile(IncPath, IncData) ||
 						    FFileHelper::LoadFileToArray(IncData, *FPaths::Combine(Mpq->GetDataPath(), IncPath.Replace(TEXT("\\"), TEXT("/")))))
 						{
-							FWowFrameXmlParser::ParseXml(IncData, IncPath);
+							// Recursively process included XML directives
+							TArray<FWowXmlDirective> IncDirs = FWowFrameXmlParser::ParseXml(IncData, IncPath);
+							for (const FWowXmlDirective& IncDir : IncDirs)
+							{
+								if (IncDir.Type == FWowXmlDirective::EType::Script && !IncDir.FilePath.IsEmpty())
+								{
+									FString IncScriptPath = BasePath + IncDir.FilePath;
+									TArray<uint8> SD;
+									if (Mpq->ReadFile(IncScriptPath, SD) ||
+									    FFileHelper::LoadFileToArray(SD, *FPaths::Combine(Mpq->GetDataPath(), IncScriptPath.Replace(TEXT("\\"), TEXT("/")))))
+									{
+										LuaVM->ExecuteBuffer(SD, IncScriptPath);
+									}
+								}
+								else if (IncDir.Type == FWowXmlDirective::EType::Frame && FrameManager)
+								{
+									FrameManager->CreateFrame(IncDir.FrameDef);
+								}
+							}
 						}
 					}
 					break;
@@ -457,6 +475,12 @@ void FWowAddonLoader::LoadAllAddons(FMpqManager* Mpq, FWowLuaVM* LuaVM,
 		if (LoadAddon(AddonName, Mpq, LuaVM, FrameManager, EventSystem))
 		{
 			Loaded++;
+
+			// Fire ADDON_LOADED event with addon name argument (WoW 3.3.5 behavior)
+			if (EventSystem)
+			{
+				EventSystem->FireEvent(TEXT("ADDON_LOADED"), { AddonName });
+			}
 		}
 	}
 
