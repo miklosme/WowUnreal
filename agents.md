@@ -36,10 +36,17 @@ UE="/Users/Shared/Epic Games/UE_5.7"
 
 ```bash
 # Launch the game with rendering enabled (NO -nullrhi — that disables the GPU)
+# Takes a screenshot after 10 seconds then exits automatically
 "$UE/Engine/Binaries/Mac/UnrealEditor" \
   "/Users/clancey/Projects/WowUnreal/WowUnreal.uproject" \
-  -game -windowed -resx=1920 -resy=1080 -nosplash -log
+  -game -windowed -resx=1920 -resy=1080 -nosplash -log \
+  -ExecCmds="ce ScreenshotAndQuit 10"
 ```
+
+**IMPORTANT: Always close the game when you're done.** If you launch the game for verification, make sure it exits when finished. Use one of these approaches:
+- Pass `-ExecCmds="quit"` or a delayed quit command on the command line
+- If the game is still running after verification, kill it: `pkill -f UnrealEditor.*-game`
+- Never leave the game running in the background between tasks
 
 Screenshots are taken via `UWowScreenshotManager::TakeScreenshot()` which calls `FScreenshotRequest::RequestScreenshot()` — the correct UE API that captures the rendered viewport. The game also supports a delayed auto-screenshot on launch (see `AWowWorldManager`).
 
