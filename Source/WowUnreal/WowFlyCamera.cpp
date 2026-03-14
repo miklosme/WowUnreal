@@ -26,6 +26,12 @@ void AWowFlyCamera::BeginPlay()
         Mov->Acceleration = FlySpeed * 4.0f;
         Mov->Deceleration = FlySpeed * 4.0f;
     }
+
+    // Start looking down at the terrain instead of at the horizon
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        PC->SetControlRotation(FRotator(-30.0f, PC->GetControlRotation().Yaw, 0.0f));
+    }
 }
 
 void AWowFlyCamera::Tick(float DeltaTime) { Super::Tick(DeltaTime); }
