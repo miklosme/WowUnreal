@@ -142,16 +142,15 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
 
         for (int32 i = 0; i < NumVerts; ++i)
         {
-            // WoW model vertices are right-handed Y-up (OpenGL convention).
-            // UE is left-handed Z-up. Convert by:
-            // 1) Swap Y and Z (Y-up → Z-up): (X, Z, Y)
-            // 2) Negate X to fix handedness (RH → LH): (-X, Z, Y)
-            // Combined with SCALE for unit conversion.
+            // WoW model vertices: right-handed, Y-up (X=right, Y=up, Z=back)
+            // UE: left-handed, Z-up (X=forward, Y=right, Z=up)
+            // Convert: UE.X = WoW.Z (forward), UE.Y = WoW.X (right), UE.Z = WoW.Y (up)
+            // Negate X for handedness: UE = (WoW.Z, -WoW.X, WoW.Y)
             const FVector& P = GroupData.Vertices[i];
-            Vertices[i] = FVector(-P.X, P.Z, P.Y) * FWowCoordinate::SCALE;
+            Vertices[i] = FVector(P.Z, -P.X, P.Y) * FWowCoordinate::SCALE;
 
             FVector N = (i < GroupData.Normals.Num())
-                ? FVector(-GroupData.Normals[i].X, GroupData.Normals[i].Z, GroupData.Normals[i].Y)
+                ? FVector(GroupData.Normals[i].Z, -GroupData.Normals[i].X, GroupData.Normals[i].Y)
                 : FVector(0, 0, 1);
             N.Normalize();
             Normals[i] = N;

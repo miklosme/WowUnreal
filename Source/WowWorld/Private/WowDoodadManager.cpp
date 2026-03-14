@@ -108,10 +108,10 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
     for (int32 i = 0; i < NumVerts; ++i)
     {
         const FM2Vertex& V = Data.Vertices[i];
-        // WoW model vertices are right-handed Y-up (OpenGL).
-        // Convert to UE left-handed Z-up: (-X, Z, Y) * SCALE
-        Vertices[i] = FVector(-V.Position.X, V.Position.Z, V.Position.Y) * FWowCoordinate::SCALE;
-        Normals[i] = FVector(-V.Normal.X, V.Normal.Z, V.Normal.Y);
+        // WoW model: RH Y-up (X=right, Y=up, Z=back)
+        // UE: LH Z-up. Convert: UE = (Z, -X, Y) * SCALE
+        Vertices[i] = FVector(V.Position.Z, -V.Position.X, V.Position.Y) * FWowCoordinate::SCALE;
+        Normals[i] = FVector(V.Normal.Z, -V.Normal.X, V.Normal.Y);
         Normals[i].Normalize();
         UVs[i] = V.TexCoord;
 
