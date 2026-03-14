@@ -80,6 +80,13 @@ void UWowConnectionManager::SelectRealm(int32 I)
     const FWowRealmInfo& Realm = CachedRealms[I];
     UE_LOG(LogWowNet, Log, TEXT("Selected realm: %s id=%u (%s:%d)"), *Realm.Name, Realm.RealmId, *Realm.Address, Realm.Port);
 
+    if (SessionKey.Num() == 0)
+    {
+        UE_LOG(LogWowNet, Error, TEXT("Cannot connect to world server: no session key (auth not completed)"));
+        OnError.Broadcast(TEXT("No session key — authenticate first"));
+        return;
+    }
+
     SetState(EWowSessionState::WorldConnecting);
 
     // Disconnect auth socket -- no longer needed
@@ -245,8 +252,11 @@ void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, 
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
 
+    // WoW 3.3.5a chat messages are limited to 255 bytes (UTF-8)
+    FString TruncatedMessage = Message.Left(255);
+
     TArray<uint8> Data;
-    Data.Reserve(Message.Len() + 16);
+    Data.Reserve(TruncatedMessage.Len() + 16);
 
     // uint32 type (SAY=1, YELL=6, WHISPER=7, CHANNEL=17)
     uint32 ChatType = static_cast<uint32>(Type);
@@ -257,8 +267,9 @@ void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, 
     Data.Append(reinterpret_cast<const uint8*>(&Lang), 4);
 
     // Null-terminated message string (UTF-8)
-    FTCHARToUTF8 MsgUtf8(*Message);
-    Data.Append(reinterpret_cast<const uint8*>(MsgUtf8.Get()), MsgUtf8.Length());
+    FTCHARToUTF8 MsgUtf8(*TruncatedMessage);
+    int32 MsgLen = FMath::Min(MsgUtf8.Length(), 255);
+    Data.Append(reinterpret_cast<const uint8*>(MsgUtf8.Get()), MsgLen);
     Data.Add(0);
 
     WorldSocket->SendPacket(WowOpcode::CMSG_MESSAGECHAT, Data);

@@ -29,6 +29,13 @@ FWowPacketHandler::FWowPacketHandler()
 
 void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
 {
+    // Validate opcode is in valid WoW 3.3.5a range (max opcode ~0x04F6)
+    if (Opcode > 0x0FFF)
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("Ignoring out-of-range opcode 0x%04X (%d bytes)"), Opcode, Data.Num());
+        return;
+    }
+
     HandlerFunc* Found = Handlers.Find(Opcode);
     if (Found)
     {
