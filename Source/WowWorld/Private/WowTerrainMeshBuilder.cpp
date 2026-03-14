@@ -179,28 +179,23 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             // Center inner vertex
             int32 Center = InnerIndex(QX, QY);
 
-            // 4 triangles in fan pattern around center
-            // UE uses clockwise winding when viewed from above (front face)
-            // Our coordinate transform (AdtToUE) negates the Z axis,
-            // which flips handedness, so we use reversed winding.
-
             // 4 triangles in fan pattern around center vertex
-            // CW winding when viewed from above (UE front face)
+            // CCW winding when viewed from above = UE front face
             Result.Indices.Add(TopLeft);
-            Result.Indices.Add(Center);
-            Result.Indices.Add(TopRight);
-
             Result.Indices.Add(TopRight);
             Result.Indices.Add(Center);
-            Result.Indices.Add(BottomRight);
 
+            Result.Indices.Add(TopRight);
             Result.Indices.Add(BottomRight);
             Result.Indices.Add(Center);
-            Result.Indices.Add(BottomLeft);
 
+            Result.Indices.Add(BottomRight);
             Result.Indices.Add(BottomLeft);
             Result.Indices.Add(Center);
+
+            Result.Indices.Add(BottomLeft);
             Result.Indices.Add(TopLeft);
+            Result.Indices.Add(Center);
         }
     }
 
