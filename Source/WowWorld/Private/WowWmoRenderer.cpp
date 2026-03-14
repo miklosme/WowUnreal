@@ -68,12 +68,25 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
     // Same coordinate system as terrain vertices — use AdtToUE directly
     FVector UEPos = FWowCoordinate::AdtToUE(Placement.Position.X, Placement.Position.Y, Placement.Position.Z);
 
-    // Rotation: from WowGodot — (rotX, rotY-90, -rotZ) as YXZ euler
-    // UE uses Pitch(Y), Yaw(Z), Roll(X) but FRotator is (Pitch, Yaw, Roll)
-    FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
+    // Rotation: WowGodot uses Godot YXZ euler with angles (rotX, rotY-90, -rotZ) in radians.
+    // Map Godot axes to UE axes (GodotX→UE_X, GodotY→UE_Z, GodotZ→-UE_Y)
+    // and build quaternion in the correct Godot YXZ application order.
+    {
+        const float Deg2Rad = PI / 180.0f;
+        float GodotRotX = Placement.Rotation.X * Deg2Rad;
+        float GodotRotY = (Placement.Rotation.Y - 90.0f) * Deg2Rad;
+        float GodotRotZ = -Placement.Rotation.Z * Deg2Rad;
 
-    WmoActor->SetActorLocation(UEPos);
-    WmoActor->SetActorRotation(UERot);
+        // Godot YXZ order: apply Y first, then X, then Z
+        // In UE axes: Y→Z, X→X, Z→-Y
+        FQuat QYaw   = FQuat(FVector(0, 0, 1), GodotRotY);   // Godot Y → UE Z
+        FQuat QRoll  = FQuat(FVector(1, 0, 0), GodotRotX);    // Godot X → UE X
+        FQuat QPitch = FQuat(FVector(0, 1, 0), -GodotRotZ);   // Godot Z → -UE Y (negate angle)
+
+        FQuat FinalRot = QPitch * QRoll * QYaw;
+        WmoActor->SetActorLocation(UEPos);
+        WmoActor->SetActorRotation(FinalRot);
+    }
 
     // Scale (WMOs can have scale too)
     float ScaleVal = (Placement.Scale == 0) ? 1.0f : Placement.Scale / 1024.0f;
@@ -163,12 +176,15 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
             Tangents[i] = FProcMeshTangent(T, false);
         }
 
-        // Convert indices - no winding reversal needed (cyclic permutation has det=+1)
+        // Reverse winding order: WoW files use CW front-faces (DirectX/LH convention)
+        // but UE uses CCW front-faces. Swap i1 and i2 in each triangle.
         TArray<int32> Indices;
         Indices.SetNum(GroupData.Indices.Num());
-        for (int32 i = 0; i < GroupData.Indices.Num(); ++i)
+        for (int32 i = 0; i + 2 < GroupData.Indices.Num(); i += 3)
         {
-            Indices[i] = static_cast<int32>(GroupData.Indices[i]);
+            Indices[i]     = static_cast<int32>(GroupData.Indices[i]);
+            Indices[i + 1] = static_cast<int32>(GroupData.Indices[i + 2]);
+            Indices[i + 2] = static_cast<int32>(GroupData.Indices[i + 1]);
         }
 
         // If we have batches, create one section per batch for separate materials

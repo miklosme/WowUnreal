@@ -125,12 +125,15 @@ UProceduralMeshComponent* FWowDoodadManager::CreateM2MeshComponent(
         Tangents[i] = FProcMeshTangent(T, false);
     }
 
-    // No winding reversal (cyclic permutation has det=+1)
+    // Reverse winding order: WoW files use CW front-faces (DirectX/LH convention)
+    // but UE uses CCW front-faces. Swap i1 and i2 in each triangle.
     TArray<int32> Indices;
     Indices.SetNum(Data.Indices.Num());
-    for (int32 i = 0; i < Data.Indices.Num(); ++i)
+    for (int32 i = 0; i + 2 < Data.Indices.Num(); i += 3)
     {
-        Indices[i] = static_cast<int32>(Data.Indices[i]);
+        Indices[i]     = static_cast<int32>(Data.Indices[i]);
+        Indices[i + 1] = static_cast<int32>(Data.Indices[i + 2]);
+        Indices[i + 2] = static_cast<int32>(Data.Indices[i + 1]);
     }
 
     TArray<FLinearColor> EmptyColors;
@@ -237,14 +240,23 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
         float AdtZ = Placement.Position.Z;
         FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
 
-        // Rotation: (rotX, rotY-90, -rotZ) matching WowGodot
-        FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
+        // Rotation: WowGodot uses Godot YXZ euler with angles (rotX, rotY-90, -rotZ).
+        // Map Godot axes to UE axes and build quaternion in correct order.
+        const float Deg2Rad = PI / 180.0f;
+        float GodotRotX = Placement.Rotation.X * Deg2Rad;
+        float GodotRotY = (Placement.Rotation.Y - 90.0f) * Deg2Rad;
+        float GodotRotZ = -Placement.Rotation.Z * Deg2Rad;
+
+        FQuat QYaw   = FQuat(FVector(0, 0, 1), GodotRotY);
+        FQuat QRoll  = FQuat(FVector(1, 0, 0), GodotRotX);
+        FQuat QPitch = FQuat(FVector(0, 1, 0), -GodotRotZ);
+        FQuat FinalRot = QPitch * QRoll * QYaw;
 
         // Scale
         float ScaleVal = Placement.GetScaleFloat();
 
         MeshComp->SetWorldLocation(UEPos);
-        MeshComp->SetWorldRotation(UERot);
+        MeshComp->SetWorldRotation(FinalRot);
         MeshComp->SetWorldScale3D(FVector(ScaleVal));
 
         ++Spawned;
@@ -283,11 +295,21 @@ UProceduralMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
     float AdtZ = Placement.Position.Z;
     FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
 
-    FRotator UERot = FRotator(Placement.Rotation.X, Placement.Rotation.Y - 90.0f, -Placement.Rotation.Z);
+    // Rotation: WowGodot uses Godot YXZ euler with angles (rotX, rotY-90, -rotZ).
+    const float Deg2Rad = PI / 180.0f;
+    float GodotRotX = Placement.Rotation.X * Deg2Rad;
+    float GodotRotY = (Placement.Rotation.Y - 90.0f) * Deg2Rad;
+    float GodotRotZ = -Placement.Rotation.Z * Deg2Rad;
+
+    FQuat QYaw   = FQuat(FVector(0, 0, 1), GodotRotY);
+    FQuat QRoll  = FQuat(FVector(1, 0, 0), GodotRotX);
+    FQuat QPitch = FQuat(FVector(0, 1, 0), -GodotRotZ);
+    FQuat FinalRot = QPitch * QRoll * QYaw;
+
     float ScaleVal = Placement.GetScaleFloat();
 
     MeshComp->SetWorldLocation(UEPos);
-    MeshComp->SetWorldRotation(UERot);
+    MeshComp->SetWorldRotation(FinalRot);
     MeshComp->SetWorldScale3D(FVector(ScaleVal));
 
     return MeshComp;
