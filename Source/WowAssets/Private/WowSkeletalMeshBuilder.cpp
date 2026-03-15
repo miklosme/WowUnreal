@@ -350,17 +350,20 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		SkelMesh->GetMaterials().Add(FSkeletalMaterial(UMaterial::GetDefaultMaterial(MD_Surface), true, false, FName(TEXT("Default"))));
 	}
 
-	SkelMesh->CommitMeshDescription(0);
-
-	// Ensure the imported model has a valid LOD before Build
-	if (SkelMesh->GetImportedModel() && SkelMesh->GetImportedModel()->LODModels.Num() == 0)
+	// The LODModel MUST exist in ImportedModel BEFORE CommitMeshDescription is called.
+	// CommitMeshDescription accesses LODModels[InLODIndex] to store bulk data IDs,
+	// and Build() iterates LODModels to call BuildLODModel for each LOD.
+	FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel();
+	check(ImportedModel);
+	if (!ImportedModel->LODModels.IsValidIndex(0))
 	{
-		SkelMesh->GetImportedModel()->LODModels.Add(new FSkeletalMeshLODModel());
+		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
 	}
 
-	SkelMesh->Build();
+	SkelMesh->CommitMeshDescription(0);
 
-	// Set bounds using M2 vertex transform convention: UE = (WoW.Y, WoW.X, WoW.Z) * SCALE
+	// Set bounds BEFORE Build() so the build pipeline has valid bounds data.
+	// M2 vertex transform convention: UE = (WoW.Y, WoW.X, WoW.Z) * SCALE
 	const FVector& BMin = Data.BoundingBox.Min;
 	const FVector& BMax = Data.BoundingBox.Max;
 	FBox MeshBox(
@@ -373,8 +376,13 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	);
 	FBoxSphereBounds Bounds(MeshBox);
 	SkelMesh->SetImportedBounds(Bounds);
+
+	// CalculateInvRefMatrices must run before Build() so the build has valid inverse reference matrices.
 	SkelMesh->CalculateInvRefMatrices();
-	SkelMesh->InitResources();
+
+	// Build() calls BuildLODModel (which uses IMeshBuilderModule to convert mesh description to render data),
+	// then FinishBuildInternal calls InitResources(). Do NOT call InitResources() again after Build().
+	SkelMesh->Build();
 
 	UE_LOG(LogWowSkelMesh, Log, TEXT("Created skeletal mesh '%s' with %d verts, %d tris, %d bones"),
 		*ModelName, NumVerts, NumTris, NumBones);
