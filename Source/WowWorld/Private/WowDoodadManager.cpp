@@ -142,7 +142,8 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
         float AdtZ = Placement.Position.Z;
         FVector UEPos = FWowCoordinate::AdtToUE(AdtX, AdtY, AdtZ);
         float ScaleVal = Placement.GetScaleFloat();
-        FRotator Rot(0.0f, -Placement.Rotation.Y, 0.0f);
+        FRotator Rot = FWowCoordinate::WowRotationToUE(
+            Placement.Rotation.X, Placement.Rotation.Y, Placement.Rotation.Z);
 
         if (ShouldUseSkeletalMesh(*M2Parsed))
         {
@@ -226,11 +227,30 @@ UStaticMeshComponent* FWowDoodadManager::SpawnSingleDoodad(
     float ScaleVal = Placement.GetScaleFloat();
 
     MeshComp->SetWorldLocation(UEPos);
-    MeshComp->SetWorldRotation(FRotator(0.0f, -Placement.Rotation.Y, 0.0f));
+    MeshComp->SetWorldRotation(FWowCoordinate::WowRotationToUE(
+        Placement.Rotation.X, Placement.Rotation.Y, Placement.Rotation.Z));
     MeshComp->SetWorldScale3D(FVector(ScaleVal));
     MeshComp->RegisterComponent();
 
     return MeshComp;
+}
+
+UTexture2D* FWowDoodadManager::LoadBlpTexture(const FString& Path, FMpqManager* Mpq, FWowAssetCache* Cache)
+{
+    if (Path.IsEmpty() || !Mpq || !Cache) return nullptr;
+
+    UTexture2D* Tex = Cache->FindTexture(Path);
+    if (Tex) return Tex;
+
+    TArray<uint8> BlpRaw;
+    if (!Mpq->ReadFile(Path, BlpRaw)) return nullptr;
+
+    FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
+    if (!BlpData.bIsValid) return nullptr;
+
+    Tex = FWowTextureFactory::CreateTexture(BlpData, Path);
+    if (Tex) Cache->CacheTexture(Path, Tex);
+    return Tex;
 }
 
 UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, const FString& M2Path,
@@ -248,14 +268,61 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     Attributes.Register();
 
     const int32 NumVerts = Data.Vertices.Num();
-    const int32 NumTris = Data.Indices.Num() / 3;
 
-    // Reserve geometry
-    FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+    // Determine polygon groups from render passes + submeshes
+    // Each render pass maps to a submesh (triangle range) and a texture
+    // Group by unique (submesh, texture) pairs to create material slots
+    struct FMaterialBatch
+    {
+        int32 StartIndex;   // Index into Data.Indices
+        int32 NumIndices;   // Number of indices (NumTriangles * 3... well, nTriangles from skin is actually index count)
+        int32 TextureIndex; // Index into Data.TexturePaths
+    };
+
+    TArray<FMaterialBatch> Batches;
+    bool bHasValidBatches = Data.RenderPasses.Num() > 0 && Data.Submeshes.Num() > 0;
+
+    if (bHasValidBatches)
+    {
+        for (const FM2RenderPass& Pass : Data.RenderPasses)
+        {
+            if (Pass.SubmeshIndex >= Data.Submeshes.Num()) continue;
+
+            const FM2Submesh& Sub = Data.Submeshes[Pass.SubmeshIndex];
+            // StartTriangle and NumTriangles in M2 skin format are index counts, not triangle counts
+            int32 Start = static_cast<int32>(Sub.StartTriangle);
+            int32 Count = static_cast<int32>(Sub.NumTriangles);
+
+            if (Start + Count > Data.Indices.Num()) continue;
+            if (Count < 3) continue;
+
+            FMaterialBatch Batch;
+            Batch.StartIndex = Start;
+            Batch.NumIndices = Count;
+            Batch.TextureIndex = Pass.TextureIndex;
+            Batches.Add(Batch);
+        }
+    }
+
+    // Fallback: single batch with all triangles if no valid render passes
+    if (Batches.Num() == 0)
+    {
+        FMaterialBatch Batch;
+        Batch.StartIndex = 0;
+        Batch.NumIndices = Data.Indices.Num();
+        Batch.TextureIndex = 0;
+        Batches.Add(Batch);
+    }
+
+    // Create polygon groups (one per batch)
+    TArray<FPolygonGroupID> PolyGroups;
+    for (int32 i = 0; i < Batches.Num(); ++i)
+    {
+        PolyGroups.Add(MeshDesc.CreatePolygonGroup());
+    }
+
     MeshDesc.ReserveNewVertices(NumVerts);
     MeshDesc.ReserveNewVertexInstances(NumVerts);
-    MeshDesc.ReserveNewPolygons(NumTris);
-    MeshDesc.ReserveNewEdges(Data.Indices.Num());
 
     TVertexAttributesRef<FVector3f> VertexPositions = Attributes.GetVertexPositions();
     TVertexInstanceAttributesRef<FVector3f> VertexInstanceNormals = Attributes.GetVertexInstanceNormals();
@@ -272,15 +339,16 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
         const FM2Vertex& V = Data.Vertices[i];
         FVertexID VertID = MeshDesc.CreateVertex();
 
-        // WoW Z-up RH → UE Z-up LH: negate X
-        VertexPositions[VertID] = FVector3f(-V.Position.X * FWowCoordinate::SCALE,
-                                             V.Position.Y * FWowCoordinate::SCALE,
+        // WoW model space → UE local: (Y, X, Z) * SCALE
+        // Same derivation as WMO: model→ADT is (X,Z,-Y), ADT→UE is (-Z,X,Y)
+        VertexPositions[VertID] = FVector3f(V.Position.Y * FWowCoordinate::SCALE,
+                                             V.Position.X * FWowCoordinate::SCALE,
                                              V.Position.Z * FWowCoordinate::SCALE);
 
         FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
         VertexInstanceIDs[i] = InstID;
 
-        FVector3f Normal(-V.Normal.X, V.Normal.Y, V.Normal.Z);
+        FVector3f Normal(V.Normal.Y, V.Normal.X, V.Normal.Z);
         Normal.Normalize();
         VertexInstanceNormals[InstID] = Normal;
 
@@ -297,14 +365,29 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
         VertexInstanceUVs.Set(InstID, 0, FVector2f(V.TexCoord.X, V.TexCoord.Y));
     }
 
-    // Create triangles
-    for (int32 i = 0; i < NumTris; ++i)
+    // Create triangles per batch (polygon group)
+    for (int32 BatchIdx = 0; BatchIdx < Batches.Num(); ++BatchIdx)
     {
-        TArray<FVertexInstanceID> TriVerts;
-        TriVerts.Add(VertexInstanceIDs[Data.Indices[i * 3]]);
-        TriVerts.Add(VertexInstanceIDs[Data.Indices[i * 3 + 1]]);
-        TriVerts.Add(VertexInstanceIDs[Data.Indices[i * 3 + 2]]);
-        MeshDesc.CreatePolygon(PolyGroup, TriVerts);
+        const FMaterialBatch& Batch = Batches[BatchIdx];
+        int32 NumBatchTris = Batch.NumIndices / 3;
+
+        for (int32 t = 0; t < NumBatchTris; ++t)
+        {
+            int32 BaseIdx = Batch.StartIndex + t * 3;
+            if (BaseIdx + 2 >= Data.Indices.Num()) break;
+
+            uint16 I0 = Data.Indices[BaseIdx];
+            uint16 I1 = Data.Indices[BaseIdx + 1];
+            uint16 I2 = Data.Indices[BaseIdx + 2];
+
+            if (I0 >= NumVerts || I1 >= NumVerts || I2 >= NumVerts) continue;
+
+            TArray<FVertexInstanceID> TriVerts;
+            TriVerts.Add(VertexInstanceIDs[I0]);
+            TriVerts.Add(VertexInstanceIDs[I1]);
+            TriVerts.Add(VertexInstanceIDs[I2]);
+            MeshDesc.CreatePolygon(PolyGroups[BatchIdx], TriVerts);
+        }
     }
 
     // Build static mesh from description
@@ -316,36 +399,31 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     Params.bFastBuild = true;
     StaticMesh->BuildFromMeshDescriptions(MeshDescs, Params);
 
-    // Apply material with first texture
-    if (Data.TexturePaths.Num() > 0 && Mpq && Cache)
+    // Apply per-batch materials — use simple UV0-based material for doodads
+    UMaterial* BaseMat = FWowTerrainMaterial::GetSimpleObjectMaterial();
+    UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+
+    if (Mpq && Cache && BaseMat)
     {
-        const FString& TexPath = Data.TexturePaths[0];
-        if (!TexPath.IsEmpty())
+        for (int32 BatchIdx = 0; BatchIdx < Batches.Num(); ++BatchIdx)
         {
-            UTexture2D* Tex = Cache->FindTexture(TexPath);
-            if (!Tex)
+            const FMaterialBatch& Batch = Batches[BatchIdx];
+            UTexture2D* Tex = nullptr;
+
+            if (Batch.TextureIndex >= 0 && Batch.TextureIndex < Data.TexturePaths.Num())
             {
-                TArray<uint8> BlpRaw;
-                if (Mpq->ReadFile(TexPath, BlpRaw))
-                {
-                    FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
-                    if (BlpData.bIsValid)
-                    {
-                        Tex = FWowTextureFactory::CreateTexture(BlpData, TexPath);
-                        if (Tex) Cache->CacheTexture(TexPath, Tex);
-                    }
-                }
+                Tex = LoadBlpTexture(Data.TexturePaths[Batch.TextureIndex], Mpq, Cache);
             }
 
             if (Tex)
             {
-                UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
-                if (BaseMat)
-                {
-                    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, StaticMesh);
-                    MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
-                    StaticMesh->SetMaterial(0, MID);
-                }
+                UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, StaticMesh);
+                MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
+                StaticMesh->SetMaterial(BatchIdx, MID);
+            }
+            else if (FallbackMat)
+            {
+                StaticMesh->SetMaterial(BatchIdx, FallbackMat);
             }
         }
     }
@@ -427,7 +505,8 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
             FVector UEPos = FWowCoordinate::AdtToUE(
                 Placement->Position.X, Placement->Position.Y, Placement->Position.Z);
             float ScaleVal = Placement->GetScaleFloat();
-            FRotator Rot(0.0f, -Placement->Rotation.Y, 0.0f);
+            FRotator Rot = FWowCoordinate::WowRotationToUE(
+                Placement->Rotation.X, Placement->Rotation.Y, Placement->Rotation.Z);
 
             FTransform InstanceTransform(Rot, UEPos, FVector(ScaleVal));
             HISMC->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
@@ -446,7 +525,9 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
 
 bool FWowDoodadManager::ShouldUseSkeletalMesh(const FM2Data& Data)
 {
-    return Data.HasBones() && Data.HasAnimationData() && Data.Bones.Num() > 1;
+    // Temporarily disabled: skeletal mesh GPU skin crashes on some M2 models
+    return false;
+    // return Data.HasBones() && Data.HasAnimationData() && Data.Bones.Num() > 1;
 }
 
 USkeletalMesh* FWowDoodadManager::GetOrCreateSkeletalMesh(const FString& M2Path, FMpqManager* Mpq, FWowAssetCache* Cache)

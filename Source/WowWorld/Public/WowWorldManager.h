@@ -91,11 +91,11 @@ public:
 
     /** Maximum number of active WMO group components. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
-    int32 MaxActiveWmoGroups = 100;
+    int32 MaxActiveWmoGroups = 2000;
 
     /** Skip WMOs with more groups than this to avoid GPU overload. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WoW|Streaming")
-    int32 MaxWmoGroupsPerObject = 20;
+    int32 MaxWmoGroupsPerObject = 100;
 
 private:
     TUniquePtr<FMpqManager> MpqManager;

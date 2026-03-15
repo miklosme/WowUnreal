@@ -437,3 +437,101 @@ UTexture2D* FWowTerrainMaterial::LoadBlpTexture(const FString& Path, FMpqManager
 
     return Tex;
 }
+
+UMaterial* FWowTerrainMaterial::GetSimpleObjectMaterial()
+{
+    static UMaterial* CachedMat = nullptr;
+    if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+
+    // Try loading pre-compiled version first
+    const TCHAR* MatPaths[] = {
+        TEXT("/Game/Wow/Materials/M_WowSimpleObject"),
+        TEXT("/Game/Materials/M_WowSimpleObject")
+    };
+    for (const TCHAR* Path : MatPaths)
+    {
+        FSoftObjectPath MatPath(FString(Path) + TEXT(".") + FPaths::GetBaseFilename(Path));
+        if (MatPath.ResolveObject() || FPackageName::DoesPackageExist(MatPath.GetLongPackageName()))
+        {
+            CachedMat = LoadObject<UMaterial>(nullptr, Path);
+            if (CachedMat)
+            {
+                UE_LOG(LogTerrainMat, Log, TEXT("Loaded simple object material from %s"), Path);
+#if WITH_EDITOR
+                if (!CachedMat->IsComplete())
+                {
+                    CachedMat->ForceRecompileForRendering();
+                    if (GShaderCompilingManager)
+                        GShaderCompilingManager->FinishAllCompilation();
+                }
+#endif
+                return CachedMat;
+            }
+        }
+    }
+
+#if WITH_EDITOR
+    // Build a simple single-texture material: samples UV0 with one texture parameter
+    UE_LOG(LogTerrainMat, Log, TEXT("Creating simple object material (UV0-based)"));
+
+    UPackage* MatPackage = CreatePackage(TEXT("/Game/Materials/M_WowSimpleObject"));
+    CachedMat = NewObject<UMaterial>(MatPackage, TEXT("M_WowSimpleObject"),
+        RF_Public | RF_Standalone);
+    CachedMat->SetShadingModel(MSM_DefaultLit);
+    CachedMat->TwoSided = false;
+
+    UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
+
+    auto& Exprs = CachedMat->GetExpressionCollection();
+
+    // UV0 for texture sampling (standard object UVs)
+    auto* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(CachedMat);
+    TexCoord->CoordinateIndex = 0;
+    TexCoord->MaterialExpressionEditorX = -400;
+    TexCoord->MaterialExpressionEditorY = 0;
+    Exprs.AddExpression(TexCoord);
+
+    // Single texture parameter
+    auto* Sampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
+    Sampler->ParameterName = FName(TEXT("Layer0Texture"));
+    Sampler->SamplerType = SAMPLERTYPE_Color;
+    Sampler->Texture = WhiteTex;
+    Sampler->Coordinates.Connect(0, TexCoord);
+    Sampler->MaterialExpressionEditorX = -200;
+    Sampler->MaterialExpressionEditorY = 0;
+    Exprs.AddExpression(Sampler);
+
+    CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, Sampler);
+
+    auto* RoughnessConst = NewObject<UMaterialExpressionConstant>(CachedMat);
+    RoughnessConst->R = 0.8f;
+    RoughnessConst->MaterialExpressionEditorX = 0;
+    RoughnessConst->MaterialExpressionEditorY = 200;
+    Exprs.AddExpression(RoughnessConst);
+    CachedMat->GetEditorOnlyData()->Roughness.Connect(0, RoughnessConst);
+
+    CachedMat->PreEditChange(nullptr);
+    CachedMat->PostEditChange();
+    CachedMat->ForceRecompileForRendering();
+
+    if (GShaderCompilingManager)
+    {
+        GShaderCompilingManager->FinishAllCompilation();
+        UE_LOG(LogTerrainMat, Log, TEXT("Simple object material compiled, IsComplete=%d"),
+            CachedMat->IsComplete() ? 1 : 0);
+    }
+
+    // Save to disk
+    {
+        FString PackageFilename = FPackageName::LongPackageNameToFilename(
+            TEXT("/Game/Materials/M_WowSimpleObject"), FPackageName::GetAssetPackageExtension());
+        FSavePackageArgs SaveArgs;
+        SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+        UPackage::SavePackage(MatPackage, CachedMat, *PackageFilename, SaveArgs);
+    }
+#else
+    CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
+#endif
+
+    return CachedMat;
+}

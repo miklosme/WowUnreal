@@ -136,16 +136,16 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                     uint32 Idx = y * Liq.XVerts + x;
                     float Height = (Idx < (uint32)Liq.Vertices.Num()) ? Liq.Vertices[Idx].Height : 0.0f;
 
-                    // WMO liquid positions are in WMO local space
-                    // pos.x + UNITSIZE * x, height, pos.z - UNITSIZE * y (noggit3 convention)
-                    // UNITSIZE for WMO MLIQ is typically 1/8 of a chunk = 4.1667 units
+                    // MLIQ grid in WMO model space (X=east, Y=north, Z=up)
                     constexpr float LIQUID_UNIT = 4.1667f;
-                    float WmoX = Liq.Position.X + LIQUID_UNIT * x;
-                    float WmoY = Height;
-                    float WmoZ = Liq.Position.Z - LIQUID_UNIT * y;
+                    float ModelX = Liq.Position.X + LIQUID_UNIT * x;
+                    float ModelY = Liq.Position.Y + LIQUID_UNIT * y;
+                    float ModelZ = Height;
 
-                    // WMO local coords use same axis convention as general WoW
-                    LiqVerts.Add(FVector3f(WmoX, WmoZ, WmoY));
+                    // WMO model → UE local: (Y, X, Z) * SCALE (same as group mesh)
+                    LiqVerts.Add(FVector3f(ModelY * FWowCoordinate::SCALE,
+                                           ModelX * FWowCoordinate::SCALE,
+                                           ModelZ * FWowCoordinate::SCALE));
 
                     float U = (float)x / FMath::Max(1u, Liq.XVerts - 1);
                     float V = (float)y / FMath::Max(1u, Liq.YVerts - 1);
@@ -318,13 +318,16 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     {
         const FVector& P = GroupData.Vertices[i];
         FVertexID VertID = MeshDesc.CreateVertex();
-        VertexPositions[VertID] = FVector3f(-P.X * FWowCoordinate::SCALE, P.Y * FWowCoordinate::SCALE, P.Z * FWowCoordinate::SCALE);
+        // WMO model space → UE local space: (Y, X, Z) * SCALE
+        // Derivation: WMO→ADT is (X,Z,-Y) [noggit3], ADT→UE is (-Z,X,Y)
+        // Combined: UE.X=WMO.Y, UE.Y=WMO.X, UE.Z=WMO.Z (det=-1 handles RH→LH winding)
+        VertexPositions[VertID] = FVector3f(P.Y * FWowCoordinate::SCALE, P.X * FWowCoordinate::SCALE, P.Z * FWowCoordinate::SCALE);
 
         FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
         VertexInstanceIDs[i] = InstID;
 
         FVector3f N = (i < GroupData.Normals.Num())
-            ? FVector3f(-GroupData.Normals[i].X, GroupData.Normals[i].Y, GroupData.Normals[i].Z)
+            ? FVector3f(GroupData.Normals[i].Y, GroupData.Normals[i].X, GroupData.Normals[i].Z)
             : FVector3f(0, 0, 1);
         N.Normalize();
         VertexInstanceNormals[InstID] = N;
@@ -397,8 +400,8 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     NaniteSettings.bEnabled = true;
     SM->SetNaniteSettings(NaniteSettings);
 
-    // Apply materials per batch
-    UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
+    // Apply materials per batch — use simple UV0-based material for WMOs
+    UMaterial* BaseMat = FWowTerrainMaterial::GetSimpleObjectMaterial();
     UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
 
     if (GroupData.Batches.Num() > 0)
@@ -415,23 +418,23 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
                     Tex = Cache->FindTexture(WmoMat.TexturePath1);
                     if (!Tex)
                     {
-                        TArray<uint8> BlpRaw;
-                        if (Mpq->ReadFile(WmoMat.TexturePath1, BlpRaw))
-                        {
-                            FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
-                            if (BlpData.bIsValid)
-                            {
-                                Tex = FWowTextureFactory::CreateTexture(BlpData, WmoMat.TexturePath1);
-                                if (Tex) Cache->CacheTexture(WmoMat.TexturePath1, Tex);
-                            }
-                        }
+                        Tex = FWowTerrainMaterial::LoadBlpTexture(WmoMat.TexturePath1, Mpq, Cache);
+                    }
+
+                    static bool bLoggedFirstWmoTex = false;
+                    if (!bLoggedFirstWmoTex)
+                    {
+                        bLoggedFirstWmoTex = true;
+                        UE_LOG(LogWowWmo, Log, TEXT("WMO batch %d tex: '%s' -> %s"),
+                            BatchIdx, *WmoMat.TexturePath1,
+                            Tex ? *FString::Printf(TEXT("%dx%d"), Tex->GetSizeX(), Tex->GetSizeY()) : TEXT("FAILED"));
                     }
                 }
 
                 if (Tex)
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
-                    MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
+                    MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
                     SM->SetMaterial(BatchIdx, MID);
                 }
                 else if (FallbackMat)

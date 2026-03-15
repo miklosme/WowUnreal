@@ -26,13 +26,16 @@ public:
         FWowAssetCache* Cache,
         UObject* Outer);
 
-    /** Get or create the base terrain material */
+    /** Get or create the base terrain material (4-layer splat, uses UV0=alpha, UV1=texture) */
     static UMaterial* GetBaseMaterial();
+
+    /** Get or create a simple single-texture material for WMOs/doodads (uses UV0 for texture) */
+    static UMaterial* GetSimpleObjectMaterial();
+
+    /** Load a BLP texture from MPQ, with caching */
+    static UTexture2D* LoadBlpTexture(const FString& Path, FMpqManager* Mpq, FWowAssetCache* Cache);
 
 private:
     /** Create a UTexture2D from alpha map data (64x64 grayscale) */
     static UTexture2D* CreateAlphaTexture(const TArray<uint8>& AlphaData, const FString& Name);
-
-    /** Load a BLP texture from MPQ, with caching */
-    static UTexture2D* LoadBlpTexture(const FString& Path, FMpqManager* Mpq, FWowAssetCache* Cache);
 };
