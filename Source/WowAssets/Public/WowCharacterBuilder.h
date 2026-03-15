@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "WowCharacterTexture.h"
 #include "WowEquipmentManager.h"
+#include "WowSkeletalMeshBuilder.h"
 
 class FMpqManager;
 class FWowAssetCache;
@@ -12,7 +13,8 @@ class UWorld;
 /**
  * Builds and spawns WoW character models from race/gender/customization data.
  * Uses ChrRaces.dbc to map race+gender to M2 model paths, then loads the skeletal mesh.
- * Supports composite character textures (skin+face+underwear) and equipment attachment.
+ * Supports composite character textures (skin+face+underwear), equipment attachment,
+ * and geoset (submesh) visibility for hair, facial hair, gloves, boots, etc.
  */
 class WOWASSETS_API FWowCharacterBuilder
 {
@@ -63,9 +65,26 @@ public:
     static AActor* SpawnCreatureByDisplayId(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
         uint32 DisplayId, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
 
+    /**
+     * Compute the default visible geoset set for a character based on customization.
+     * Returns a map from geoset group -> visible variant.
+     * Groups not in the map default to variant 0 (show default/no equipment).
+     */
+    static TMap<uint16, uint16> ComputeDefaultGeosets(const FWowCharacterTexture::FCustomization& Customization);
+
+    /**
+     * Apply geoset visibility to a skeletal mesh component.
+     * Shows sections whose geoset matches the desired variant for their group;
+     * hides all others. VisibleGeosets maps group -> variant to show.
+     */
+    static void ApplyGeosetVisibility(USkeletalMeshComponent* MeshComp,
+        const TArray<FGeosetSectionInfo>& GeosetInfo,
+        const TMap<uint16, uint16>& VisibleGeosets);
+
 private:
     /** Internal: load M2, build skeleton + mesh + anims, spawn actor */
     static AActor* SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
         const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale = 1.0f,
-        UTexture2D* OverrideTexture = nullptr);
+        UTexture2D* OverrideTexture = nullptr,
+        const FWowCharacterTexture::FCustomization* Customization = nullptr);
 };

@@ -39,6 +39,7 @@ static TMap<FString, TSharedPtr<FM2Data>> CharM2Cache;
 static FCriticalSection CharCacheLock;
 static TMap<FString, TWeakObjectPtr<USkeleton>> CharSkeletonCache;
 static TMap<FString, TArray<TWeakObjectPtr<UAnimSequence>>> CharAnimCache;
+static TMap<FString, TArray<FGeosetSectionInfo>> CharGeosetCache;
 
 namespace
 {
@@ -278,6 +279,105 @@ UTexture2D* ResolveCreatureTextureOverride(FMpqManager* Mpq, FWowAssetCache* Cac
 }
 }
 
+TMap<uint16, uint16> FWowCharacterBuilder::ComputeDefaultGeosets(const FWowCharacterTexture::FCustomization& Customization)
+{
+    TMap<uint16, uint16> Result;
+
+    // Group 0 (body/skin): always show variant 0
+    Result.Add(0, 0);
+
+    // Group 1 (hair geoset): variant = hairStyle + 1 (variant 0 = bald/no hair mesh)
+    // HairStyle 0 is the first style, which maps to geoset variant 1
+    Result.Add(1, static_cast<uint16>(Customization.HairStyle + 1));
+
+    // Group 2 (facial hair): variant = facialHairStyle + 1 (variant 0 = no facial hair mesh)
+    // FacialHairStyle 0 = first style -> geoset variant 1
+    if (Customization.FacialHairStyle > 0)
+    {
+        Result.Add(2, static_cast<uint16>(Customization.FacialHairStyle));
+    }
+    else
+    {
+        // No facial hair
+        Result.Add(2, 0);
+    }
+
+    // Group 3 (unused for characters typically): variant 0
+    Result.Add(3, 0);
+
+    // Group 4 (gloves): variant 0 = show bare hands (no glove equipment)
+    Result.Add(4, 0);
+
+    // Group 5 (boots): variant 0 = show bare feet
+    Result.Add(5, 0);
+
+    // Group 6 (unused): variant 0
+    Result.Add(6, 0);
+
+    // Group 7 (ears): variant 0 = show ears (hidden by some helmets)
+    Result.Add(7, 0);
+
+    // Group 8 (tabard): variant 0 = no tabard
+    Result.Add(8, 0);
+
+    // Group 9 (robe / legs lower): variant 0 = show normal legs
+    Result.Add(9, 0);
+
+    // Groups 10-18 (cape, kneepads, chest, etc.): variant 0
+    for (uint16 g = 10; g <= 18; ++g)
+    {
+        Result.Add(g, 0);
+    }
+
+    return Result;
+}
+
+void FWowCharacterBuilder::ApplyGeosetVisibility(USkeletalMeshComponent* MeshComp,
+    const TArray<FGeosetSectionInfo>& GeosetInfo,
+    const TMap<uint16, uint16>& VisibleGeosets)
+{
+    if (!MeshComp || GeosetInfo.Num() == 0)
+    {
+        return;
+    }
+
+    int32 VisibleCount = 0;
+    int32 HiddenCount = 0;
+
+    for (const FGeosetSectionInfo& Info : GeosetInfo)
+    {
+        bool bShouldBeVisible = false;
+
+        const uint16* DesiredVariant = VisibleGeosets.Find(Info.GeosetGroup);
+        if (DesiredVariant)
+        {
+            // Show this section if its variant matches the desired variant for this group
+            bShouldBeVisible = (Info.GeosetVariant == *DesiredVariant);
+        }
+        else
+        {
+            // Groups not in the map: show variant 0 (default) only
+            bShouldBeVisible = (Info.GeosetVariant == 0);
+        }
+
+        // MaterialID = SectionIndex since we have one material slot per section.
+        // SectionIndex param = INDEX_NONE means use MaterialID directly.
+        MeshComp->ShowMaterialSection(Info.SectionIndex, Info.SectionIndex, bShouldBeVisible, 0);
+
+        if (bShouldBeVisible)
+        {
+            VisibleCount++;
+        }
+        else
+        {
+            HiddenCount++;
+        }
+    }
+
+    UE_LOG(LogWowCharacter, Log, TEXT("Applied geoset visibility: %d visible, %d hidden (of %d sections)"),
+        VisibleCount, HiddenCount, GeosetInfo.Num());
+}
+
 FString FWowCharacterBuilder::GetCharacterModelPath(ERace Race, EGender Gender)
 {
     const FDbcStore& Dbc = FDbcStore::Get();
@@ -311,7 +411,7 @@ AActor* FWowCharacterBuilder::SpawnCharacter(UWorld* World, FMpqManager* Mpq, FW
     Cust.Gender = static_cast<uint32>(Gender);
     UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Cust);
 
-    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, CompositeTex);
+    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, CompositeTex, &Cust);
 }
 
 AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
@@ -326,8 +426,8 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
     // Build composite texture with full customization
     UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Params.Customization);
 
-    // Spawn base character
-    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, CompositeTex);
+    // Spawn base character with geoset visibility
+    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, CompositeTex, &Params.Customization);
     if (!Actor) return nullptr;
 
     // Attach equipment
@@ -411,7 +511,7 @@ AActor* FWowCharacterBuilder::SpawnCreatureByDisplayId(UWorld* World, FMpqManage
 
 AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
     const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale,
-    UTexture2D* OverrideTexture)
+    UTexture2D* OverrideTexture, const FWowCharacterTexture::FCustomization* Customization)
 {
     if (!World || !Mpq) return nullptr;
 
@@ -489,12 +589,28 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
         }
 
         USkeletalMesh* SkeletalMesh = Cache ? Cache->FindSkelMesh(NormPath) : nullptr;
+        TArray<FGeosetSectionInfo> GeosetInfo;
         if (!SkeletalMesh && Skeleton)
         {
-            SkeletalMesh = FWowSkeletalMeshBuilder::CreateSkeletalMesh(*M2Data, Skeleton, ModelPath, Mpq, Cache);
+            SkeletalMesh = FWowSkeletalMeshBuilder::CreateSkeletalMesh(*M2Data, Skeleton, ModelPath, Mpq, Cache, &GeosetInfo);
             if (SkeletalMesh && Cache)
             {
                 Cache->CacheSkelMesh(NormPath, SkeletalMesh);
+            }
+            // Cache geoset info for this model
+            if (GeosetInfo.Num() > 0)
+            {
+                FScopeLock Lock(&CharCacheLock);
+                CharGeosetCache.Add(NormPath, GeosetInfo);
+            }
+        }
+        else
+        {
+            // Try to load cached geoset info
+            FScopeLock Lock(&CharCacheLock);
+            if (TArray<FGeosetSectionInfo>* CachedGeoset = CharGeosetCache.Find(NormPath))
+            {
+                GeosetInfo = *CachedGeoset;
             }
         }
 
@@ -513,7 +629,28 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             {
                 TextureToApply = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[0]);
             }
-            ApplyTexturedMaterial(SkelMesh, TextureToApply);
+
+            // Apply the same textured material to all sections
+            if (UMaterial* BaseMat = GetCharacterMaterial())
+            {
+                const int32 NumMatSlots = SkeletalMesh->GetMaterials().Num();
+                for (int32 MatIdx = 0; MatIdx < NumMatSlots; ++MatIdx)
+                {
+                    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SkelMesh);
+                    if (TextureToApply)
+                    {
+                        MID->SetTextureParameterValue(TEXT("BaseTexture"), TextureToApply);
+                    }
+                    SkelMesh->SetMaterial(MatIdx, MID);
+                }
+            }
+
+            // Apply geoset visibility for character models
+            if (Customization && GeosetInfo.Num() > 0)
+            {
+                TMap<uint16, uint16> VisibleGeosets = ComputeDefaultGeosets(*Customization);
+                ApplyGeosetVisibility(SkelMesh, GeosetInfo, VisibleGeosets);
+            }
 
             TArray<TWeakObjectPtr<UAnimSequence>> CachedAnimations;
             bool bNeedCreateAnimations = true;

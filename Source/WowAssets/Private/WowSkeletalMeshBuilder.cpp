@@ -168,7 +168,8 @@ USkeleton* FWowSkeletalMeshBuilder::CreateSkeleton(const FM2Data& Data, const FS
 }
 
 USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, USkeleton* Skeleton,
-	const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache)
+	const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
+	TArray<FGeosetSectionInfo>* OutGeosetInfo)
 {
 	if (!Skeleton || Data.Vertices.Num() == 0 || Data.Indices.Num() == 0)
 	{
@@ -246,7 +247,41 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	FSkeletalMeshAttributes SkelAttrs(MeshDesc);
 	SkelAttrs.Register();
 
-	FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+	// Create one polygon group per render pass for per-geoset visibility control.
+	// Each render pass references a submesh (with a geoset ID) — we build a separate
+	// mesh section for each so the character builder can show/hide individual geosets.
+	const int32 NumRenderPasses = Data.RenderPasses.Num();
+	const bool bHasRenderPasses = NumRenderPasses > 0 && Data.Submeshes.Num() > 0;
+	const int32 NumSections = bHasRenderPasses ? NumRenderPasses : 1;
+
+	TArray<FPolygonGroupID> PolyGroups;
+	PolyGroups.SetNum(NumSections);
+	for (int32 i = 0; i < NumSections; ++i)
+	{
+		PolyGroups[i] = MeshDesc.CreatePolygonGroup();
+	}
+
+	// Output geoset info for each section
+	if (OutGeosetInfo)
+	{
+		OutGeosetInfo->SetNum(NumSections);
+		for (int32 i = 0; i < NumSections; ++i)
+		{
+			FGeosetSectionInfo& Info = (*OutGeosetInfo)[i];
+			Info.SectionIndex = i;
+			if (bHasRenderPasses)
+			{
+				const FM2RenderPass& Pass = Data.RenderPasses[i];
+				if (Pass.SubmeshIndex < static_cast<uint16>(Data.Submeshes.Num()))
+				{
+					Info.GeosetId = Data.Submeshes[Pass.SubmeshIndex].Id;
+					Info.GeosetGroup = Info.GeosetId / 100;
+					Info.GeosetVariant = Info.GeosetId % 100;
+				}
+			}
+		}
+	}
+
 	MeshDesc.ReserveNewVertices(NumVerts);
 	MeshDesc.ReserveNewVertexInstances(NumVerts);
 	MeshDesc.ReserveNewPolygons(NumTris);
@@ -313,22 +348,69 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		VertexUVs.Set(InstID, 0, FVector2f(V.TexCoord.X, V.TexCoord.Y));
 	}
 
-	for (int32 i = 0; i < NumTris; ++i)
+	// Build triangles per-section. When we have render passes, each render pass
+	// references a submesh with a triangle range. We emit those triangles into
+	// the corresponding polygon group so UE builds separate mesh sections.
+	if (bHasRenderPasses)
 	{
-		TArray<FVertexInstanceID> TriVerts;
-		TriVerts.Reserve(3);
-		for (int32 Corner = 0; Corner < 3; ++Corner)
+		for (int32 PassIdx = 0; PassIdx < NumRenderPasses; ++PassIdx)
 		{
-			const int32 VertexIndex = Data.Indices[i * 3 + Corner];
-			if (VertexInstanceIDs.IsValidIndex(VertexIndex))
+			const FM2RenderPass& Pass = Data.RenderPasses[PassIdx];
+			if (Pass.SubmeshIndex >= static_cast<uint16>(Data.Submeshes.Num()))
 			{
-				TriVerts.Add(VertexInstanceIDs[VertexIndex]);
+				continue;
+			}
+
+			const FM2Submesh& Submesh = Data.Submeshes[Pass.SubmeshIndex];
+			const int32 TriStart = Submesh.StartTriangle / 3;
+			const int32 TriCount = Submesh.NumTriangles / 3;
+
+			for (int32 t = 0; t < TriCount; ++t)
+			{
+				const int32 TriIdx = TriStart + t;
+				if (TriIdx * 3 + 2 >= Data.Indices.Num())
+				{
+					break;
+				}
+
+				TArray<FVertexInstanceID> TriVerts;
+				TriVerts.Reserve(3);
+				for (int32 Corner = 0; Corner < 3; ++Corner)
+				{
+					const int32 VertexIndex = Data.Indices[TriIdx * 3 + Corner];
+					if (VertexInstanceIDs.IsValidIndex(VertexIndex))
+					{
+						TriVerts.Add(VertexInstanceIDs[VertexIndex]);
+					}
+				}
+
+				if (TriVerts.Num() == 3)
+				{
+					MeshDesc.CreatePolygon(PolyGroups[PassIdx], TriVerts);
+				}
 			}
 		}
-
-		if (TriVerts.Num() == 3)
+	}
+	else
+	{
+		// Fallback: single polygon group for all triangles
+		for (int32 i = 0; i < NumTris; ++i)
 		{
-			MeshDesc.CreatePolygon(PolyGroup, TriVerts);
+			TArray<FVertexInstanceID> TriVerts;
+			TriVerts.Reserve(3);
+			for (int32 Corner = 0; Corner < 3; ++Corner)
+			{
+				const int32 VertexIndex = Data.Indices[i * 3 + Corner];
+				if (VertexInstanceIDs.IsValidIndex(VertexIndex))
+				{
+					TriVerts.Add(VertexInstanceIDs[VertexIndex]);
+				}
+			}
+
+			if (TriVerts.Num() == 3)
+			{
+				MeshDesc.CreatePolygon(PolyGroups[0], TriVerts);
+			}
 		}
 	}
 
@@ -344,10 +426,16 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		BonePoses[BoneID] = RefSkel.GetRefBonePose()[BoneIndex];
 	}
 
-	// Materials MUST be set BEFORE Build() — otherwise the mesh renders black/invisible
-	if (SkelMesh->GetMaterials().Num() == 0)
+	// Materials MUST be set BEFORE Build() — otherwise the mesh renders black/invisible.
+	// One material slot per section (polygon group) so UE maps sections correctly.
 	{
-		SkelMesh->GetMaterials().Add(FSkeletalMaterial(UMaterial::GetDefaultMaterial(MD_Surface), true, false, FName(TEXT("Default"))));
+		UMaterial* DefaultMat = UMaterial::GetDefaultMaterial(MD_Surface);
+		SkelMesh->GetMaterials().Reset();
+		for (int32 i = 0; i < NumSections; ++i)
+		{
+			FName SlotName = FName(*FString::Printf(TEXT("Section_%d"), i));
+			SkelMesh->GetMaterials().Add(FSkeletalMaterial(DefaultMat, true, false, SlotName));
+		}
 	}
 
 	// The LODModel MUST exist in ImportedModel BEFORE CommitMeshDescription is called.

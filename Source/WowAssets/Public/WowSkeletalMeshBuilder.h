@@ -9,6 +9,18 @@ class FMpqManager;
 class FWowAssetCache;
 
 /**
+ * Per-section geoset info returned by CreateSkeletalMesh.
+ * SectionIndex maps to the USkeletalMesh material section index.
+ */
+struct WOWASSETS_API FGeosetSectionInfo
+{
+	int32 SectionIndex = 0;   // Mesh section index (polygon group)
+	uint16 GeosetId = 0;     // Raw geoset ID from M2 submesh (e.g. 0, 1, 101, 201, 401, 801)
+	uint16 GeosetGroup = 0;  // GeosetId / 100 (0=body, 1=hair, 2=facial, 4=gloves, 8=tabard, etc.)
+	uint16 GeosetVariant = 0; // GeosetId % 100 (0=default, 1+=specific customization/equipment)
+};
+
+/**
  * Builds USkeleton, USkeletalMesh, and UAnimSequence assets from parsed M2 data.
  */
 class WOWASSETS_API FWowSkeletalMeshBuilder
@@ -17,9 +29,12 @@ public:
 	/** Build a USkeleton from M2 bone hierarchy. Returns nullptr on failure. */
 	static USkeleton* CreateSkeleton(const FM2Data& Data, const FString& ModelName);
 
-	/** Build a USkeletalMesh from M2 vertices with bone weights. */
+	/** Build a USkeletalMesh from M2 vertices with bone weights.
+	 *  One mesh section per render pass, enabling per-geoset visibility control.
+	 *  OutGeosetInfo receives the geoset ID mapping for each section. */
 	static USkeletalMesh* CreateSkeletalMesh(const FM2Data& Data, USkeleton* Skeleton,
-		const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache);
+		const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
+		TArray<FGeosetSectionInfo>* OutGeosetInfo = nullptr);
 
 	/** Build UAnimSequence assets for all parsed animation tracks. */
 	static TArray<UAnimSequence*> CreateAnimations(const FM2Data& Data, USkeleton* Skeleton,
