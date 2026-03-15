@@ -1,10 +1,14 @@
 #include "WowCharacterBuilder.h"
 #include "WowSkeletalMeshBuilder.h"
+#include "WowCharacterTexture.h"
+#include "WowEquipmentManager.h"
 #include "WowAssetCache.h"
 #include "WowTextureFactory.h"
 #include "Mpq/MpqManager.h"
 #include "Formats/M2Parser.h"
 #include "Formats/M2Types.h"
+#include "Formats/BlpParser.h"
+#include "Formats/BlpTypes.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
@@ -12,6 +16,9 @@
 #include "Animation/Skeleton.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "ProceduralMeshComponent.h"
+#include "Coord/WowCoordinate.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowCharacter, Log, All);
 
@@ -23,7 +30,6 @@ static TMap<FString, TArray<TWeakObjectPtr<UAnimSequence>>> CharAnimCache;
 
 FString FWowCharacterBuilder::GetCharacterModelPath(ERace Race, EGender Gender)
 {
-    // Look up ChrRaces.dbc for the ClientFileString
     const FDbcStore& Dbc = FDbcStore::Get();
     uint32 RaceId = static_cast<uint32>(Race);
     const FChrRacesDbcEntry* RaceEntry = Dbc.ChrRaces().GetById(RaceId);
@@ -34,8 +40,6 @@ FString FWowCharacterBuilder::GetCharacterModelPath(ERace Race, EGender Gender)
         return FString();
     }
 
-    // WoW 3.3.5 character model path convention:
-    // Character\{ClientFileString}\{Gender}\{ClientFileString}{Gender}.m2
     FString RaceStr = RaceEntry->ClientFileString;
     FString GenderStr = (Gender == EGender::Male) ? TEXT("Male") : TEXT("Female");
 
@@ -46,16 +50,77 @@ AActor* FWowCharacterBuilder::SpawnCharacter(UWorld* World, FMpqManager* Mpq, FW
     ERace Race, EGender Gender, const FVector& Location, const FRotator& Rotation)
 {
     FString ModelPath = GetCharacterModelPath(Race, Gender);
-    if (ModelPath.IsEmpty())
-    {
-        return nullptr;
-    }
+    if (ModelPath.IsEmpty()) return nullptr;
 
     UE_LOG(LogWowCharacter, Log, TEXT("Spawning character: Race=%d Gender=%d Model=%s"),
         static_cast<int32>(Race), static_cast<int32>(Gender), *ModelPath);
 
-    // Character models are in WoW units — scale to UE (100x)
-    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 100.0f);
+    // Build composite texture with default customization
+    FWowCharacterTexture::FCustomization Cust;
+    Cust.RaceId = static_cast<uint32>(Race);
+    Cust.Gender = static_cast<uint32>(Gender);
+    UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Cust);
+
+    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 100.0f, CompositeTex);
+}
+
+AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
+    const FCharacterParams& Params, const FVector& Location, const FRotator& Rotation)
+{
+    FString ModelPath = GetCharacterModelPath(Params.Race, Params.Gender);
+    if (ModelPath.IsEmpty()) return nullptr;
+
+    UE_LOG(LogWowCharacter, Log, TEXT("Spawning equipped character: Race=%d Gender=%d Equipment=%d slots"),
+        static_cast<int32>(Params.Race), static_cast<int32>(Params.Gender), Params.Equipment.Num());
+
+    // Build composite texture with full customization
+    UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Params.Customization);
+
+    // Spawn base character
+    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 100.0f, CompositeTex);
+    if (!Actor) return nullptr;
+
+    // Attach equipment
+    if (Params.Equipment.Num() > 0)
+    {
+        USkeletalMeshComponent* MeshComp = Actor->FindComponentByClass<USkeletalMeshComponent>();
+        if (MeshComp)
+        {
+            // Get the character's M2 data for attachment point bone lookup
+            FString NormPath = ModelPath.ToLower();
+            NormPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+            TSharedPtr<FM2Data> CharM2;
+            {
+                FScopeLock Lock(&CharCacheLock);
+                TSharedPtr<FM2Data>* Found = CharM2Cache.Find(NormPath);
+                if (Found) CharM2 = *Found;
+            }
+
+            if (CharM2)
+            {
+                for (const FEquipmentSlot& Slot : Params.Equipment)
+                {
+                    if (Slot.ItemDisplayId == 0) continue;
+
+                    USceneComponent* EquipComp = FWowEquipmentManager::AttachEquipment(
+                        Mpq, Cache, Slot.ItemDisplayId, Slot.AttachPoint, MeshComp, *CharM2);
+
+                    if (EquipComp)
+                    {
+                        UE_LOG(LogWowCharacter, Log, TEXT("Equipped item DisplayID=%d at attachment %d"),
+                            Slot.ItemDisplayId, static_cast<uint32>(Slot.AttachPoint));
+                    }
+                }
+            }
+            else
+            {
+                UE_LOG(LogWowCharacter, Warning, TEXT("No cached M2 data for equipment attachment: %s"), *NormPath);
+            }
+        }
+    }
+
+    return Actor;
 }
 
 AActor* FWowCharacterBuilder::SpawnCreatureByDisplayId(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
@@ -78,12 +143,8 @@ AActor* FWowCharacterBuilder::SpawnCreatureByDisplayId(UWorld* World, FMpqManage
     }
 
     FString ModelPath = ModelData->ModelPath;
-    if (ModelPath.IsEmpty())
-    {
-        return nullptr;
-    }
+    if (ModelPath.IsEmpty()) return nullptr;
 
-    // Replace .mdx with .m2 if needed
     if (ModelPath.EndsWith(TEXT(".mdx"), ESearchCase::IgnoreCase))
     {
         ModelPath = ModelPath.Left(ModelPath.Len() - 4) + TEXT(".m2");
@@ -97,111 +158,72 @@ AActor* FWowCharacterBuilder::SpawnCreatureByDisplayId(UWorld* World, FMpqManage
 }
 
 AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
-    const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale)
+    const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale,
+    UTexture2D* OverrideTexture)
 {
     if (!World || !Mpq) return nullptr;
 
     FString NormPath = ModelPath.ToLower();
     NormPath.ReplaceInline(TEXT("/"), TEXT("\\"));
 
-    // Check skel mesh cache first
-    USkeletalMesh* SkelMesh = Cache ? Cache->FindSkelMesh(NormPath) : nullptr;
-    USkeleton* Skeleton = nullptr;
-
-    if (!SkelMesh)
+    // Parse M2
+    TSharedPtr<FM2Data> M2Data;
     {
-        // Parse M2
-        TSharedPtr<FM2Data> M2Data;
-        {
-            FScopeLock Lock(&CharCacheLock);
-            TSharedPtr<FM2Data>* Found = CharM2Cache.Find(NormPath);
-            if (Found) M2Data = *Found;
-        }
-
-        if (!M2Data)
-        {
-            TArray<uint8> M2Raw;
-            if (!Mpq->ReadFile(ModelPath, M2Raw))
-            {
-                UE_LOG(LogWowCharacter, Warning, TEXT("Failed to read M2: %s"), *ModelPath);
-                return nullptr;
-            }
-
-            // Skin file
-            FString SkinPath = ModelPath;
-            if (SkinPath.EndsWith(TEXT(".m2"), ESearchCase::IgnoreCase))
-                SkinPath = SkinPath.Left(SkinPath.Len() - 3);
-            SkinPath += TEXT("00.skin");
-
-            TArray<uint8> SkinRaw;
-            Mpq->ReadFile(SkinPath, SkinRaw);
-
-            M2Data = MakeShared<FM2Data>(FM2Parser::Parse(M2Raw, SkinRaw));
-            if (!M2Data->bIsValid)
-            {
-                UE_LOG(LogWowCharacter, Warning, TEXT("Failed to parse M2: %s"), *ModelPath);
-                return nullptr;
-            }
-
-            FScopeLock Lock(&CharCacheLock);
-            CharM2Cache.Add(NormPath, M2Data);
-        }
-
-        // Build skeleton
-        {
-            FScopeLock Lock(&CharCacheLock);
-            auto* CachedSkel = CharSkeletonCache.Find(NormPath);
-            if (CachedSkel && CachedSkel->IsValid())
-                Skeleton = CachedSkel->Get();
-        }
-
-        if (!Skeleton)
-        {
-            Skeleton = FWowSkeletalMeshBuilder::CreateSkeleton(*M2Data, ModelPath);
-            if (!Skeleton)
-            {
-                UE_LOG(LogWowCharacter, Warning, TEXT("Failed to create skeleton: %s"), *ModelPath);
-                return nullptr;
-            }
-            Skeleton->AddToRoot();
-
-            FScopeLock Lock(&CharCacheLock);
-            CharSkeletonCache.Add(NormPath, Skeleton);
-        }
-
-        // Build skeletal mesh
-        SkelMesh = FWowSkeletalMeshBuilder::CreateSkeletalMesh(*M2Data, Skeleton, ModelPath, Mpq, Cache);
-        if (!SkelMesh)
-        {
-            UE_LOG(LogWowCharacter, Warning, TEXT("Failed to create skeletal mesh: %s"), *ModelPath);
-            return nullptr;
-        }
-        SkelMesh->AddToRoot();
-
-        if (Cache) Cache->CacheSkelMesh(NormPath, SkelMesh);
-
-        // Build animations
-        TArray<UAnimSequence*> Anims = FWowSkeletalMeshBuilder::CreateAnimations(*M2Data, Skeleton, ModelPath);
-        {
-            FScopeLock Lock(&CharCacheLock);
-            TArray<TWeakObjectPtr<UAnimSequence>> WeakAnims;
-            for (UAnimSequence* A : Anims)
-            {
-                if (A)
-                {
-                    A->AddToRoot();
-                    WeakAnims.Add(A);
-                }
-            }
-            CharAnimCache.Add(NormPath, MoveTemp(WeakAnims));
-        }
-
-        UE_LOG(LogWowCharacter, Log, TEXT("Built skeletal mesh for %s: %d verts, %d bones, %d anims, %d attachments"),
-            *ModelPath, M2Data->Vertices.Num(), M2Data->Bones.Num(),
-            Anims.Num(), M2Data->Attachments.Num());
+        FScopeLock Lock(&CharCacheLock);
+        TSharedPtr<FM2Data>* Found = CharM2Cache.Find(NormPath);
+        if (Found) M2Data = *Found;
     }
 
-    // Spawn actor
+    if (!M2Data)
+    {
+        TArray<uint8> M2Raw;
+        if (!Mpq->ReadFile(ModelPath, M2Raw))
+        {
+            UE_LOG(LogWowCharacter, Warning, TEXT("Failed to read M2: %s"), *ModelPath);
+            return nullptr;
+        }
+
+        FString SkinPath = ModelPath;
+        if (SkinPath.EndsWith(TEXT(".m2"), ESearchCase::IgnoreCase))
+            SkinPath = SkinPath.Left(SkinPath.Len() - 3);
+        SkinPath += TEXT("00.skin");
+
+        TArray<uint8> SkinRaw;
+        Mpq->ReadFile(SkinPath, SkinRaw);
+
+        M2Data = MakeShared<FM2Data>(FM2Parser::Parse(M2Raw, SkinRaw));
+        if (!M2Data->bIsValid)
+        {
+            UE_LOG(LogWowCharacter, Warning, TEXT("Failed to parse M2: %s"), *ModelPath);
+            return nullptr;
+        }
+
+        FScopeLock Lock(&CharCacheLock);
+        CharM2Cache.Add(NormPath, M2Data);
+    }
+
+    if (M2Data->Vertices.Num() == 0 || M2Data->Indices.Num() == 0)
+    {
+        UE_LOG(LogWowCharacter, Warning, TEXT("M2 has no geometry: %s"), *ModelPath);
+        return nullptr;
+    }
+
+    // Build skeleton (cached for future skeletal animation support)
+    {
+        FScopeLock Lock(&CharCacheLock);
+        auto* CachedSkel = CharSkeletonCache.Find(NormPath);
+        if (!CachedSkel || !CachedSkel->IsValid())
+        {
+            USkeleton* Skeleton = FWowSkeletalMeshBuilder::CreateSkeleton(*M2Data, ModelPath);
+            if (Skeleton)
+            {
+                Skeleton->AddToRoot();
+                CharSkeletonCache.Add(NormPath, Skeleton);
+            }
+        }
+    }
+
+    // Spawn actor with ProceduralMeshComponent (avoids skeletal mesh render pipeline issues)
     AActor* Actor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform(Rotation, Location));
     if (!Actor) return nullptr;
 
@@ -209,27 +231,82 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
     Actor->SetRootComponent(Root);
     Root->RegisterComponent();
 
-    USkeletalMeshComponent* MeshComp = NewObject<USkeletalMeshComponent>(Actor, TEXT("CharacterMesh"));
-    MeshComp->SetSkeletalMesh(SkelMesh);
-    MeshComp->SetupAttachment(Root);
-    MeshComp->SetWorldScale3D(FVector(Scale));
-    MeshComp->SetCastShadow(true);
-    MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-    MeshComp->RegisterComponent();
+    UProceduralMeshComponent* ProcMesh = NewObject<UProceduralMeshComponent>(Actor, TEXT("CharacterMesh"));
+    ProcMesh->SetupAttachment(Root);
+    ProcMesh->SetWorldScale3D(FVector(Scale));
+    ProcMesh->SetCastShadow(true);
+    ProcMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Play idle animation if available
+    // Build mesh section from M2 vertex data
+    const int32 NumVerts = M2Data->Vertices.Num();
+    const int32 NumIndices = M2Data->Indices.Num();
+
+    TArray<FVector> Vertices;
+    TArray<FVector> Normals;
+    TArray<FVector2D> UVs;
+    TArray<FColor> Colors;
+    TArray<int32> Triangles;
+
+    Vertices.SetNum(NumVerts);
+    Normals.SetNum(NumVerts);
+    UVs.SetNum(NumVerts);
+    Colors.SetNum(NumVerts);
+
+    for (int32 i = 0; i < NumVerts; ++i)
     {
-        FScopeLock Lock(&CharCacheLock);
-        auto* Anims = CharAnimCache.Find(NormPath);
-        if (Anims && Anims->Num() > 0 && (*Anims)[0].IsValid())
+        const FM2Vertex& V = M2Data->Vertices[i];
+        // Positions in WoW units (yards), component world scale handles UE conversion
+        Vertices[i] = FVector(V.Position.Y, V.Position.X, V.Position.Z);
+        Normals[i] = FVector(V.Normal.Y, V.Normal.X, V.Normal.Z).GetSafeNormal();
+        UVs[i] = FVector2D(V.TexCoord.X, V.TexCoord.Y);
+        Colors[i] = FColor::White;
+    }
+
+    Triangles.SetNum(NumIndices);
+    for (int32 i = 0; i < NumIndices; ++i)
+    {
+        Triangles[i] = M2Data->Indices[i];
+    }
+
+    ProcMesh->CreateMeshSection(0, Vertices, Triangles, Normals, UVs, Colors, TArray<FProcMeshTangent>(), false);
+
+    // Load and apply texture
+    UTexture2D* TexToApply = OverrideTexture;
+    if (!TexToApply && M2Data->TexturePaths.Num() > 0 && !M2Data->TexturePaths[0].IsEmpty())
+    {
+        const FString& TexPath = M2Data->TexturePaths[0];
+        TexToApply = Cache ? Cache->FindTexture(TexPath) : nullptr;
+        if (!TexToApply)
         {
-            MeshComp->PlayAnimation((*Anims)[0].Get(), true);
-            UE_LOG(LogWowCharacter, Log, TEXT("Playing animation on %s"), *ModelPath);
+            TArray<uint8> BlpRaw;
+            if (Mpq->ReadFile(TexPath, BlpRaw))
+            {
+                FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
+                if (BlpData.bIsValid)
+                {
+                    TexToApply = FWowTextureFactory::CreateTexture(BlpData, TexPath);
+                    if (TexToApply && Cache) Cache->CacheTexture(TexPath, TexToApply);
+                }
+            }
         }
     }
 
-    UE_LOG(LogWowCharacter, Log, TEXT("Spawned M2 actor: %s at %s (scale=%.1f)"),
-        *ModelPath, *Location.ToString(), Scale);
+    if (TexToApply)
+    {
+        UMaterial* BaseMat = UMaterial::GetDefaultMaterial(MD_Surface);
+        if (BaseMat)
+        {
+            UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, ProcMesh);
+            MID->SetTextureParameterValue(FName(TEXT("BaseColor")), TexToApply);
+            ProcMesh->SetMaterial(0, MID);
+            UE_LOG(LogWowCharacter, Log, TEXT("Applied texture to character: %s"), *ModelPath);
+        }
+    }
+
+    ProcMesh->RegisterComponent();
+
+    UE_LOG(LogWowCharacter, Log, TEXT("Spawned M2 actor: %s at %s (scale=%.1f, %d verts, %d tris)"),
+        *ModelPath, *Location.ToString(), Scale, NumVerts, NumIndices / 3);
 
     return Actor;
 }

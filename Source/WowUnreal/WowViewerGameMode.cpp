@@ -31,8 +31,15 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
 AWowViewerGameMode::AWowViewerGameMode()
 {
-    // Default to gameplay character pawn — fly camera used only for non-gameplay test scenes
-    DefaultPawnClass = AWowPlayerCharacter::StaticClass();
+    // Use fly camera when startpos override is specified (terrain testing mode)
+    if (FString(FCommandLine::Get()).Contains(TEXT("startpos")))
+    {
+        DefaultPawnClass = AWowFlyCamera::StaticClass();
+    }
+    else
+    {
+        DefaultPawnClass = AWowPlayerCharacter::StaticClass();
+    }
     PlayerControllerClass = AWowGameplayController::StaticClass();
     HUDClass = AWowDebugHUD::StaticClass();
 }
@@ -239,32 +246,57 @@ void AWowViewerGameMode::SetupCharacterTestScene(UWorld* World)
     SpawnDirectionalLight(World);
     SpawnGroundPlane(World, FVector::ZeroVector, 100.0f);
 
-    // Teleport player just above the ground plane
+    // Position camera in front of the character, looking at it
     APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
     if (PC && PC->GetPawn())
     {
-        PC->GetPawn()->SetActorLocation(FVector(0.0f, 0.0f, 200.0f));
-        PC->SetControlRotation(FRotator(-15.0f, 0.0f, 0.0f));
+        PC->GetPawn()->SetActorLocation(FVector(-800.0f, 0.0f, 150.0f));
+        PC->SetControlRotation(FRotator(-5.0f, 0.0f, 0.0f));
     }
 
     // Spawn world manager for MPQ access (terrain loading skipped via -testscene check in WM::BeginPlay)
     AWowWorldManager* WM = SpawnWorldManager(World);
 
-    // Spawn test character models — Human Male and Female for visual verification
     if (WM && WM->GetMpqManager() && WM->GetAssetCache())
     {
-        FWowCharacterBuilder::SpawnCharacter(World, WM->GetMpqManager(), WM->GetAssetCache(),
+        FMpqManager* Mpq = WM->GetMpqManager();
+        FWowAssetCache* AssetCache = WM->GetAssetCache();
+
+        // 1. Human Male with composite texture (skin + face + underwear)
+        FWowCharacterBuilder::SpawnCharacter(World, Mpq, AssetCache,
             FWowCharacterBuilder::ERace::Human, FWowCharacterBuilder::EGender::Male,
             FVector(0.0f, 0.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
 
-        FWowCharacterBuilder::SpawnCharacter(World, WM->GetMpqManager(), WM->GetAssetCache(),
-            FWowCharacterBuilder::ERace::Human, FWowCharacterBuilder::EGender::Female,
-            FVector(0.0f, 300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+        // 2. Human Female with different skin color variation
+        {
+            FWowCharacterBuilder::FCharacterParams Params;
+            Params.Race = FWowCharacterBuilder::ERace::Human;
+            Params.Gender = FWowCharacterBuilder::EGender::Female;
+            Params.Customization.RaceId = 1;
+            Params.Customization.Gender = 1;
+            Params.Customization.SkinColor = 2;
+            Params.Customization.FaceVariation = 1;
 
-        // Spawn an Orc for variety
-        FWowCharacterBuilder::SpawnCharacter(World, WM->GetMpqManager(), WM->GetAssetCache(),
-            FWowCharacterBuilder::ERace::Orc, FWowCharacterBuilder::EGender::Male,
-            FVector(0.0f, -300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+            FWowCharacterBuilder::SpawnCharacterWithEquipment(World, Mpq, AssetCache,
+                Params, FVector(0.0f, 300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+        }
+
+        // 3. Orc Male
+        {
+            FWowCharacterBuilder::FCharacterParams Params;
+            Params.Race = FWowCharacterBuilder::ERace::Orc;
+            Params.Gender = FWowCharacterBuilder::EGender::Male;
+            Params.Customization.RaceId = 2;
+            Params.Customization.Gender = 0;
+            Params.Customization.SkinColor = 1;
+
+            FWowCharacterBuilder::SpawnCharacterWithEquipment(World, Mpq, AssetCache,
+                Params, FVector(0.0f, -300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+        }
+
+        // 4. NPC creature via display ID (Stormwind Guard = 3167)
+        FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
+            3167, FVector(500.0f, 0.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
     }
 }
 

@@ -1,5 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "WowCharacterTexture.h"
+#include "WowEquipmentManager.h"
 
 class FMpqManager;
 class FWowAssetCache;
@@ -10,6 +12,7 @@ class UWorld;
 /**
  * Builds and spawns WoW character models from race/gender/customization data.
  * Uses ChrRaces.dbc to map race+gender to M2 model paths, then loads the skeletal mesh.
+ * Supports composite character textures (skin+face+underwear) and equipment attachment.
  */
 class WOWASSETS_API FWowCharacterBuilder
 {
@@ -23,15 +26,38 @@ public:
 
     enum class EGender : uint8 { Male = 0, Female = 1 };
 
+    /** Equipment slots for character gear */
+    struct FEquipmentSlot
+    {
+        uint32 ItemDisplayId = 0;
+        FWowEquipmentManager::EAttachmentPoint AttachPoint = FWowEquipmentManager::EAttachmentPoint::RightHand;
+    };
+
+    /** Full character spawn parameters */
+    struct FCharacterParams
+    {
+        ERace Race = ERace::Human;
+        EGender Gender = EGender::Male;
+        FWowCharacterTexture::FCustomization Customization;
+        TArray<FEquipmentSlot> Equipment;
+    };
+
     /** Get the M2 model path for a race/gender combo using ChrRaces.dbc */
     static FString GetCharacterModelPath(ERace Race, EGender Gender);
 
     /**
      * Spawn a character actor with skeletal mesh + idle animation.
-     * Returns the spawned actor, or nullptr on failure.
+     * Simple version without customization or equipment.
      */
     static AActor* SpawnCharacter(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
         ERace Race, EGender Gender, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
+
+    /**
+     * Spawn a fully customized character with composite texture and equipment.
+     * Returns the spawned actor, or nullptr on failure.
+     */
+    static AActor* SpawnCharacterWithEquipment(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
+        const FCharacterParams& Params, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator);
 
     /** Spawn a creature/NPC by display ID from CreatureDisplayInfo.dbc */
     static AActor* SpawnCreatureByDisplayId(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
@@ -40,5 +66,6 @@ public:
 private:
     /** Internal: load M2, build skeleton + mesh + anims, spawn actor */
     static AActor* SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
-        const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale = 1.0f);
+        const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale = 1.0f,
+        UTexture2D* OverrideTexture = nullptr);
 };
