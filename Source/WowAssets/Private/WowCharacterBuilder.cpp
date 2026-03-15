@@ -346,18 +346,26 @@ void FWowCharacterBuilder::ApplyGeosetVisibility(USkeletalMeshComponent* MeshCom
 
     for (const FGeosetSectionInfo& Info : GeosetInfo)
     {
-        bool bShouldBeVisible = false;
+        bool bShouldBeVisible = true; // Default: show unless explicitly filtered
 
-        const uint16* DesiredVariant = VisibleGeosets.Find(Info.GeosetGroup);
-        if (DesiredVariant)
+        if (Info.GeosetId == 0)
         {
-            // Show this section if its variant matches the desired variant for this group
-            bShouldBeVisible = (Info.GeosetVariant == *DesiredVariant);
+            // Geoset ID 0 = base body mesh, always visible
+            bShouldBeVisible = true;
         }
         else
         {
-            // Groups not in the map: show variant 0 (default) only
-            bShouldBeVisible = (Info.GeosetVariant == 0);
+            const uint16* DesiredVariant = VisibleGeosets.Find(Info.GeosetGroup);
+            if (DesiredVariant)
+            {
+                // For groups with a rule, show only the matching variant
+                bShouldBeVisible = (Info.GeosetVariant == *DesiredVariant);
+            }
+            else
+            {
+                // Groups not in our rule set: show by default (creatures, etc.)
+                bShouldBeVisible = true;
+            }
         }
 
         // MaterialID = SectionIndex since we have one material slot per section.
