@@ -21,12 +21,15 @@ bool FMpqManager::Initialize(const FString& InDataPath)
         return false;
     }
 
+    // Load order: patches first (highest priority), then base archives.
+    // locale-enUS.MPQ contains Interface/ textures needed by some M2 models.
     TArray<FString> ArchiveNames = {
         TEXT("enUS/patch-enUS-3.MPQ"), TEXT("enUS/patch-enUS-2.MPQ"), TEXT("enUS/patch-enUS.MPQ"),
         TEXT("patch-3.MPQ"), TEXT("patch-2.MPQ"), TEXT("patch.MPQ"),
         TEXT("enUS/lichking-locale-enUS.MPQ"), TEXT("enUS/lichking-speech-enUS.MPQ"), TEXT("lichking.MPQ"),
         TEXT("enUS/expansion-locale-enUS.MPQ"), TEXT("enUS/expansion-speech-enUS.MPQ"), TEXT("expansion.MPQ"),
-        TEXT("enUS/base-enUS.MPQ"), TEXT("enUS/speech-enUS.MPQ"),
+        TEXT("enUS/locale-enUS.MPQ"), TEXT("enUS/base-enUS.MPQ"), TEXT("enUS/speech-enUS.MPQ"),
+        TEXT("enUS/backup-enUS.MPQ"),
         TEXT("common.MPQ"), TEXT("common-2.MPQ"),
     };
 
