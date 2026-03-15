@@ -59,6 +59,9 @@ echo ""
 echo "=== Terrain ==="
 grep -i "sections.*textured\|Loaded terrain material\|Tile.*textured" "$LOG_FILE" 2>/dev/null | tail -5
 echo ""
+echo "=== Entities ==="
+grep -i "Spawned player model\|Spawned creature model\|Destroyed entity model\|OnEntityCreated\|entity.*GUID" "$LOG_FILE" 2>/dev/null | tail -10
+echo ""
 echo "=== Objects ==="
 grep -i "Spawned WMO\|Instanced.*doodad\|Skipping large" "$LOG_FILE" 2>/dev/null | head -10
 echo ""

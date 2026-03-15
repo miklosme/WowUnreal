@@ -284,9 +284,6 @@ void AWowGameplayController::OnEntityCreated(const FWowEntity& Entity)
 {
 	if (!ConnectionManager) return;
 
-	// Skip entity model spawning in fly camera / terrain viewing mode
-	if (FString(FCommandLine::Get()).Contains(TEXT("startpos"))) return;
-
 	// Skip local player — they already have a pawn
 	if (Entity.Guid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) return;
 
