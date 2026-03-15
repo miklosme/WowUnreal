@@ -351,6 +351,13 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	}
 
 	SkelMesh->CommitMeshDescription(0);
+
+	// Ensure the imported model has a valid LOD before Build
+	if (SkelMesh->GetImportedModel() && SkelMesh->GetImportedModel()->LODModels.Num() == 0)
+	{
+		SkelMesh->GetImportedModel()->LODModels.Add(new FSkeletalMeshLODModel());
+	}
+
 	SkelMesh->Build();
 
 	// Set bounds using M2 vertex transform convention: UE = (WoW.Y, WoW.X, WoW.Z) * SCALE
