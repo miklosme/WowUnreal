@@ -10,6 +10,8 @@
 #include "UObject/SoftObjectPath.h"
 #include "UObject/UObjectGlobals.h"
 #include "Misc/PackageName.h"
+#include "Misc/App.h"
+#include "UObject/SavePackage.h"
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
@@ -18,6 +20,7 @@
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionConstant.h"
 #include "Materials/MaterialExpressionRuntimeVirtualTextureOutput.h"
+#include "ShaderCompiler.h"
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogTerrainMat, Log, All);
@@ -61,6 +64,19 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
         return nullptr;
     }
 
+    // Debug: log first chunk's texture info
+    static bool bLoggedFirst = false;
+    if (!bLoggedFirst)
+    {
+        bLoggedFirst = true;
+        UE_LOG(LogTerrainMat, Log, TEXT("First chunk [%d,%d]: %d layer textures, %d alpha maps, base tex=%s (%dx%d)"),
+            ChunkData.IndexX, ChunkData.IndexY,
+            LayerTextures.Num(), ChunkData.AlphaMaps.Num(),
+            LayerTextures[0] ? *LayerTextures[0]->GetName() : TEXT("null"),
+            LayerTextures[0] ? LayerTextures[0]->GetSizeX() : 0,
+            LayerTextures[0] ? LayerTextures[0]->GetSizeY() : 0);
+    }
+
     // Create alpha map textures from chunk data (layers 1-3 have alpha maps)
     TArray<UTexture2D*> AlphaTextures;
     for (int32 i = 0; i < ChunkData.AlphaMaps.Num() && i < 3; ++i)
@@ -92,9 +108,18 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
         return nullptr;
     }
 
+    // Debug: log material info once
+    static bool bLoggedMat = false;
+    if (!bLoggedMat)
+    {
+        bLoggedMat = true;
+        UE_LOG(LogTerrainMat, Log, TEXT("MID parent: %s, IsComplete=%d"),
+            *BaseMat->GetName(), BaseMat->IsComplete() ? 1 : 0);
+    }
+
     // Set the base layer texture (always present)
-    MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), LayerTextures[0]);
-    UE_LOG(LogTerrainMat, Verbose, TEXT("Chunk [%d,%d]: assigned BaseTexture %s"),
+    MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), LayerTextures[0]);
+    UE_LOG(LogTerrainMat, Verbose, TEXT("Chunk [%d,%d]: assigned Layer0Texture %s"),
         ChunkData.IndexX, ChunkData.IndexY, *LayerTextures[0]->GetName());
 
     // Set additional layer textures and their alpha maps
@@ -104,9 +129,9 @@ UMaterialInstanceDynamic* FWowTerrainMaterial::CreateChunkMaterial(
         FName(TEXT("Layer3Texture"))
     };
     static const FName AlphaParamNames[] = {
-        FName(TEXT("Alpha1")),
-        FName(TEXT("Alpha2")),
-        FName(TEXT("Alpha3"))
+        FName(TEXT("AlphaMap1")),
+        FName(TEXT("AlphaMap2")),
+        FName(TEXT("AlphaMap3"))
     };
 
     for (int32 i = 0; i < 3; ++i)
@@ -129,29 +154,52 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     static UMaterial* CachedMat = nullptr;
     if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
 
-    // Try loading a hand-authored material asset first (if it exists)
+    // Try loading a pre-compiled material asset (created by Scripts/CreateTerrainPreviewMaterial.py)
+    const TCHAR* MatPaths[] = {
+        TEXT("/Game/Wow/Materials/M_WowTerrainPreview"),
+        TEXT("/Game/Materials/M_WowTerrain"),
+        TEXT("/Game/Materials/M_WowTerrainRuntime")
+    };
+    for (const TCHAR* Path : MatPaths)
     {
-        FSoftObjectPath MatPath(TEXT("/Game/Materials/M_WowTerrain.M_WowTerrain"));
+        FSoftObjectPath MatPath(FString(Path) + TEXT(".") + FPaths::GetBaseFilename(Path));
         if (MatPath.ResolveObject() || FPackageName::DoesPackageExist(MatPath.GetLongPackageName()))
         {
-            CachedMat = LoadObject<UMaterial>(nullptr, TEXT("/Game/Materials/M_WowTerrain"));
+            CachedMat = LoadObject<UMaterial>(nullptr, Path);
+            if (CachedMat)
+            {
+                UE_LOG(LogTerrainMat, Log, TEXT("Loaded terrain material from %s"), Path);
+#if WITH_EDITOR
+                // Ensure shaders are compiled before using — on first run the Metal
+                // shaders may not be cached yet, causing grey rendering.
+                if (!CachedMat->IsComplete())
+                {
+                    UE_LOG(LogTerrainMat, Log, TEXT("Material shaders not compiled yet, compiling..."));
+                    CachedMat->ForceRecompileForRendering();
+                    if (GShaderCompilingManager)
+                    {
+                        GShaderCompilingManager->FinishAllCompilation();
+                    }
+                    UE_LOG(LogTerrainMat, Log, TEXT("Material shader compilation done, IsComplete=%d"),
+                        CachedMat->IsComplete() ? 1 : 0);
+                }
+#endif
+                return CachedMat;
+            }
         }
-    }
-    if (CachedMat)
-    {
-        UE_LOG(LogTerrainMat, Log, TEXT("Loaded custom terrain material /Game/Materials/M_WowTerrain"));
-        return CachedMat;
     }
 
 #if WITH_EDITOR
     // Build the full 4-layer terrain splat material graph programmatically.
     // Layout:
-    //   UV0 (0..8 tiling) → ground texture samplers
-    //   UV0 / 8.0 (0..1)  → alpha map samplers
+    //   UV0 (0..1 per chunk) → alpha map samplers
+    //   UV1 (world-space tiled) → ground texture samplers
     //   Lerp chain: Base → Layer1 (Alpha1) → Layer2 (Alpha2) → Layer3 (Alpha3) → BaseColor
     UE_LOG(LogTerrainMat, Log, TEXT("Creating 4-layer terrain splat material"));
 
-    CachedMat = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowTerrainRuntime"));
+    UPackage* MatPackage = CreatePackage(TEXT("/Game/Materials/M_WowTerrainRuntime"));
+    CachedMat = NewObject<UMaterial>(MatPackage, TEXT("M_WowTerrainRuntime"),
+        RF_Public | RF_Standalone);
     CachedMat->SetShadingModel(MSM_DefaultLit);
     CachedMat->TwoSided = false;
 
@@ -160,30 +208,24 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
 
     auto& Exprs = CachedMat->GetExpressionCollection();
 
-    // --- TexCoord node (UV0) for alpha map UV computation ---
-    auto* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(CachedMat);
-    TexCoord->CoordinateIndex = 0;
-    TexCoord->MaterialExpressionEditorX = -900;
-    TexCoord->MaterialExpressionEditorY = 600;
-    Exprs.AddExpression(TexCoord);
+    // --- Texture coordinate nodes ---
+    // UV1 = world-space tiled UVs for ground texture sampling
+    auto* TexCoordTiled = NewObject<UMaterialExpressionTextureCoordinate>(CachedMat);
+    TexCoordTiled->CoordinateIndex = 1;
+    TexCoordTiled->MaterialExpressionEditorX = -800;
+    TexCoordTiled->MaterialExpressionEditorY = 0;
+    Exprs.AddExpression(TexCoordTiled);
 
-    // --- Divide UV0 by 8.0 to get alpha UVs (0..1 range) ---
-    auto* DivConst = NewObject<UMaterialExpressionConstant>(CachedMat);
-    DivConst->R = 8.0f;
-    DivConst->MaterialExpressionEditorX = -900;
-    DivConst->MaterialExpressionEditorY = 700;
-    Exprs.AddExpression(DivConst);
+    // UV0 = per-chunk [0,1] for alpha/splatmap lookup
+    auto* TexCoordAlpha = NewObject<UMaterialExpressionTextureCoordinate>(CachedMat);
+    TexCoordAlpha->CoordinateIndex = 0;
+    TexCoordAlpha->MaterialExpressionEditorX = -800;
+    TexCoordAlpha->MaterialExpressionEditorY = 800;
+    Exprs.AddExpression(TexCoordAlpha);
 
-    auto* AlphaUVDiv = NewObject<UMaterialExpressionDivide>(CachedMat);
-    AlphaUVDiv->MaterialExpressionEditorX = -750;
-    AlphaUVDiv->MaterialExpressionEditorY = 600;
-    AlphaUVDiv->A.Connect(0, TexCoord);
-    AlphaUVDiv->B.Connect(0, DivConst);
-    Exprs.AddExpression(AlphaUVDiv);
-
-    // --- 4 ground texture samplers (use default UV0 for tiling) ---
+    // --- 4 ground texture samplers (use UV1 for world-space tiling) ---
     const TCHAR* GroundParamNames[] = {
-        TEXT("BaseTexture"), TEXT("Layer1Texture"), TEXT("Layer2Texture"), TEXT("Layer3Texture")
+        TEXT("Layer0Texture"), TEXT("Layer1Texture"), TEXT("Layer2Texture"), TEXT("Layer3Texture")
     };
     UMaterialExpressionTextureSampleParameter2D* GroundSamplers[4];
 
@@ -193,15 +235,16 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
         Sampler->ParameterName = FName(GroundParamNames[i]);
         Sampler->SamplerType = SAMPLERTYPE_Color;
         Sampler->Texture = (i == 0) ? WhiteTex : BlackTex;
+        Sampler->Coordinates.Connect(0, TexCoordTiled);
         Sampler->MaterialExpressionEditorX = -600;
         Sampler->MaterialExpressionEditorY = i * 200;
         Exprs.AddExpression(Sampler);
         GroundSamplers[i] = Sampler;
     }
 
-    // --- 3 alpha map samplers (sample with computed alpha UVs) ---
-    const TCHAR* AlphaParamNames[] = {
-        TEXT("Alpha1"), TEXT("Alpha2"), TEXT("Alpha3")
+    // --- 3 alpha map samplers (use UV0 for per-chunk splatmap) ---
+    const TCHAR* AlphaParamNamesArr[] = {
+        TEXT("AlphaMap1"), TEXT("AlphaMap2"), TEXT("AlphaMap3")
     };
     UMaterialExpressionTextureSampleParameter2D* AlphaSamplers[3];
     UMaterialExpressionComponentMask* AlphaMasks[3];
@@ -209,15 +252,12 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     for (int32 i = 0; i < 3; ++i)
     {
         auto* Sampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
-        Sampler->ParameterName = FName(AlphaParamNames[i]);
-        // Use a color sampler with the engine's default black texture; Metal rejects
-        // grayscale samplers when the default texture asset is authored as color.
+        Sampler->ParameterName = FName(AlphaParamNamesArr[i]);
         Sampler->SamplerType = SAMPLERTYPE_Color;
-        Sampler->Texture = BlackTex; // Default black = no blending
+        Sampler->Texture = BlackTex;
+        Sampler->Coordinates.Connect(0, TexCoordAlpha);
         Sampler->MaterialExpressionEditorX = -600;
         Sampler->MaterialExpressionEditorY = 800 + i * 200;
-        // Wire alpha UVs into the sampler
-        Sampler->Coordinates.Connect(0, AlphaUVDiv);
         Exprs.AddExpression(Sampler);
         AlphaSamplers[i] = Sampler;
 
@@ -261,20 +301,45 @@ UMaterial* FWowTerrainMaterial::GetBaseMaterial()
     Lerp3->Alpha.Connect(0, AlphaMasks[2]); // Alpha3 R
     Exprs.AddExpression(Lerp3);
 
-    // --- Connect final lerp output to BaseColor ---
+    // --- Connect final lerp output to BaseColor + roughness/specular ---
     CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, Lerp3);
 
-    // --- Runtime Virtual Texture output ---
-    // This allows the terrain to render into an RVT for LOD/caching
-    auto* RVTOutput = NewObject<UMaterialExpressionRuntimeVirtualTextureOutput>(CachedMat);
-    RVTOutput->MaterialExpressionEditorX = 400;
-    RVTOutput->MaterialExpressionEditorY = 0;
-    RVTOutput->BaseColor.Connect(0, Lerp3); // BaseColor output to RVT
-    Exprs.AddExpression(RVTOutput);
+    auto* RoughnessConst = NewObject<UMaterialExpressionConstant>(CachedMat);
+    RoughnessConst->R = 0.85f; // Slightly less than full rough for subtle sheen on terrain
+    RoughnessConst->MaterialExpressionEditorX = 200;
+    RoughnessConst->MaterialExpressionEditorY = 400;
+    Exprs.AddExpression(RoughnessConst);
+    CachedMat->GetEditorOnlyData()->Roughness.Connect(0, RoughnessConst);
 
-    // Compile the material
+    auto* SpecularConst = NewObject<UMaterialExpressionConstant>(CachedMat);
+    SpecularConst->R = 0.15f; // Small amount of specular for natural terrain
+    SpecularConst->MaterialExpressionEditorX = 200;
+    SpecularConst->MaterialExpressionEditorY = 500;
+    Exprs.AddExpression(SpecularConst);
+    CachedMat->GetEditorOnlyData()->Specular.Connect(0, SpecularConst);
+
+    // Compile the material — must be in a real package for Metal shader compilation
     CachedMat->PreEditChange(nullptr);
     CachedMat->PostEditChange();
+    CachedMat->ForceRecompileForRendering();
+
+    // Block until shader compilation is done — otherwise MIDs will render grey
+    if (GShaderCompilingManager)
+    {
+        UE_LOG(LogTerrainMat, Log, TEXT("Waiting for terrain material shader compilation..."));
+        GShaderCompilingManager->FinishAllCompilation();
+        UE_LOG(LogTerrainMat, Log, TEXT("Shader compilation complete, IsComplete=%d"), CachedMat->IsComplete() ? 1 : 0);
+    }
+
+    // Save the material to disk so it persists for subsequent launches
+    {
+        FString PackageFilename = FPackageName::LongPackageNameToFilename(
+            TEXT("/Game/Materials/M_WowTerrainRuntime"), FPackageName::GetAssetPackageExtension());
+        FSavePackageArgs SaveArgs;
+        SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+        UPackage::SavePackage(MatPackage, CachedMat, *PackageFilename, SaveArgs);
+        UE_LOG(LogTerrainMat, Log, TEXT("Saved terrain material to: %s"), *PackageFilename);
+    }
 
     UE_LOG(LogTerrainMat, Log, TEXT("4-layer terrain splat material created and compiled"));
 #else
@@ -311,6 +376,8 @@ UTexture2D* FWowTerrainMaterial::CreateAlphaTexture(const TArray<uint8>& AlphaDa
     Tex->AddressX = TA_Clamp;
     Tex->AddressY = TA_Clamp;
 
+    // ADT parser reads alpha data in row-major order (row=south, col=east),
+    // which directly matches UE's texture layout and our UV0 mapping.
     void* TexData = Tex->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
     if (TexData)
     {

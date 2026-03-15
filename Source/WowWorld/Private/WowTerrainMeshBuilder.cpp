@@ -67,8 +67,12 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
     Result.Vertices.SetNum(145);
     Result.Normals.SetNum(145);
     Result.UVs.SetNum(145);
-    Result.AlphaUVs.SetNum(145);
+    Result.TiledUVs.SetNum(145);
     Result.VertexColors.SetNum(145);
+
+    // World-space texture scale: 0.125 in WoW units = 0.00125 in UE units (1 WoW unit = 100 UE)
+    // This makes textures tile continuously across chunk/tile boundaries.
+    static constexpr float TextureScale = 0.00125f;
 
     for (int32 i = 0; i < 145; ++i)
     {
@@ -133,17 +137,18 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMesh(const FAdtChunkData& C
             AdtY * FWowCoordinate::SCALE  // height (absolute, not relative)
         );
 
-        // MCNR normals stored as (east, north, up) in Normals[i].
-        // For UE, just set all normals to UP for now — we can fix the
-        // mapping to real MCNR normals later.
-        // A flat surface should have normal (0, 0, 1) in UE.
-        Result.Normals[i] = FVector(0, 0, 1);
+        // MCNR normals: parsed as FVector(east, up, south) from file bytes (X, Z, Y).
+        // WoW ADT axes: X=east, Y=up, Z=south
+        // UE axes: X=north(-south), Y=east, Z=up
+        // Transform: UE_Normal = (-WoW.south, WoW.east, WoW.up)
+        const FVector& WN = ChunkData.Normals[i];
+        Result.Normals[i] = FVector(-WN.Z, WN.X, WN.Y);
 
-        // Tiling UVs: 0..8 range across the chunk for texture tiling
-        Result.UVs[i] = FVector2D(GridX, GridY);
+        // UV0: Alpha/splatmap UVs (0..1 per chunk)
+        Result.UVs[i] = FVector2D(GridX / 8.0f, GridY / 8.0f);
 
-        // Alpha map UVs: 0..1 range across the chunk
-        Result.AlphaUVs[i] = FVector2D(GridX / 8.0f, GridY / 8.0f);
+        // UV1: Tiled UVs for ground texture sampling (texture repeats 8x per chunk)
+        Result.TiledUVs[i] = FVector2D(GridX, GridY);
 
         // Vertex colors
         if (ChunkData.bHasVertexColors)
@@ -219,8 +224,10 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMeshLOD1(const FAdtChunkDat
     Result.Vertices.SetNum(81);
     Result.Normals.SetNum(81);
     Result.UVs.SetNum(81);
-    Result.AlphaUVs.SetNum(81);
+    Result.TiledUVs.SetNum(81);
     Result.VertexColors.SetNum(81);
+
+    static constexpr float TextureScale = 0.00125f;
 
     int32 VertIdx = 0;
     for (int32 Row = 0; Row < 9; ++Row)
@@ -250,14 +257,15 @@ FTerrainChunkMeshData FTerrainMeshBuilder::BuildChunkMeshLOD1(const FAdtChunkDat
                 AdtY * FWowCoordinate::SCALE     // height (absolute, not relative)
             );
 
-            // Set normal to UP for now
-            Result.Normals[VertIdx] = FVector(0, 0, 1);
+            // Transform MCNR normals from WoW ADT (east, up, south) to UE (north, east, up)
+            const FVector& WN = ChunkData.Normals[HeightIndex];
+            Result.Normals[VertIdx] = FVector(-WN.Z, WN.X, WN.Y);
 
-            // Tiling UVs: 0..8 range across the chunk for texture tiling
-            Result.UVs[VertIdx] = FVector2D(GridX, GridY);
+            // UV0: Alpha/splatmap UVs (0..1 per chunk)
+            Result.UVs[VertIdx] = FVector2D(GridX / 8.0f, GridY / 8.0f);
 
-            // Alpha map UVs: 0..1 range across the chunk
-            Result.AlphaUVs[VertIdx] = FVector2D(GridX / 8.0f, GridY / 8.0f);
+            // UV1: Tiled UVs for ground texture sampling (texture repeats 8x per chunk)
+            Result.TiledUVs[VertIdx] = FVector2D(GridX, GridY);
 
             // Vertex colors
             if (ChunkData.bHasVertexColors)
