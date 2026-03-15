@@ -387,71 +387,56 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
         }
     }
 
-    // Build mesh
-    TArray<const FMeshDescription*> MeshDescs;
-    MeshDescs.Add(&MeshDesc);
-    UStaticMesh::FBuildMeshDescriptionsParams Params;
-    Params.bBuildSimpleCollision = false;
-    Params.bFastBuild = true;
-    SM->BuildFromMeshDescriptions(MeshDescs, Params);
-
-    // Enable Nanite if available
-    FMeshNaniteSettings NaniteSettings = SM->GetNaniteSettings();
-    NaniteSettings.bEnabled = true;
-    SM->SetNaniteSettings(NaniteSettings);
-
-    // Apply materials per batch — use simple UV0-based material for WMOs
+    // Build materials BEFORE mesh so sections are initialized correctly
     UMaterial* BaseMat = FWowTerrainMaterial::GetSimpleObjectMaterial();
     UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
 
+    TArray<UMaterialInterface*> SectionMaterials;
     if (GroupData.Batches.Num() > 0)
     {
         for (int32 BatchIdx = 0; BatchIdx < GroupData.Batches.Num(); ++BatchIdx)
         {
             const FWmoGroupData::FBatch& Batch = GroupData.Batches[BatchIdx];
+            UMaterialInterface* Mat = FallbackMat;
+
             if (Batch.MaterialIndex < RootData.Materials.Num() && Cache && BaseMat)
             {
                 const FWmoMaterial& WmoMat = RootData.Materials[Batch.MaterialIndex];
                 UTexture2D* Tex = nullptr;
                 if (!WmoMat.TexturePath1.IsEmpty())
                 {
-                    Tex = Cache->FindTexture(WmoMat.TexturePath1);
-                    if (!Tex)
-                    {
-                        Tex = FWowTerrainMaterial::LoadBlpTexture(WmoMat.TexturePath1, Mpq, Cache);
-                    }
-
-                    static bool bLoggedFirstWmoTex = false;
-                    if (!bLoggedFirstWmoTex)
-                    {
-                        bLoggedFirstWmoTex = true;
-                        UE_LOG(LogWowWmo, Log, TEXT("WMO batch %d tex: '%s' -> %s"),
-                            BatchIdx, *WmoMat.TexturePath1,
-                            Tex ? *FString::Printf(TEXT("%dx%d"), Tex->GetSizeX(), Tex->GetSizeY()) : TEXT("FAILED"));
-                    }
+                    Tex = FWowTerrainMaterial::LoadBlpTexture(WmoMat.TexturePath1, Mpq, Cache);
                 }
 
                 if (Tex)
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
                     MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
-                    SM->SetMaterial(BatchIdx, MID);
-                }
-                else if (FallbackMat)
-                {
-                    SM->SetMaterial(BatchIdx, FallbackMat);
+                    Mat = MID;
                 }
             }
-            else if (FallbackMat)
-            {
-                SM->SetMaterial(BatchIdx, FallbackMat);
-            }
+            SectionMaterials.Add(Mat);
         }
     }
-    else if (FallbackMat)
+    else
     {
-        SM->SetMaterial(0, FallbackMat);
+        SectionMaterials.Add(FallbackMat);
     }
+
+    // Add materials to static mesh before building
+    for (UMaterialInterface* Mat : SectionMaterials)
+    {
+        SM->GetStaticMaterials().Add(FStaticMaterial(Mat));
+    }
+
+    // Build mesh
+    TArray<const FMeshDescription*> MeshDescs;
+    MeshDescs.Add(&MeshDesc);
+    UStaticMesh::FBuildMeshDescriptionsParams Params;
+    Params.bBuildSimpleCollision = false;
+    Params.bFastBuild = true;
+    Params.bCommitMeshDescription = true;
+    SM->BuildFromMeshDescriptions(MeshDescs, Params);
 
     return SM;
 }
