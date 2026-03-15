@@ -48,7 +48,7 @@ void AWowSkyManager::BeginPlay()
 	MoonLight = NewObject<UDirectionalLightComponent>(this, TEXT("MoonLight"));
 	MoonLight->RegisterComponent();
 	MoonLight->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
-	MoonLight->SetIntensity(0.1f);
+	MoonLight->SetIntensity(0.5f);
 	MoonLight->SetLightColor(FLinearColor(0.5f, 0.55f, 0.7f));
 	MoonLight->SetCastShadows(false);
 	MoonLight->SetVisibility(false);
@@ -659,7 +659,8 @@ void AWowSkyManager::UpdateLightColors()
 		if (SkyLight)
 		{
 			SkyLight->SetLightColor(AmbientColor);
-			SkyLight->SetIntensity(FMath::Lerp(0.15f, 1.0f, SunIntensity / 3.14f));
+			// Keep minimum ambient so night is never pitch black (WoW always has some visibility)
+			SkyLight->SetIntensity(FMath::Lerp(0.5f, 1.5f, SunIntensity / 3.14f));
 		}
 	}
 	else
@@ -669,7 +670,7 @@ void AWowSkyManager::UpdateLightColors()
 
 		if (SkyLight)
 		{
-			SkyLight->SetIntensity(FMath::Lerp(0.15f, 1.0f, SunIntensity / 3.14f));
+			SkyLight->SetIntensity(FMath::Lerp(0.5f, 1.5f, SunIntensity / 3.14f));
 		}
 	}
 }
