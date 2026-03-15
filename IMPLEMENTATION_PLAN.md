@@ -152,8 +152,68 @@ The project needs proper UE `.umap` levels instead of running everything through
 ## Phase 13: Test Coverage
 - [?] Add first-party automated tests for parsers, world streaming, networking, UI, addon loading, movement, and audio — expanded from 15 to 26 automation tests: added Audio.ZoneMusicDbc, Audio.SoundEntriesDbc, Audio.SoundAmbienceDbc (verify DBC parsing and Elwynn Forest zone→music→ambience chain); Network.HandleSpellStart, Network.HandlePowerUpdate, Network.EntityCreation (packet handling and entity promotion with display ID/race/gender); Character.ModelPath, Character.CreatureDisplayLookup (character builder model path and creature display DBC chain); Movement.WowToUEPosition, Movement.ScaleConsistency (coordinate conversion with real game positions); World.AdtAreaIds (ADT chunk area IDs for zone detection); all 26 tests pass March 14, 2026
 
+## Phase 14: Terrain Rendering Polish (March 2026)
+- [x] Wire up MCNR normals for terrain (WoW ADT → UE coordinate transform)
+- [x] Fix WMO textures (materials before BuildFromMeshDescriptions)
+- [x] Fix doodad textures (bUsedWithInstancedStaticMeshes, ISM instead of HISMC)
+- [x] Add alpha masking for foliage (BLEND_Masked + TwoSided)
+- [x] Load locale-enUS.MPQ for Interface/ textures (tree trunks)
+- [x] Raise WMO group limits (100→2000, per-object 20→100)
+- [x] Fix night lighting (min ambient 0.5, moon 0.5)
+- [ ] Custom terrain shader (reduce 256 draw calls/tile, distance-based UV)
+- [ ] Shadow flickering fix on WMOs
+
+## Phase 15: Character Showcase Test Scene
+Goal: A standalone test level proving characters render correctly with gear, hair/face customization, and creature animations — all without needing a server.
+
+- [ ] **CharacterTest scene**: spawn gallery of player characters (all races/genders) with idle animations
+- [ ] **Equipment rendering**: attach weapons + armor via ItemDisplayInfo.dbc + attachment points
+- [ ] **Customization**: hair style/color, face style, skin color from CharSections.dbc
+- [ ] **Creature gallery**: spawn 10+ iconic creatures (wolf, boar, murloc, spider, etc.) with idle/walk anims
+- [ ] **Animation states**: idle, walk, run, attack, cast, death — driven by AnimationData.dbc
+- [ ] Fix skeletal mesh rendering (Phase 12 character task failed — black/empty screenshot)
+- [ ] Composite character textures (skin + face + hair baked into body texture)
+
+## Phase 16: Live Server Integration
+Goal: Connect to the AzerothCore server and render players/NPCs/creatures in the world.
+
+- [ ] **Server connection test**: connect to 192.168.1.5 from terrain viewer mode
+- [ ] Wire entity creation events to creature/player spawning in terrain viewer (currently skipped with -startpos)
+- [ ] Render other players with race/gender model + equipment from UPDATE_OBJECT fields
+- [ ] Render NPCs/creatures by DisplayId from entity data
+- [ ] Player movement sync (server position → interpolated client position)
+- [ ] NPC movement from SMSG_MONSTER_MOVE waypoint packets
+- [ ] Basic nameplates (name + health bar above entities)
+
+## Phase 17: Effects & Polish
+Goal: Visual effects that bring the world to life.
+
+- [ ] **M2 particle emitters**: parse nParticleEmitters from M2 header, create Niagara systems
+- [ ] **Fire/smoke effects**: campfires, torches, chimneys from M2 particle data
+- [ ] **M2 ribbon emitters**: weapon trails, spell ribbons
+- [ ] **M2 light emitters**: point lights for lanterns, torches, spell glow
+- [ ] **Point light pool**: reusable dynamic point lights for performance
+- [ ] **WMO interior lighting**: zone-based ambient from Light.dbc indoor zones
+- [ ] **Spell visuals**: SpellVisual → SpellVisualKit → effect attachment chain
+- [ ] **ParticleColor.dbc**: creature-specific particle tints
+
+## Phase 18: Authentic WoW UI & Screens
+Goal: Real WoW UI experience — original FrameXML, addon support, 3D login/character screens.
+
+- [ ] **3D Login Screen**: render the WoW 3.3.5 login background (M2 scene from Interface/Glues/Models/) with animated camera, flying dragons, particle effects
+- [ ] **3D Character Select**: render player character model on race-appropriate background with idle animation, equipment preview, rotation
+- [ ] **Character Creation**: 3D preview with race/class selection, customization sliders (hair, face, skin), animated model
+- [ ] **Loading Screens**: LoadingScreens.dbc → BLP loading screen images with progress bar
+- [ ] **Full FrameXML boot**: load real Blizzard FrameXML from MPQ, not stubs — action bars, minimap, chat, unit frames, buffs, bags
+- [ ] **Addon loading**: discover + load player addons from Interface/AddOns/ folder
+- [ ] **Font rendering**: load WoW .ttf fonts from MPQ for proper text rendering
+- [ ] **Mouse cursor**: WoW cursor textures from Interface/Cursor/
+- [ ] **Tooltip system**: item/spell/NPC tooltips with proper formatting
+- [ ] **Minimap**: real-time minimap rendering from terrain data
+
 ## Test Server
-- Host: 127.0.0.1
+- LAN: 192.168.1.5
+- Remote: 127.0.0.1
 - Auth port: 3724, World port: 8085
 - Account: WowTestUser / WowTestPass
 
