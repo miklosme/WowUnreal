@@ -61,10 +61,14 @@ private:
     /** Start playing music for the current zone */
     void UpdateMusic();
 
+    /** Start playing ambient sounds for the current zone */
+    void UpdateAmbience();
+
     /** Current zone/area */
     uint32 CurrentZoneId = 0;
     uint32 CurrentAreaId = 0;
     uint32 PendingZoneMusicId = 0;
+    uint32 PendingAmbienceId = 0;
 
     /** Music playback */
     UPROPERTY()

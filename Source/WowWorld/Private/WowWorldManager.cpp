@@ -18,12 +18,14 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "WowDoodadManager.h"
 #include "WowTerrainMaterial.h"
+#include "UnrealClient.h"
 #include "WowWmoRenderer.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Async/Async.h"
 #include "VT/RuntimeVirtualTexture.h"
 #include "Components/RuntimeVirtualTextureComponent.h"
 #include "WowTerrainMeshBuilder.h"
+#include "WowAudioManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "Misc/FileHelper.h"
@@ -50,19 +52,13 @@ int32 OuterVertexIndex(int32 X, int32 Y)
 
 bool SaveViewportPng(const FString& OutputPath)
 {
-    // Metal SM6's GetViewportScreenShot fails (TextureRHI null ensure) and
-    // FScreenshotRequest captures from a render target without materials.
-    // Use macOS screencapture as a reliable fallback for validation screenshots.
     FString AbsPath = FPaths::ConvertRelativePathToFull(OutputPath);
 
-    int32 RetCode = -1;
-    FString StdOut, StdErr;
-    FString Args = FString::Printf(TEXT("-x %s"), *AbsPath);
-    FPlatformProcess::ExecProcess(TEXT("/usr/sbin/screencapture"), *Args, &RetCode, &StdOut, &StdErr);
+    // Use UE's built-in screenshot API — no platform-specific tools needed
+    FScreenshotRequest::RequestScreenshot(AbsPath, false, false);
 
-    bool bExists = FPaths::FileExists(AbsPath);
-    UE_LOG(LogWowWorld, Log, TEXT("screencapture: ret=%d exists=%d path=%s"), RetCode, bExists ? 1 : 0, *AbsPath);
-    return bExists;
+    UE_LOG(LogWowWorld, Log, TEXT("Screenshot requested via FScreenshotRequest: %s"), *AbsPath);
+    return true; // Screenshot is async; file appears after next frame render
 }
 
 int32 GetTileDistance(const FIntPoint& CameraTile, int32 TX, int32 TY)
@@ -581,6 +577,7 @@ void AWowWorldManager::Tick(float DT)
 
     UpdateStreaming();
     UpdateObjectStreaming();
+    UpdateZoneAudio();
 
     // Periodically purge stale cache entries and check budget
     static int32 CachePurgeCounter = 0;
@@ -1127,11 +1124,11 @@ void AWowWorldManager::UpdateLod1Streaming(const FIntPoint& CameraTile)
     if (!WdtData || !WdtData->bIsValid || !MpqManager) return;
 
     // Load LOD 1 tiles in mid-range (beyond full-detail, within Lod1Radius).
-    // Throttle to 1 per call to avoid a memory/CPU spike (96 tiles at radius 5).
+    // Spawn up to 4 LOD1 tiles per tick for faster loading
     int32 Lod1Spawned = 0;
-    for (int32 DX = -Lod1Radius; DX <= Lod1Radius && Lod1Spawned < 1; ++DX)
+    for (int32 DX = -Lod1Radius; DX <= Lod1Radius && Lod1Spawned < 4; ++DX)
     {
-        for (int32 DY = -Lod1Radius; DY <= Lod1Radius && Lod1Spawned < 1; ++DY)
+        for (int32 DY = -Lod1Radius; DY <= Lod1Radius && Lod1Spawned < 4; ++DY)
         {
             int32 Dist = FMath::Max(FMath::Abs(DX), FMath::Abs(DY));
             // Only LOD 1 range: beyond LoadRadius, within Lod1Radius
@@ -1210,10 +1207,26 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = SMAttributes.GetVertexInstanceBinormalSigns();
     TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = SMAttributes.GetVertexInstanceUVs();
 
-    // LOD1 uses a single polygon group with a simple solid material — no per-chunk
-    // textures. This keeps memory usage low (old WoW ran on 2GB RAM total).
+    // LOD1 uses a single polygon group with one material — the most common base
+    // texture from the tile. This keeps memory low while still showing real textures.
     FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
     int32 TotalChunks = 0;
+
+    // Find the most common base texture across all chunks
+    TMap<int32, int32> TexFrequency;
+    for (int32 i = 0; i < 256; ++i)
+    {
+        if (AdtData.Chunks[i].TextureIndices.Num() > 0)
+        {
+            TexFrequency.FindOrAdd(AdtData.Chunks[i].TextureIndices[0])++;
+        }
+    }
+    int32 MostCommonTexIdx = -1;
+    int32 MaxCount = 0;
+    for (auto& Pair : TexFrequency)
+    {
+        if (Pair.Value > MaxCount) { MaxCount = Pair.Value; MostCommonTexIdx = Pair.Key; }
+    }
 
     for (int32 i = 0; i < 256; ++i)
     {
@@ -1273,13 +1286,18 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
         Params.bFastBuild = true;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
 
-        // Simple green-brown material for distant terrain (same as WDL)
-        UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
-            UMaterial::GetDefaultMaterial(MD_Surface), SM);
-        if (Mat)
+        // Apply single texture material for the whole LOD1 tile
+        if (MostCommonTexIdx >= 0 && AdtData.TexturePaths.IsValidIndex(MostCommonTexIdx))
         {
-            Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
-            SM->SetMaterial(0, Mat);
+            UTexture2D* Tex = FWowTerrainMaterial::LoadBlpTexture(
+                AdtData.TexturePaths[MostCommonTexIdx], MpqManager.Get(), AssetCache.Get());
+            UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
+            if (Tex && BaseMat)
+            {
+                UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
+                MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
+                SM->SetMaterial(0, MID);
+            }
         }
 
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
@@ -1291,7 +1309,58 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     }
 
     Lod1Tiles.Add(TileKey(TX, TY), Lod1Actor);
-    UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d chunks, no textures)"), TX, TY, TotalChunks);
+    UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d chunks, tex=%d)"), TX, TY, TotalChunks, MostCommonTexIdx);
+}
+
+void AWowWorldManager::UpdateZoneAudio()
+{
+    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
+    if (!PC) return;
+
+    FVector CamLoc;
+    FRotator CamRot;
+    PC->GetPlayerViewPoint(CamLoc, CamRot);
+
+    // Determine which tile and chunk the camera is over
+    FIntPoint CameraTile = FWowCoordinate::WorldToTile(CamLoc);
+    int64 Key = TileKey(CameraTile.X, CameraTile.Y);
+
+    TObjectPtr<AWowTerrainTile>* TilePtr = LoadedTiles.Find(Key);
+    if (!TilePtr || !*TilePtr) return;
+
+    AWowTerrainTile* Tile = *TilePtr;
+    if (Tile->ChunkAreaIds.Num() != 256) return;
+
+    // Calculate which chunk within the tile (0-15 in each axis)
+    float NgX = CamLoc.Y / FWowCoordinate::SCALE;
+    float NgZ = -CamLoc.X / FWowCoordinate::SCALE;
+    float LocalX = NgX - CameraTile.X * FWowCoordinate::TILE_SIZE;
+    float LocalZ = NgZ - CameraTile.Y * FWowCoordinate::TILE_SIZE;
+
+    int32 ChunkX = FMath::Clamp(FMath::FloorToInt32(LocalX / FWowCoordinate::CHUNK_SIZE), 0, 15);
+    int32 ChunkY = FMath::Clamp(FMath::FloorToInt32(LocalZ / FWowCoordinate::CHUNK_SIZE), 0, 15);
+
+    uint32 AreaId = Tile->ChunkAreaIds[ChunkY * 16 + ChunkX];
+    if (AreaId == 0 || AreaId == CurrentAudioAreaId) return;
+
+    CurrentAudioAreaId = AreaId;
+
+    // Look up the zone (parent area) from AreaTable.dbc
+    const FAreaTableDbcEntry* AreaEntry = FDbcStore::Get().AreaTable().GetById(AreaId);
+    uint32 ZoneId = AreaEntry ? AreaEntry->ParentAreaID : 0;
+    if (ZoneId == 0) ZoneId = AreaId; // Top-level zone
+
+    // Find audio manager and notify zone change
+    TArray<AActor*> Found;
+    UGameplayStatics::GetAllActorsOfClass(GetWorld(), AWowAudioManager::StaticClass(), Found);
+    if (Found.Num() > 0)
+    {
+        AWowAudioManager* AudioMgr = Cast<AWowAudioManager>(Found[0]);
+        if (AudioMgr)
+        {
+            AudioMgr->SetCurrentZone(ZoneId, AreaId);
+        }
+    }
 }
 
 void AWowWorldManager::UpdateObjectStreaming()

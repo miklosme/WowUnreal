@@ -46,6 +46,9 @@ public:
     FMpqManager* CachedMpq = nullptr;
     FWowAssetCache* CachedCache = nullptr;
 
+    /** Area IDs per chunk (16x16 = 256 entries, row-major: [chunkY * 16 + chunkX]) */
+    TArray<uint32> ChunkAreaIds;
+
 private:
     UPROPERTY()
     TObjectPtr<USceneComponent> RootScene;

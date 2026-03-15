@@ -234,6 +234,13 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
     CachedMpq = Mpq;
     CachedCache = Cache;
 
+    // Store area IDs per chunk for zone detection
+    ChunkAreaIds.SetNum(256);
+    for (int32 i = 0; i < 256; ++i)
+    {
+        ChunkAreaIds[i] = Data.Chunks[i].AreaId;
+    }
+
     UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d instanced doodad HISMCs, %d WMO placements for streaming"),
         TX, TY, InstancedDoodads.Num(), WmoPlacements.Num());
 }

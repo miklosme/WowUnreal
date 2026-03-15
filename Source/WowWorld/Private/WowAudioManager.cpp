@@ -82,17 +82,23 @@ void AWowAudioManager::SetCurrentZone(uint32 ZoneId, uint32 AreaId)
         AreaEntry = FDbcStore::Get().AreaTable().GetById(ZoneId);
     }
 
-    if (AreaEntry && AreaEntry->ZoneMusicID != 0)
+    if (AreaEntry)
     {
-        if (AreaEntry->ZoneMusicID != PendingZoneMusicId)
+        if (AreaEntry->ZoneMusicID != 0 && AreaEntry->ZoneMusicID != PendingZoneMusicId)
         {
             PendingZoneMusicId = AreaEntry->ZoneMusicID;
             UpdateMusic();
         }
+
+        if (AreaEntry->AmbienceID != 0 && AreaEntry->AmbienceID != PendingAmbienceId)
+        {
+            PendingAmbienceId = AreaEntry->AmbienceID;
+            UpdateAmbience();
+        }
     }
 
-    UE_LOG(LogWowAudio, Log, TEXT("Zone changed: zone=%d area=%d musicId=%d"),
-        ZoneId, AreaId, PendingZoneMusicId);
+    UE_LOG(LogWowAudio, Log, TEXT("Zone changed: zone=%d area=%d musicId=%d ambienceId=%d"),
+        ZoneId, AreaId, PendingZoneMusicId, PendingAmbienceId);
 }
 
 void AWowAudioManager::UpdateMusic()
@@ -131,6 +137,35 @@ void AWowAudioManager::UpdateMusic()
 
     UE_LOG(LogWowAudio, Log, TEXT("Playing music: %s (ZoneMusic %d, %s)"),
         *FilePath, PendingZoneMusicId, bIsDaytime ? TEXT("day") : TEXT("night"));
+}
+
+void AWowAudioManager::UpdateAmbience()
+{
+    if (!Mpq || PendingAmbienceId == 0) return;
+
+    const FSoundAmbienceDbcEntry* Ambience = FDbcStore::Get().SoundAmbience().GetById(PendingAmbienceId);
+    if (!Ambience) return;
+
+    uint32 SoundId = bIsDaytime ? Ambience->DayAmbience : Ambience->NightAmbience;
+    if (SoundId == 0) SoundId = Ambience->DayAmbience;
+    if (SoundId == 0) return;
+
+    FString FilePath = GetSoundFilePath(SoundId);
+    if (FilePath.IsEmpty()) return;
+
+    USoundWave* Sound = LoadSoundFromMpq(FilePath);
+    if (!Sound) return;
+
+    if (AmbienceComponent)
+    {
+        AmbienceComponent->Stop();
+        AmbienceComponent->SetSound(Sound);
+        AmbienceComponent->SetVolumeMultiplier(AmbienceVolume * MasterVolume);
+        AmbienceComponent->Play();
+
+        UE_LOG(LogWowAudio, Log, TEXT("Playing ambience: %s (AmbienceId %d, %s)"),
+            *FilePath, PendingAmbienceId, bIsDaytime ? TEXT("day") : TEXT("night"));
+    }
 }
 
 FString AWowAudioManager::GetSoundFilePath(uint32 SoundEntryId)
@@ -240,16 +275,15 @@ USoundWave* AWowAudioManager::LoadSoundFromMpq(const FString& FilePath)
     }
     else
     {
-        // MP3: store raw file data via FSharedBuffer for UE to decode
-#if WITH_EDITORONLY_DATA
+        // MP3: store raw compressed data for UE to decode
         FSharedBuffer SharedBuf = FSharedBuffer::Clone(RawData.GetData(), RawData.Num());
         SoundWave->RawData.UpdatePayload(SharedBuf);
-#endif
 
         SoundWave->SetSampleRate(44100);
         SoundWave->NumChannels = 2;
         SoundWave->Duration = 60.0f; // Estimate — corrected on decode
         SoundWave->SoundGroup = ESoundGroup::SOUNDGROUP_Music;
+        SoundWave->bProcedural = false;
     }
 
     SoundCache.Add(FilePath, SoundWave);

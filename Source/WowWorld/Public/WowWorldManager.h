@@ -151,6 +151,7 @@ private:
     void UnloadTile(int32 TX, int32 TY);
     void UpdateStreaming();
     void UpdateObjectStreaming();
+    void UpdateZoneAudio();
     void UpdateWdlStreaming(const FIntPoint& CameraTile);
     void UpdateLod1Streaming(const FIntPoint& CameraTile);
     void SpawnWdlTile(int32 TX, int32 TY);
@@ -160,6 +161,9 @@ private:
     bool IsTileLoaded(int32 TX, int32 TY) const;
     bool IsTilePending(int32 TX, int32 TY) const;
     static int64 TileKey(int32 TX, int32 TY) { return ((int64)TX << 32) | (int64)(uint32)TY; }
+
+    /** Current area ID for zone audio detection */
+    uint32 CurrentAudioAreaId = 0;
 
     /** Tiles currently being loaded on background threads */
     TArray<FPendingTileLoad> PendingLoads;
