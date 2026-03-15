@@ -18,6 +18,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "HAL/IConsoleManager.h"
 #include "TimerManager.h"
+#include "GameFramework/FloatingPawnMovement.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowTestMode, Log, All);
 
@@ -131,11 +132,11 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
         SpawnDirectionalLight(World);
 
         // Large ground plane so nothing floats in the void
-        SpawnGroundPlane(World, FVector(200.0f, 0.0f, -5.0f), 40.0f);
+        SpawnGroundPlane(World, FVector(200.0f, 0.0f, -5.0f), 60.0f);
 
         // Front fill light to reduce harsh shadows on characters
         if (APointLight* FillLight = World->SpawnActor<APointLight>(
-            APointLight::StaticClass(), FTransform(FRotator::ZeroRotator, FVector(-400.0f, 0.0f, 300.0f))))
+            APointLight::StaticClass(), FTransform(FRotator::ZeroRotator, FVector(-600.0f, 0.0f, 400.0f))))
         {
             if (UPointLightComponent* FillLightComponent = Cast<UPointLightComponent>(FillLight->GetLightComponent()))
             {
@@ -158,6 +159,7 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
         }
 
         // Position camera to view the full gallery (delayed one frame for pawn to spawn)
+        // Also slow down fly speed for this small test scene
         FTimerHandle CameraFrameTimer;
         World->GetTimerManager().SetTimer(CameraFrameTimer, [this]()
         {
@@ -165,8 +167,20 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
             {
                 if (APawn* Pawn = PC->GetPawn())
                 {
-                    Pawn->SetActorLocation(FVector(-500.0f, 0.0f, 150.0f));
-                    PC->SetControlRotation(FRotator(-8.0f, 10.0f, 0.0f));
+                    Pawn->SetActorLocation(FVector(-900.0f, 0.0f, 200.0f));
+                    PC->SetControlRotation(FRotator(-5.0f, 8.0f, 0.0f));
+
+                    // Slow fly speed for test scene (default 20000 is for terrain)
+                    if (AWowFlyCamera* FlyCamera = Cast<AWowFlyCamera>(Pawn))
+                    {
+                        FlyCamera->FlySpeed = 1500.0f;
+                        if (UFloatingPawnMovement* Mov = Cast<UFloatingPawnMovement>(FlyCamera->GetMovementComponent()))
+                        {
+                            Mov->MaxSpeed = 1500.0f;
+                            Mov->Acceleration = 6000.0f;
+                            Mov->Deceleration = 6000.0f;
+                        }
+                    }
                 }
             }
         }, 0.1f, false);
@@ -183,7 +197,7 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
 
         // --- Row 1: Player characters (front row, spaced along Y) ---
         const float CharacterRowX = 0.0f;
-        const float CharacterSpacing = 250.0f;
+        const float CharacterSpacing = 400.0f;
         const FRotator FacingCamera(0.0f, -90.0f, 0.0f);
 
         // 1. Human Male (center) with equipment
@@ -225,20 +239,20 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
             OrcMale, FVector(CharacterRowX, -CharacterSpacing, 0.0f), FacingCamera);
 
         // --- Row 2: Creatures (back row, spaced along Y) ---
-        const float CreatureRowX = 350.0f;
-        const float CreatureSpacing = 300.0f;
+        const float CreatureRowX = 400.0f;
+        const float CreatureSpacing = 400.0f;
 
         // Wolf (DisplayId 604)
         FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
             604, FVector(CreatureRowX, -CreatureSpacing, 0.0f), FacingCamera);
 
-        // Boar (DisplayId 454)
+        // Boar (DisplayId 113)
         FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
-            454, FVector(CreatureRowX, 0.0f, 0.0f), FacingCamera);
+            113, FVector(CreatureRowX, 0.0f, 0.0f), FacingCamera);
 
-        // Murloc (DisplayId 2192)
+        // Murloc (DisplayId 285)
         FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
-            2192, FVector(CreatureRowX, CreatureSpacing, 0.0f), FacingCamera);
+            285, FVector(CreatureRowX, CreatureSpacing, 0.0f), FacingCamera);
 
         UE_LOG(LogWowTestMode, Log, TEXT("CharacterTest: spawned 3 characters + 3 creatures"));
         return;
