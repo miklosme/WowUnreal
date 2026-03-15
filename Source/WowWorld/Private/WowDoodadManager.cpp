@@ -262,6 +262,7 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     }
 
     UStaticMesh* StaticMesh = NewObject<UStaticMesh>();
+    StaticMesh->bAllowCPUAccess = true; // Required for HISMC instancing
 
     FMeshDescription MeshDesc;
     FStaticMeshAttributes Attributes(MeshDesc);
@@ -436,6 +437,9 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     Params.bCommitMeshDescription = true;
     StaticMesh->BuildFromMeshDescriptions(MeshDescs, Params);
 
+    // Ensure bounds are computed — bFastBuild may skip this
+    StaticMesh->CalculateExtendedBounds();
+
     return StaticMesh;
 }
 
@@ -498,14 +502,17 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
         UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
         if (!SM) continue;
 
-        // Create HISMC
+        // Create HISMC for instanced rendering
         FName CompName = *FString::Printf(TEXT("HISMC_%s"), *FPaths::GetBaseFilename(M2Path));
         UHierarchicalInstancedStaticMeshComponent* HISMC = NewObject<UHierarchicalInstancedStaticMeshComponent>(ParentActor, CompName);
         HISMC->SetupAttachment(ParentActor->GetRootComponent());
         HISMC->SetStaticMesh(SM);
-        HISMC->SetCastShadow(true);
-        HISMC->SetCullDistances(0.0f, 200000.0f); // 2km cull distance
-        HISMC->bDisableCollision = true;
+        HISMC->SetCastShadow(false);
+        HISMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        HISMC->SetMobility(EComponentMobility::Static);
+
+        // Must register BEFORE adding instances so the component transform is set
+        HISMC->RegisterComponent();
 
         // Add all instances for this model
         for (const FAdtDoodadPlacement* Placement : GroupPlacements)
@@ -520,7 +527,10 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
             HISMC->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
         }
 
-        HISMC->RegisterComponent();
+        // Force tree rebuild and bounds update after all instances are added
+        HISMC->BuildTreeIfOutdated(true, true);
+        HISMC->MarkRenderStateDirty();
+
         Result.Add(HISMC);
         TotalInstances += GroupPlacements.Num();
     }
