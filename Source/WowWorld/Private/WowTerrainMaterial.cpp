@@ -479,6 +479,7 @@ UMaterial* FWowTerrainMaterial::GetSimpleObjectMaterial()
         RF_Public | RF_Standalone);
     CachedMat->SetShadingModel(MSM_DefaultLit);
     CachedMat->TwoSided = false;
+    CachedMat->bUsedWithInstancedStaticMeshes = true; // Required for HISMC/ISM rendering
 
     UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
 

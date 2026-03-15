@@ -391,10 +391,11 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
         }
     }
 
-    // Build materials BEFORE mesh so sections are initialized correctly
+    // Build materials and collect them for post-build assignment
     UMaterial* BaseMat = FWowTerrainMaterial::GetSimpleObjectMaterial();
     UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
 
+    TArray<UMaterialInterface*> BatchMaterials;
     if (Mpq && Cache && BaseMat)
     {
         for (int32 BatchIdx = 0; BatchIdx < Batches.Num(); ++BatchIdx)
@@ -411,11 +412,11 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
             {
                 UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, StaticMesh);
                 MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
-                StaticMesh->GetStaticMaterials().Add(FStaticMaterial(MID));
+                BatchMaterials.Add(MID);
             }
             else
             {
-                StaticMesh->GetStaticMaterials().Add(FStaticMaterial(FallbackMat));
+                BatchMaterials.Add(FallbackMat);
             }
         }
     }
@@ -423,8 +424,14 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     {
         for (int32 i = 0; i < Batches.Num(); ++i)
         {
-            StaticMesh->GetStaticMaterials().Add(FStaticMaterial(FallbackMat));
+            BatchMaterials.Add(FallbackMat);
         }
+    }
+
+    // Add materials BEFORE build
+    for (UMaterialInterface* Mat : BatchMaterials)
+    {
+        StaticMesh->GetStaticMaterials().Add(FStaticMaterial(Mat));
     }
 
     // Build static mesh from description
@@ -436,6 +443,26 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     Params.bFastBuild = true;
     Params.bCommitMeshDescription = true;
     StaticMesh->BuildFromMeshDescriptions(MeshDescs, Params);
+
+    // Log material state after build to diagnose
+    static bool bLoggedMatState = false;
+    if (!bLoggedMatState)
+    {
+        bLoggedMatState = true;
+        UE_LOG(LogWowDoodad, Warning, TEXT("After build: %d static materials, %d batch materials"),
+            StaticMesh->GetStaticMaterials().Num(), BatchMaterials.Num());
+        for (int32 i = 0; i < StaticMesh->GetStaticMaterials().Num(); ++i)
+        {
+            UMaterialInterface* M = StaticMesh->GetStaticMaterials()[i].MaterialInterface;
+            UE_LOG(LogWowDoodad, Warning, TEXT("  mat[%d] = %s"), i, M ? *M->GetName() : TEXT("null"));
+        }
+    }
+
+    // Re-set materials after build in case BuildFromMeshDescriptions resets them
+    for (int32 i = 0; i < BatchMaterials.Num(); ++i)
+    {
+        StaticMesh->SetMaterial(i, BatchMaterials[i]);
+    }
 
     // Ensure bounds are computed — bFastBuild may skip this
     StaticMesh->CalculateExtendedBounds();
@@ -510,6 +537,15 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
         HISMC->SetCastShadow(false);
         HISMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         HISMC->SetMobility(EComponentMobility::Static);
+
+        // Override materials on the HISMC component (SM materials may not transfer)
+        for (int32 MatIdx = 0; MatIdx < SM->GetStaticMaterials().Num(); ++MatIdx)
+        {
+            if (SM->GetStaticMaterials()[MatIdx].MaterialInterface)
+            {
+                HISMC->SetMaterial(MatIdx, SM->GetStaticMaterials()[MatIdx].MaterialInterface);
+            }
+        }
 
         // Must register BEFORE adding instances so the component transform is set
         HISMC->RegisterComponent();
