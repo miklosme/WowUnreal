@@ -382,10 +382,19 @@ void AWowWorldManager::BeginPlay()
     // Check if a test scene mode wants MPQ-only (no terrain loading)
     FString TestScene;
     FParse::Value(FCommandLine::Get(), TEXT("-testscene="), TestScene);
-    if (TestScene.Equals(TEXT("character"), ESearchCase::IgnoreCase) ||
-        TestScene.Equals(TEXT("ui"), ESearchCase::IgnoreCase))
+    FString CurrentMapName;
+    if (const UWorld* World = GetWorld())
     {
-        UE_LOG(LogWowWorld, Log, TEXT("Terrain loading skipped for test scene '%s' (MPQ-only mode)"), *TestScene);
+        CurrentMapName = World->GetMapName();
+        CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
+    }
+
+    if (TestScene.Equals(TEXT("character"), ESearchCase::IgnoreCase) ||
+        TestScene.Equals(TEXT("ui"), ESearchCase::IgnoreCase) ||
+        CurrentMapName.Equals(TEXT("CharacterTest"), ESearchCase::IgnoreCase))
+    {
+        UE_LOG(LogWowWorld, Log, TEXT("Terrain loading skipped for test scene '%s' on map '%s' (MPQ-only mode)"),
+            *TestScene, *CurrentMapName);
         return;
     }
 
@@ -1196,8 +1205,9 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     Root->RegisterComponent();
     Lod1Actor->SetRootComponent(Root);
 
-    // Build a single UStaticMesh with one polygon group per chunk
+    // Build LOD1 mesh with per-chunk base texture (no alpha blending, just primary texture)
     FMeshDescription MeshDesc;
+    MeshDesc.SetNumUVChannels(2);
     FStaticMeshAttributes SMAttributes(MeshDesc);
     SMAttributes.Register();
 
@@ -1207,109 +1217,118 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
     TVertexInstanceAttributesRef<float> VertexInstanceBinormalSigns = SMAttributes.GetVertexInstanceBinormalSigns();
     TVertexInstanceAttributesRef<FVector2f> VertexInstanceUVs = SMAttributes.GetVertexInstanceUVs();
 
-    // LOD1 uses a single polygon group with one material — the most common base
-    // texture from the tile. This keeps memory low while still showing real textures.
-    FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+    // Group chunks by their base texture to minimize material count
+    TMap<int32, TArray<int32>> TexToChunks;
+    for (int32 i = 0; i < 256; ++i)
+    {
+        int32 BaseTexIdx = (AdtData.Chunks[i].TextureIndices.Num() > 0)
+            ? AdtData.Chunks[i].TextureIndices[0] : -1;
+        TexToChunks.FindOrAdd(BaseTexIdx).Add(i);
+    }
+
+    TArray<UMaterialInterface*> SectionMaterials;
+    UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
     int32 TotalChunks = 0;
 
-    // Find the most common base texture across all chunks
-    TMap<int32, int32> TexFrequency;
-    for (int32 i = 0; i < 256; ++i)
+    for (auto& Pair : TexToChunks)
     {
-        if (AdtData.Chunks[i].TextureIndices.Num() > 0)
+        FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+
+        for (int32 ChunkIdx : Pair.Value)
         {
-            TexFrequency.FindOrAdd(AdtData.Chunks[i].TextureIndices[0])++;
-        }
-    }
-    int32 MostCommonTexIdx = -1;
-    int32 MaxCount = 0;
-    for (auto& Pair : TexFrequency)
-    {
-        if (Pair.Value > MaxCount) { MaxCount = Pair.Value; MostCommonTexIdx = Pair.Key; }
-    }
+            const FAdtChunkData& ChunkData = AdtData.Chunks[ChunkIdx];
+            FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(ChunkData, TX, TY);
+            if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0) continue;
 
-    for (int32 i = 0; i < 256; ++i)
-    {
-        const FAdtChunkData& ChunkData = AdtData.Chunks[i];
-        FTerrainChunkMeshData MeshData = FTerrainMeshBuilder::BuildChunkMeshLOD1(ChunkData, TX, TY);
-        if (MeshData.Vertices.Num() == 0 || MeshData.Indices.Num() == 0) continue;
+            TArray<FVertexInstanceID> ChunkVertInstIDs;
+            ChunkVertInstIDs.SetNum(MeshData.Vertices.Num());
 
-        TArray<FVertexInstanceID> ChunkVertInstIDs;
-        ChunkVertInstIDs.SetNum(MeshData.Vertices.Num());
+            for (int32 v = 0; v < MeshData.Vertices.Num(); ++v)
+            {
+                const FVector& P = MeshData.Vertices[v];
+                FVertexID VertID = MeshDesc.CreateVertex();
+                VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
 
-        for (int32 v = 0; v < MeshData.Vertices.Num(); ++v)
-        {
-            const FVector& P = MeshData.Vertices[v];
-            FVertexID VertID = MeshDesc.CreateVertex();
-            VertexPositions[VertID] = FVector3f(P.X, P.Y, P.Z);
+                FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+                ChunkVertInstIDs[v] = InstID;
 
-            FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
-            ChunkVertInstIDs[v] = InstID;
+                FVector3f N = (v < MeshData.Normals.Num())
+                    ? FVector3f(MeshData.Normals[v]) : FVector3f(0, 0, 1);
+                N.Normalize();
+                VertexInstanceNormals[InstID] = N;
 
-            FVector3f N = (v < MeshData.Normals.Num())
-                ? FVector3f(MeshData.Normals[v]) : FVector3f(0, 0, 1);
-            N.Normalize();
-            VertexInstanceNormals[InstID] = N;
+                FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
+                if (T.SizeSquared() < 0.001f)
+                    T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
+                T.Normalize();
+                VertexInstanceTangents[InstID] = T;
+                VertexInstanceBinormalSigns[InstID] = 1.0f;
 
-            FVector3f T = FVector3f::CrossProduct(N, FVector3f(0, 1, 0));
-            if (T.SizeSquared() < 0.001f)
-                T = FVector3f::CrossProduct(N, FVector3f(1, 0, 0));
-            T.Normalize();
-            VertexInstanceTangents[InstID] = T;
-            VertexInstanceBinormalSigns[InstID] = 1.0f;
+                FVector2f UV1 = (v < MeshData.TiledUVs.Num())
+                    ? FVector2f(MeshData.TiledUVs[v]) : FVector2f(0, 0);
+                VertexInstanceUVs.Set(InstID, 0, UV1); // Use tiled UVs for UV0 too
+                VertexInstanceUVs.Set(InstID, 1, UV1);
+            }
 
-            FVector2f UV = (v < MeshData.UVs.Num())
-                ? FVector2f(MeshData.UVs[v]) : FVector2f(0, 0);
-            VertexInstanceUVs.Set(InstID, 0, UV);
-        }
+            for (int32 t = 0; t < MeshData.Indices.Num(); t += 3)
+            {
+                TArray<FVertexInstanceID> TriVerts;
+                TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t]]);
+                TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 1]]);
+                TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 2]]);
+                MeshDesc.CreatePolygon(PolyGroup, TriVerts);
+            }
 
-        for (int32 t = 0; t < MeshData.Indices.Num(); t += 3)
-        {
-            TArray<FVertexInstanceID> TriVerts;
-            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t]]);
-            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 1]]);
-            TriVerts.Add(ChunkVertInstIDs[MeshData.Indices[t + 2]]);
-            MeshDesc.CreatePolygon(PolyGroup, TriVerts);
+            TotalChunks++;
         }
 
-        TotalChunks++;
+        // One MID per unique base texture
+        UMaterialInstanceDynamic* MID = nullptr;
+        if (BaseMat && Pair.Key >= 0 && AdtData.TexturePaths.IsValidIndex(Pair.Key))
+        {
+            UTexture2D* Tex = FWowTerrainMaterial::LoadBlpTexture(
+                AdtData.TexturePaths[Pair.Key], MpqManager.Get(), AssetCache.Get());
+            if (Tex)
+            {
+                MID = UMaterialInstanceDynamic::Create(BaseMat, Lod1Actor);
+                MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
+            }
+        }
+        SectionMaterials.Add(MID ? MID : (UMaterialInterface*)LoadObject<UMaterial>(
+            nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial")));
     }
 
     if (TotalChunks > 0)
     {
         UStaticMesh* SM = NewObject<UStaticMesh>();
+        for (UMaterialInterface* Mat : SectionMaterials)
+        {
+            SM->GetStaticMaterials().Add(FStaticMaterial(Mat));
+        }
+        SM->bAllowCPUAccess = true;
 
         TArray<const FMeshDescription*> MeshDescs;
         MeshDescs.Add(&MeshDesc);
         UStaticMesh::FBuildMeshDescriptionsParams Params;
         Params.bBuildSimpleCollision = false;
         Params.bFastBuild = true;
+        Params.bCommitMeshDescription = true;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
-
-        // Apply single texture material for the whole LOD1 tile
-        if (MostCommonTexIdx >= 0 && AdtData.TexturePaths.IsValidIndex(MostCommonTexIdx))
-        {
-            UTexture2D* Tex = FWowTerrainMaterial::LoadBlpTexture(
-                AdtData.TexturePaths[MostCommonTexIdx], MpqManager.Get(), AssetCache.Get());
-            UMaterial* BaseMat = FWowTerrainMaterial::GetBaseMaterial();
-            if (Tex && BaseMat)
-            {
-                UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SM);
-                MID->SetTextureParameterValue(FName(TEXT("BaseTexture")), Tex);
-                SM->SetMaterial(0, MID);
-            }
-        }
 
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
         MeshComp->SetStaticMesh(SM);
         MeshComp->SetupAttachment(Root);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        for (int32 s = 0; s < SectionMaterials.Num(); ++s)
+        {
+            MeshComp->SetMaterial(s, SectionMaterials[s]);
+        }
         MeshComp->RegisterComponent();
         MeshComp->SetCastShadow(false);
-        MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     }
 
     Lod1Tiles.Add(TileKey(TX, TY), Lod1Actor);
-    UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d chunks, tex=%d)"), TX, TY, TotalChunks, MostCommonTexIdx);
+    UE_LOG(LogWowWorld, Log, TEXT("Spawned LOD 1 tile %d,%d (%d chunks, %d materials)"), TX, TY, TotalChunks, SectionMaterials.Num());
 }
 
 void AWowWorldManager::UpdateZoneAudio()

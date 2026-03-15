@@ -75,7 +75,7 @@ void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, 
 	// Override spawn position: Northshire Abbey at safe altitude for testing
 	if (FString(FCommandLine::Get()).Contains(TEXT("startpos")))
 	{
-		X = -8949.0f; Y = -132.0f; Z = 584.0f; // 500m above terrain (84 + 500)
+		X = -8949.0f; Y = -132.0f; Z = 99.0f; // 15m above terrain (84 + 15)
 		UE_LOG(LogWowGameplay, Warning, TEXT("Overriding spawn to Northshire Abbey (aerial): (%.1f, %.1f, %.1f)"), X, Y, Z);
 	}
 
@@ -91,7 +91,13 @@ void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, 
 		else
 		{
 			P->SetActorLocation(SpawnPos);
-			P->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+			// When -startpos is active, look down at terrain; otherwise use server orientation
+			float Pitch = FString(FCommandLine::Get()).Contains(TEXT("startpos")) ? -15.0f : 0.0f;
+			P->SetActorRotation(FRotator(Pitch, FMath::RadiansToDegrees(Orientation), 0.0f));
+			if (APlayerController* PC = Cast<APlayerController>(P->GetController()))
+			{
+				PC->SetControlRotation(FRotator(Pitch, FMath::RadiansToDegrees(Orientation), 0.0f));
+			}
 		}
 
 		UE_LOG(LogWowGameplay, Log, TEXT("Teleported to spawn: map=%d wow=(%.1f,%.1f,%.1f) orient=%.2f ue=(%.0f,%.0f,%.0f)"),
@@ -120,7 +126,9 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		}
 
 		// Server position correction: if server position diverges too much, teleport back
-		if (bHasServerPosition && Entity.Movement.Position != FVector::ZeroVector)
+		// Skip correction when using -startpos (fly camera free-roam mode)
+		if (bHasServerPosition && Entity.Movement.Position != FVector::ZeroVector
+			&& !FString(FCommandLine::Get()).Contains(TEXT("startpos")))
 		{
 			FVector ServerUEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
 
@@ -275,6 +283,9 @@ void AWowGameplayController::CacheWorldResources()
 void AWowGameplayController::OnEntityCreated(const FWowEntity& Entity)
 {
 	if (!ConnectionManager) return;
+
+	// Skip entity model spawning in fly camera / terrain viewing mode
+	if (FString(FCommandLine::Get()).Contains(TEXT("startpos"))) return;
 
 	// Skip local player — they already have a pawn
 	if (Entity.Guid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) return;

@@ -65,5 +65,41 @@ struct WOWDATA_API FWowCoordinate
         return FVector(MAP_ORIGIN - NgZ, MAP_ORIGIN - NgX, NgY);
     }
 
-    static FRotator WowRotationToUE(float RX, float RY, float RZ) { return FRotator(RY - 90.0f, RX, -RZ); }
+    /**
+     * Convert WoW MODF/MDDF Euler rotation to UE quaternion.
+     *
+     * Pipeline: build rotation in ADT space using noggit3's from_model_rotation
+     * (-RZ, RY-90, RX) applied in YZX order, then convert from ADT to UE axes.
+     *
+     * ADT axes → UE axes: X(east)→Y, Y(up)→Z, Z(south)→-X
+     * Quaternion conversion: Q_ue = (-Q_adt.Z, Q_adt.X, Q_adt.Y, -Q_adt.W)
+     *
+     * Verified via R_ue = A * R_adt * M_adt * M^(-1) matrix derivation
+     * where A=ADT→UE, M_adt=model→ADT vertex, M=model→UE vertex transforms.
+     */
+    static FQuat WowRotationToUEQuat(float RX, float RY, float RZ)
+    {
+        // Step 1: Build rotation quaternion in ADT space (right-handed, X=east, Y=up, Z=south)
+        // from_model_rotation: (-RZ, RY-90, RX) applied in YZX order
+        const float HalfYaw   = FMath::DegreesToRadians(RY - 90.0f) * 0.5f;  // around ADT Y (up)
+        const float HalfPitch = FMath::DegreesToRadians(RX) * 0.5f;           // around ADT Z (south)
+        const float HalfRoll  = FMath::DegreesToRadians(-RZ) * 0.5f;          // around ADT X (east)
+
+        // Individual quaternions in ADT space: Qaxis(angle) = (sin*nx, sin*ny, sin*nz, cos)
+        const FQuat Qy(0, FMath::Sin(HalfYaw), 0, FMath::Cos(HalfYaw));
+        const FQuat Qz(0, 0, FMath::Sin(HalfPitch), FMath::Cos(HalfPitch));
+        const FQuat Qx(FMath::Sin(HalfRoll), 0, 0, FMath::Cos(HalfRoll));
+
+        const FQuat Q = Qy * Qz * Qx;  // YZX order
+
+        // Step 2: Convert ADT quaternion to UE quaternion
+        // ADT X(east)→UE Y, ADT Y(up)→UE Z, ADT Z(south)→-UE X, plus handedness flip
+        return FQuat(-Q.Z, Q.X, Q.Y, -Q.W);
+    }
+
+    /** Convenience wrapper returning FRotator (for APIs that need it). */
+    static FRotator WowRotationToUE(float RX, float RY, float RZ)
+    {
+        return WowRotationToUEQuat(RX, RY, RZ).Rotator();
+    }
 };

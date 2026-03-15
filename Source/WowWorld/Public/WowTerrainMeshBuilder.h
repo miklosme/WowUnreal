@@ -8,8 +8,8 @@ struct FTerrainChunkMeshData
     TArray<FVector> Vertices;
     TArray<int32> Indices;
     TArray<FVector> Normals;
-    TArray<FVector2D> UVs;         // Ground texture UVs (tiling)
-    TArray<FVector2D> AlphaUVs;    // Alpha map UVs (0-1 per chunk)
+    TArray<FVector2D> UVs;         // UV0: Alpha/splatmap UVs (0-1 per chunk)
+    TArray<FVector2D> TiledUVs;    // UV1: World-space tiled UVs for texture sampling
     TArray<FColor> VertexColors;
 };
 

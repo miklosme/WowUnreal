@@ -10,29 +10,52 @@
 DEFINE_LOG_CATEGORY_STATIC(LogWowCharTex, Log, All);
 
 FString FWowCharacterTexture::GetSectionTexture(uint32 RaceId, uint32 Gender, ESectionType Type,
-    uint32 Variation, uint32 Color)
+    int32 Variation, int32 Color)
 {
     const FCharSectionsDbc& CharSections = FDbcStore::Get().CharSections();
 
+    FString BestMatch;
+    int32 BestScore = -1;
     for (const FCharSectionsDbcEntry& Entry : CharSections.GetAll())
     {
-        if (Entry.RaceID == RaceId &&
-            Entry.SexID == Gender &&
-            Entry.Type == static_cast<uint32>(Type) &&
-            Entry.Variation == Variation &&
-            Entry.Color == Color)
+        if (Entry.RaceID != RaceId ||
+            Entry.SexID != Gender ||
+            Entry.Type != static_cast<uint32>(Type))
         {
-            for (int32 i = 0; i < 3; i++)
+            continue;
+        }
+
+        int32 Score = 0;
+        if (Variation != INDEX_NONE)
+        {
+            if (Entry.Variation != static_cast<uint32>(Variation))
             {
-                if (!Entry.Textures[i].IsEmpty())
-                {
-                    return Entry.Textures[i];
-                }
+                continue;
+            }
+            Score += 2;
+        }
+
+        if (Color != INDEX_NONE)
+        {
+            if (Entry.Color != static_cast<uint32>(Color))
+            {
+                continue;
+            }
+            Score += 4;
+        }
+
+        for (int32 i = 0; i < 3; ++i)
+        {
+            if (!Entry.Textures[i].IsEmpty() && Score > BestScore)
+            {
+                BestMatch = Entry.Textures[i];
+                BestScore = Score;
+                break;
             }
         }
     }
 
-    return FString();
+    return BestMatch;
 }
 
 /** Decode a DXT1 4x4 block into 16 RGBA pixels */
@@ -197,16 +220,17 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
     if (!Mpq) return nullptr;
 
     // Cache key includes all customization parameters
-    FString CacheKey = FString::Printf(TEXT("CharTex_%d_%d_%d_%d_%d"),
+    FString CacheKey = FString::Printf(TEXT("CharTex_%d_%d_%d_%d_%d_%d_%d"),
         Customization.RaceId, Customization.Gender, Customization.SkinColor,
-        Customization.FaceVariation, Customization.FacialHairStyle);
+        Customization.FaceVariation, Customization.HairStyle, Customization.HairColor,
+        Customization.FacialHairStyle);
 
     UTexture2D* CachedTex = Cache ? Cache->FindTexture(CacheKey) : nullptr;
     if (CachedTex) return CachedTex;
 
     // 1. Load base skin
     FString SkinPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::Skin, Customization.SkinColor, 0);
+        ESectionType::Skin, INDEX_NONE, static_cast<int32>(Customization.SkinColor));
     if (SkinPath.IsEmpty())
     {
         UE_LOG(LogWowCharTex, Warning, TEXT("No skin texture for Race=%d Gender=%d SkinColor=%d"),
@@ -238,7 +262,8 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
 
     // 2. Overlay face texture
     FString FacePath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::Face, Customization.FaceVariation, Customization.SkinColor);
+        ESectionType::Face, static_cast<int32>(Customization.FaceVariation),
+        static_cast<int32>(Customization.SkinColor));
     if (!FacePath.IsEmpty())
     {
         uint32 FaceW, FaceH;
@@ -253,9 +278,28 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
         }
     }
 
-    // 3. Overlay facial hair texture
+    // 3. Overlay hair texture for scalp/visible hair regions
+    FString HairPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
+        ESectionType::Hair, static_cast<int32>(Customization.HairStyle),
+        static_cast<int32>(Customization.HairColor));
+    if (!HairPath.IsEmpty())
+    {
+        uint32 HairW, HairH;
+        TArray<uint8> HairPixels = LoadBlpAsRGBA(Mpq, HairPath, HairW, HairH);
+        if (HairPixels.Num() > 0)
+        {
+            if (HairW != SkinW || HairH != SkinH)
+                HairPixels = ScalePixels(HairPixels, HairW, HairH, SkinW, SkinH);
+            AlphaBlendLayer(Composite, HairPixels, SkinW, SkinH);
+            LayersComposited++;
+            UE_LOG(LogWowCharTex, Verbose, TEXT("Composited hair: %s"), *HairPath);
+        }
+    }
+
+    // 4. Overlay facial hair texture
     FString FacialPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::FacialHair, Customization.FacialHairStyle, Customization.SkinColor);
+        ESectionType::FacialHair, static_cast<int32>(Customization.FacialHairStyle),
+        static_cast<int32>(Customization.HairColor));
     if (!FacialPath.IsEmpty())
     {
         uint32 FhW, FhH;
@@ -270,9 +314,9 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
         }
     }
 
-    // 4. Overlay underwear texture
+    // 5. Overlay underwear texture
     FString UnderwearPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::Underwear, 0, Customization.SkinColor);
+        ESectionType::Underwear, INDEX_NONE, static_cast<int32>(Customization.SkinColor));
     if (!UnderwearPath.IsEmpty())
     {
         uint32 UwW, UwH;
@@ -287,7 +331,7 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
         }
     }
 
-    // 5. Create UTexture2D from composited RGBA pixels
+    // 6. Create UTexture2D from composited RGBA pixels
     UTexture2D* Tex = UTexture2D::CreateTransient(SkinW, SkinH, PF_R8G8B8A8, *CacheKey);
     if (!Tex) return nullptr;
 

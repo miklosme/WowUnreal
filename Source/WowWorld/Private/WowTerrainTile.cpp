@@ -47,6 +47,8 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
 
     // Build a single UStaticMesh with one polygon group per chunk (up to 256 material slots)
     FMeshDescription MeshDesc;
+    // Must set UV channels before Register() so attributes are allocated correctly
+    MeshDesc.SetNumUVChannels(2); // UV0 = alpha/splatmap [0,1], UV1 = world-space tiled
     FStaticMeshAttributes Attributes(MeshDesc);
     Attributes.Register();
 
@@ -111,9 +113,13 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
             VertexInstanceTangents[InstID] = T;
             VertexInstanceBinormalSigns[InstID] = 1.0f;
 
-            FVector2f UV = (v < MeshData.UVs.Num())
+            FVector2f UV0 = (v < MeshData.UVs.Num())
                 ? FVector2f(MeshData.UVs[v]) : FVector2f(0, 0);
-            VertexInstanceUVs.Set(InstID, 0, UV);
+            VertexInstanceUVs.Set(InstID, 0, UV0);
+
+            FVector2f UV1 = (v < MeshData.TiledUVs.Num())
+                ? FVector2f(MeshData.TiledUVs[v]) : FVector2f(0, 0);
+            VertexInstanceUVs.Set(InstID, 1, UV1);
         }
 
         // Create triangles for this chunk
@@ -148,38 +154,47 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         // Build UStaticMesh from the mesh description
         UStaticMesh* SM = NewObject<UStaticMesh>();
 
+        // Add materials BEFORE building so sections are initialized with correct materials
+        for (UMaterialInterface* Mat : SectionMaterials)
+        {
+            SM->GetStaticMaterials().Add(FStaticMaterial(Mat));
+        }
+
+        SM->bAllowCPUAccess = true;
+
         TArray<const FMeshDescription*> MeshDescs;
         MeshDescs.Add(&MeshDesc);
         UStaticMesh::FBuildMeshDescriptionsParams Params;
         Params.bBuildSimpleCollision = false;
         Params.bFastBuild = true;
-        Params.bAllowCpuAccess = true;
+        Params.bCommitMeshDescription = true;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
 
         // Enable complex collision (use render mesh as collision)
-        if (SM->GetBodySetup())
+        if (SM->GetBodySetup() == nullptr)
         {
-            SM->GetBodySetup()->CollisionTraceFlag = CTF_UseComplexAsSimple;
+            SM->CreateBodySetup();
+        }
+        if (UBodySetup* BodySetup = SM->GetBodySetup())
+        {
+            BodySetup->CollisionTraceFlag = CTF_UseComplexAsSimple;
+            BodySetup->bMeshCollideAll = true;
+            BodySetup->CreatePhysicsMeshes();
         }
 
-        // Assign materials to each section
-        for (int32 s = 0; s < SectionMaterials.Num(); ++s)
-        {
-            if (SectionMaterials[s])
-            {
-                SM->SetMaterial(s, SectionMaterials[s]);
-            }
-        }
-
-        // Create UStaticMeshComponent
+        // Create UStaticMeshComponent and set materials on the component
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(this, TEXT("TerrainMesh"));
         MeshComp->SetStaticMesh(SM);
         MeshComp->SetupAttachment(RootScene);
+        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        MeshComp->SetCollisionResponseToAllChannels(ECR_Block);
+        for (int32 s = 0; s < SectionMaterials.Num(); ++s)
+        {
+            MeshComp->SetMaterial(s, SectionMaterials[s]);
+        }
         MeshComp->RegisterComponent();
         MeshComp->SetCastShadow(false);
-        MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
         MeshComp->SetCollisionObjectType(ECC_WorldStatic);
-        MeshComp->SetCollisionResponseToAllChannels(ECR_Block);
 
         ChunkMeshes.Add(MeshComp);
         UE_LOG(LogTerrainTile, Log, TEXT("Tile %d,%d: %d sections, %d textured, %d/%d have heights, %d skipped"),

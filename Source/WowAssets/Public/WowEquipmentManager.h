@@ -42,4 +42,8 @@ public:
 
     /** Get the bone name for a given attachment point from M2 data */
     static FName GetAttachmentBoneName(const FM2Data& M2Data, EAttachmentPoint AttachPoint);
+
+    /** Resolve a display ID into a concrete M2/BLP pair for a specific attachment point. */
+    static bool ResolveEquipmentPaths(FMpqManager* Mpq, uint32 ItemDisplayId, EAttachmentPoint AttachPoint,
+        FString& OutModelPath, FString* OutTexturePath = nullptr);
 };

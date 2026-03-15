@@ -10,15 +10,21 @@
 #include "Formats/BlpParser.h"
 #include "Formats/BlpTypes.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/Skeleton.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
 #include "Coord/WowCoordinate.h"
+#if WITH_EDITOR
+#include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "UObject/UObjectGlobals.h"
+#endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowCharacter, Log, All);
 
@@ -27,6 +33,184 @@ static TMap<FString, TSharedPtr<FM2Data>> CharM2Cache;
 static FCriticalSection CharCacheLock;
 static TMap<FString, TWeakObjectPtr<USkeleton>> CharSkeletonCache;
 static TMap<FString, TArray<TWeakObjectPtr<UAnimSequence>>> CharAnimCache;
+
+namespace
+{
+UMaterial* GetCharacterMaterial()
+{
+    static TWeakObjectPtr<UMaterial> CachedMaterial;
+    if (!CachedMaterial.IsValid())
+    {
+#if WITH_EDITOR
+        UMaterial* Material = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowCharacterRuntimeTransient"));
+        if (Material)
+        {
+            Material->SetShadingModel(MSM_Unlit);
+            Material->BlendMode = BLEND_Opaque;
+            Material->TwoSided = false;
+
+            UTexture2D* DefaultTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
+            auto& Expressions = Material->GetExpressionCollection();
+
+            UMaterialExpressionTextureSampleParameter2D* TextureSampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(Material);
+            TextureSampler->ParameterName = TEXT("BaseTexture");
+            TextureSampler->SamplerType = SAMPLERTYPE_Color;
+            TextureSampler->Texture = DefaultTexture;
+            Expressions.AddExpression(TextureSampler);
+
+            Material->GetEditorOnlyData()->EmissiveColor.Connect(0, TextureSampler);
+
+            bool bNeedsRecompile = false;
+            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_SkeletalMesh);
+            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_StaticMesh);
+            Material->PreEditChange(nullptr);
+            Material->PostEditChange();
+            Material->ForceRecompileForRendering();
+            CachedMaterial = Material;
+        }
+#endif
+
+        if (!CachedMaterial.IsValid())
+        {
+            CachedMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
+        }
+    }
+    return CachedMaterial.Get();
+}
+
+UTexture2D* LoadBlpTexture(FMpqManager* Mpq, FWowAssetCache* Cache, const FString& TexturePath)
+{
+    if (!Mpq || TexturePath.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    if (Cache)
+    {
+        if (UTexture2D* Cached = Cache->FindTexture(TexturePath))
+        {
+            return Cached;
+        }
+    }
+
+    TArray<uint8> BlpRaw;
+    if (!Mpq->ReadFile(TexturePath, BlpRaw))
+    {
+        return nullptr;
+    }
+
+    FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
+    if (!BlpData.bIsValid)
+    {
+        return nullptr;
+    }
+
+    UTexture2D* Texture = FWowTextureFactory::CreateTexture(BlpData, TexturePath);
+    if (Texture && Cache)
+    {
+        Cache->CacheTexture(TexturePath, Texture);
+    }
+    return Texture;
+}
+
+void ApplyTexturedMaterial(UPrimitiveComponent* Component, UTexture2D* Texture)
+{
+    if (!Component || !Texture)
+    {
+        return;
+    }
+
+    if (UMaterial* BaseMat = GetCharacterMaterial())
+    {
+        UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, Component);
+        MID->SetTextureParameterValue(TEXT("BaseTexture"), Texture);
+        Component->SetMaterial(0, MID);
+    }
+}
+
+int32 FindPreferredAnimationIndex(const FM2Data& Data)
+{
+    int32 FirstLooping = INDEX_NONE;
+    for (int32 Index = 0; Index < Data.AnimationTracks.Num(); ++Index)
+    {
+        const FM2AnimationData& Track = Data.AnimationTracks[Index];
+        if (Track.AnimationId == 0)
+        {
+            return Index;
+        }
+
+        if (FirstLooping == INDEX_NONE && Track.bIsLooping)
+        {
+            FirstLooping = Index;
+        }
+    }
+
+    return FirstLooping != INDEX_NONE ? FirstLooping : 0;
+}
+
+UAnimSequence* CreateReferencePoseAnimation(USkeleton* Skeleton, const FString& ModelName)
+{
+    if (!Skeleton)
+    {
+        return nullptr;
+    }
+
+    UAnimSequence* AnimSeq = NewObject<UAnimSequence>();
+    AnimSeq->SetSkeleton(Skeleton);
+
+    IAnimationDataController& Controller = AnimSeq->GetController();
+    Controller.InitializeModel();
+    Controller.OpenBracket(FText::FromString(TEXT("CreateReferencePoseAnimation")));
+    Controller.SetFrameRate(FFrameRate(30, 1));
+    Controller.SetNumberOfFrames(1);
+
+    const FReferenceSkeleton& RefSkeleton = Skeleton->GetReferenceSkeleton();
+    const TArray<FTransform>& RefPose = RefSkeleton.GetRefBonePose();
+    for (int32 BoneIndex = 0; BoneIndex < RefSkeleton.GetNum(); ++BoneIndex)
+    {
+        const FName BoneName = RefSkeleton.GetBoneName(BoneIndex);
+        const FTransform& BoneTransform = RefPose[BoneIndex];
+
+        Controller.AddBoneCurve(BoneName);
+        Controller.SetBoneTrackKeys(
+            BoneName,
+            { FVector3f(BoneTransform.GetTranslation()) },
+            { FQuat4f(BoneTransform.GetRotation()) },
+            { FVector3f(BoneTransform.GetScale3D()) });
+    }
+
+    Controller.CloseBracket();
+    Controller.NotifyPopulated();
+
+    UE_LOG(LogWowCharacter, Log, TEXT("Created reference-pose animation for %s"), *ModelName);
+    return AnimSeq;
+}
+
+UTexture2D* ResolveCreatureTextureOverride(FMpqManager* Mpq, FWowAssetCache* Cache,
+    const FString& ModelPath, const FString& TexturePath)
+{
+    if (TexturePath.IsEmpty())
+    {
+        return nullptr;
+    }
+
+    FString ResolvedPath = TexturePath;
+    ResolvedPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+    if (!ResolvedPath.EndsWith(TEXT(".blp"), ESearchCase::IgnoreCase))
+    {
+        ResolvedPath += TEXT(".blp");
+    }
+
+    if (UTexture2D* Texture = LoadBlpTexture(Mpq, Cache, ResolvedPath))
+    {
+        return Texture;
+    }
+
+    FString RelativePath = FPaths::Combine(FPaths::GetPath(ModelPath), FPaths::GetCleanFilename(ResolvedPath));
+    RelativePath.ReplaceInline(TEXT("/"), TEXT("\\"));
+    return LoadBlpTexture(Mpq, Cache, RelativePath);
+}
+}
 
 FString FWowCharacterBuilder::GetCharacterModelPath(ERace Race, EGender Gender)
 {
@@ -61,7 +245,7 @@ AActor* FWowCharacterBuilder::SpawnCharacter(UWorld* World, FMpqManager* Mpq, FW
     Cust.Gender = static_cast<uint32>(Gender);
     UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Cust);
 
-    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 100.0f, CompositeTex);
+    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, CompositeTex);
 }
 
 AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
@@ -77,7 +261,7 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
     UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Params.Customization);
 
     // Spawn base character
-    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 100.0f, CompositeTex);
+    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, CompositeTex);
     if (!Actor) return nullptr;
 
     // Attach equipment
@@ -150,11 +334,13 @@ AActor* FWowCharacterBuilder::SpawnCreatureByDisplayId(UWorld* World, FMpqManage
         ModelPath = ModelPath.Left(ModelPath.Len() - 4) + TEXT(".m2");
     }
 
-    float Scale = DisplayInfo->Scale * ModelData->Scale * 100.0f;
+    UTexture2D* TextureOverride = ResolveCreatureTextureOverride(Mpq, Cache, ModelPath, DisplayInfo->Texture1);
+
+    float Scale = DisplayInfo->Scale * ModelData->Scale;
     UE_LOG(LogWowCharacter, Log, TEXT("Spawning creature: DisplayID=%d Model=%s Scale=%.2f"),
         DisplayId, *ModelPath, Scale);
 
-    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, Scale);
+    return SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, Scale, TextureOverride);
 }
 
 AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
@@ -208,22 +394,6 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
         return nullptr;
     }
 
-    // Build skeleton (cached for future skeletal animation support)
-    {
-        FScopeLock Lock(&CharCacheLock);
-        auto* CachedSkel = CharSkeletonCache.Find(NormPath);
-        if (!CachedSkel || !CachedSkel->IsValid())
-        {
-            USkeleton* Skeleton = FWowSkeletalMeshBuilder::CreateSkeleton(*M2Data, ModelPath);
-            if (Skeleton)
-            {
-                Skeleton->AddToRoot();
-                CharSkeletonCache.Add(NormPath, Skeleton);
-            }
-        }
-    }
-
-    // Spawn actor with ProceduralMeshComponent (avoids skeletal mesh render pipeline issues)
     AActor* Actor = World->SpawnActor<AActor>(AActor::StaticClass(), FTransform(Rotation, Location));
     if (!Actor) return nullptr;
 
@@ -231,9 +401,112 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
     Actor->SetRootComponent(Root);
     Root->RegisterComponent();
 
+    if (M2Data->HasBones())
+    {
+        USkeleton* Skeleton = nullptr;
+        {
+            FScopeLock Lock(&CharCacheLock);
+            if (TWeakObjectPtr<USkeleton>* CachedSkel = CharSkeletonCache.Find(NormPath))
+            {
+                Skeleton = CachedSkel->Get();
+            }
+        }
+
+        if (!Skeleton)
+        {
+            Skeleton = FWowSkeletalMeshBuilder::CreateSkeleton(*M2Data, ModelPath);
+            if (Skeleton)
+            {
+                FScopeLock Lock(&CharCacheLock);
+                CharSkeletonCache.Add(NormPath, Skeleton);
+            }
+        }
+
+        USkeletalMesh* SkeletalMesh = Cache ? Cache->FindSkelMesh(NormPath) : nullptr;
+        if (!SkeletalMesh && Skeleton)
+        {
+            SkeletalMesh = FWowSkeletalMeshBuilder::CreateSkeletalMesh(*M2Data, Skeleton, ModelPath, Mpq, Cache);
+            if (SkeletalMesh && Cache)
+            {
+                Cache->CacheSkelMesh(NormPath, SkeletalMesh);
+            }
+        }
+
+        if (SkeletalMesh)
+        {
+            USkeletalMeshComponent* SkelMesh = NewObject<USkeletalMeshComponent>(Actor, TEXT("CharacterMesh"));
+            SkelMesh->SetupAttachment(Root);
+            SkelMesh->SetSkeletalMesh(SkeletalMesh);
+            SkelMesh->SetWorldScale3D(FVector(Scale));
+            SkelMesh->SetCastShadow(true);
+            SkelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            SkelMesh->RegisterComponent();
+
+            UTexture2D* TextureToApply = OverrideTexture;
+            if (!TextureToApply && M2Data->TexturePaths.Num() > 0 && !M2Data->TexturePaths[0].IsEmpty())
+            {
+                TextureToApply = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[0]);
+            }
+            ApplyTexturedMaterial(SkelMesh, TextureToApply);
+
+            TArray<TWeakObjectPtr<UAnimSequence>> CachedAnimations;
+            bool bNeedCreateAnimations = true;
+            {
+                FScopeLock Lock(&CharCacheLock);
+                if (TArray<TWeakObjectPtr<UAnimSequence>>* Found = CharAnimCache.Find(NormPath))
+                {
+                    CachedAnimations = *Found;
+                    bNeedCreateAnimations = Found->Num() == 0 || !(*Found)[0].IsValid();
+                }
+            }
+
+            if (bNeedCreateAnimations && Skeleton)
+            {
+                CachedAnimations.Reset();
+                for (UAnimSequence* Animation : FWowSkeletalMeshBuilder::CreateAnimations(*M2Data, Skeleton, ModelPath))
+                {
+                    if (Animation)
+                    {
+                        CachedAnimations.Add(Animation);
+                    }
+                }
+
+                if (CachedAnimations.Num() == 0)
+                {
+                    if (UAnimSequence* ReferencePoseAnimation = CreateReferencePoseAnimation(Skeleton, ModelPath))
+                    {
+                        CachedAnimations.Add(ReferencePoseAnimation);
+                    }
+                }
+
+                FScopeLock Lock(&CharCacheLock);
+                CharAnimCache.Add(NormPath, CachedAnimations);
+            }
+
+            if (CachedAnimations.Num() > 0)
+            {
+                int32 AnimIndex = FindPreferredAnimationIndex(*M2Data);
+                if (!CachedAnimations.IsValidIndex(AnimIndex) || !CachedAnimations[AnimIndex].IsValid())
+                {
+                    AnimIndex = 0;
+                }
+
+                if (CachedAnimations[AnimIndex].IsValid())
+                {
+                    SkelMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+                    SkelMesh->PlayAnimation(CachedAnimations[AnimIndex].Get(), true);
+                }
+            }
+
+            UE_LOG(LogWowCharacter, Log, TEXT("Spawned skeletal M2 actor: %s at %s (scale=%.2f, %d bones, %d anims)"),
+                *ModelPath, *Location.ToString(), Scale, M2Data->Bones.Num(), M2Data->AnimationTracks.Num());
+            return Actor;
+        }
+    }
+
     UProceduralMeshComponent* ProcMesh = NewObject<UProceduralMeshComponent>(Actor, TEXT("CharacterMesh"));
     ProcMesh->SetupAttachment(Root);
-    ProcMesh->SetWorldScale3D(FVector(Scale));
+    ProcMesh->SetWorldScale3D(FVector(Scale * FWowCoordinate::SCALE));
     ProcMesh->SetCastShadow(true);
     ProcMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
@@ -274,34 +547,10 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
     UTexture2D* TexToApply = OverrideTexture;
     if (!TexToApply && M2Data->TexturePaths.Num() > 0 && !M2Data->TexturePaths[0].IsEmpty())
     {
-        const FString& TexPath = M2Data->TexturePaths[0];
-        TexToApply = Cache ? Cache->FindTexture(TexPath) : nullptr;
-        if (!TexToApply)
-        {
-            TArray<uint8> BlpRaw;
-            if (Mpq->ReadFile(TexPath, BlpRaw))
-            {
-                FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
-                if (BlpData.bIsValid)
-                {
-                    TexToApply = FWowTextureFactory::CreateTexture(BlpData, TexPath);
-                    if (TexToApply && Cache) Cache->CacheTexture(TexPath, TexToApply);
-                }
-            }
-        }
+        TexToApply = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[0]);
     }
 
-    if (TexToApply)
-    {
-        UMaterial* BaseMat = UMaterial::GetDefaultMaterial(MD_Surface);
-        if (BaseMat)
-        {
-            UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, ProcMesh);
-            MID->SetTextureParameterValue(FName(TEXT("BaseColor")), TexToApply);
-            ProcMesh->SetMaterial(0, MID);
-            UE_LOG(LogWowCharacter, Log, TEXT("Applied texture to character: %s"), *ModelPath);
-        }
-    }
+    ApplyTexturedMaterial(ProcMesh, TexToApply);
 
     ProcMesh->RegisterComponent();
 

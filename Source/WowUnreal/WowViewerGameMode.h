@@ -15,6 +15,7 @@ class WOWUNREAL_API AWowViewerGameMode : public AGameModeBase
 public:
     AWowViewerGameMode();
     virtual void BeginPlay() override;
+    virtual UClass* GetDefaultPawnClassForController_Implementation(AController* InController) override;
 
 private:
     void SetupPostProcess(UWorld* World);

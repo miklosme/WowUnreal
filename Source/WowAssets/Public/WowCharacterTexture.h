@@ -42,5 +42,5 @@ public:
 
     /** Look up a CharSections texture path for the given parameters */
     static FString GetSectionTexture(uint32 RaceId, uint32 Gender, ESectionType Type,
-        uint32 Variation, uint32 Color);
+        int32 Variation = INDEX_NONE, int32 Color = INDEX_NONE);
 };

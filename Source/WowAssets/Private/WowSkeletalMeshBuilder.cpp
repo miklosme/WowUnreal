@@ -11,13 +11,11 @@
 #include "Engine/SkeletalMesh.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Rendering/SkeletalMeshLODImporterData.h"
+#include "MeshDescription.h"
+#include "SkeletalMeshAttributes.h"
+#include "BoneWeights.h"
 #include "Rendering/SkeletalMeshModel.h"
 #include "Rendering/SkeletalMeshLODModel.h"
-#include "Rendering/SkeletalMeshRenderData.h"
-#include "Rendering/SkeletalMeshLODRenderData.h"
-#include "MeshUtilities.h"
-#include "RenderingThread.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowSkelMesh, Log, All);
 
@@ -237,133 +235,123 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	LODInfo.ReductionSettings.NumOfTrianglesPercentage = 1.0f;
 	LODInfo.ReductionSettings.NumOfVertPercentage = 1.0f;
 
-	// Build import data arrays for IMeshUtilities::BuildSkeletalMesh
-	TArray<FVector3f> Points;
-	Points.SetNum(NumVerts);
+	FMeshDescription* MeshDescPtr = SkelMesh->CreateMeshDescription(0);
+	if (!MeshDescPtr)
+	{
+		UE_LOG(LogWowSkelMesh, Error, TEXT("Failed to create mesh description for '%s'"), *ModelName);
+		return nullptr;
+	}
+
+	FMeshDescription& MeshDesc = *MeshDescPtr;
+	FSkeletalMeshAttributes SkelAttrs(MeshDesc);
+	SkelAttrs.Register();
+
+	FPolygonGroupID PolyGroup = MeshDesc.CreatePolygonGroup();
+	MeshDesc.ReserveNewVertices(NumVerts);
+	MeshDesc.ReserveNewVertexInstances(NumVerts);
+	MeshDesc.ReserveNewPolygons(NumTris);
+	MeshDesc.ReserveNewEdges(Data.Indices.Num());
+
+	TVertexAttributesRef<FVector3f> VertexPositions = SkelAttrs.GetVertexPositions();
+	TVertexInstanceAttributesRef<FVector3f> VertexNormals = SkelAttrs.GetVertexInstanceNormals();
+	TVertexInstanceAttributesRef<FVector3f> VertexTangents = SkelAttrs.GetVertexInstanceTangents();
+	TVertexInstanceAttributesRef<float> BinormalSigns = SkelAttrs.GetVertexInstanceBinormalSigns();
+	TVertexInstanceAttributesRef<FVector2f> VertexUVs = SkelAttrs.GetVertexInstanceUVs();
+	VertexUVs.SetNumChannels(1);
+
+	FSkinWeightsVertexAttributesRef SkinWeightsRef = SkelAttrs.GetVertexSkinWeights();
+
+	TArray<FVertexInstanceID> VertexInstanceIDs;
+	VertexInstanceIDs.SetNum(NumVerts);
+
 	for (int32 i = 0; i < NumVerts; ++i)
 	{
 		const FM2Vertex& V = Data.Vertices[i];
-		Points[i] = FVector3f(
+		FVertexID VertID = MeshDesc.CreateVertex();
+
+		VertexPositions[VertID] = FVector3f(
 			V.Position.Y * FWowCoordinate::SCALE,
 			V.Position.X * FWowCoordinate::SCALE,
 			V.Position.Z * FWowCoordinate::SCALE
 		);
-	}
 
-	TArray<SkeletalMeshImportData::FMeshWedge> Wedges;
-	Wedges.SetNum(Data.Indices.Num());
-	for (int32 i = 0; i < Data.Indices.Num(); ++i)
-	{
-		int32 VertIdx = Data.Indices[i];
-		Wedges[i].iVertex = VertIdx;
-		Wedges[i].UVs[0] = FVector2f(Data.Vertices[VertIdx].TexCoord.X, Data.Vertices[VertIdx].TexCoord.Y);
-		for (int32 u = 1; u < MAX_TEXCOORDS; ++u)
-			Wedges[i].UVs[u] = FVector2f::ZeroVector;
-		Wedges[i].Color = FColor::White;
-	}
-
-	TArray<SkeletalMeshImportData::FMeshFace> Faces;
-	Faces.SetNum(NumTris);
-	for (int32 i = 0; i < NumTris; ++i)
-	{
-		Faces[i].iWedge[0] = i * 3;
-		Faces[i].iWedge[1] = i * 3 + 1;
-		Faces[i].iWedge[2] = i * 3 + 2;
-		Faces[i].MeshMaterialIndex = 0;
-		Faces[i].SmoothingGroups = 1;
-
-		for (int32 v = 0; v < 3; ++v)
-		{
-			int32 VertIdx = Data.Indices[i * 3 + v];
-			const FM2Vertex& Vert = Data.Vertices[VertIdx];
-			FVector3f Normal(Vert.Normal.Y, Vert.Normal.X, Vert.Normal.Z);
-			Normal.Normalize();
-			Faces[i].TangentZ[v] = Normal;
-			FVector3f Tangent = FVector3f::CrossProduct(Normal, FVector3f(0, 1, 0));
-			if (Tangent.SizeSquared() < 0.001f)
-				Tangent = FVector3f::CrossProduct(Normal, FVector3f(1, 0, 0));
-			Tangent.Normalize();
-			Faces[i].TangentX[v] = Tangent;
-			Faces[i].TangentY[v] = FVector3f::CrossProduct(Normal, Tangent);
-		}
-	}
-
-	TArray<SkeletalMeshImportData::FVertInfluence> Influences;
-	for (int32 i = 0; i < NumVerts; ++i)
-	{
-		const FM2Vertex& V = Data.Vertices[i];
+		TArray<UE::AnimationCore::FBoneWeight> BoneWeightArray;
 		for (int32 j = 0; j < 4; ++j)
 		{
-			if (V.BoneWeights[j] > 0)
+			if (V.BoneWeights[j] <= 0)
 			{
-				SkeletalMeshImportData::FVertInfluence Inf;
-				Inf.VertIndex = i;
-				int32 OrigBoneIdx = V.BoneIndices[j];
-				Inf.BoneIndex = (OrigBoneIdx >= 0 && OrigBoneIdx < NumBones) ? BoneRemapTable[OrigBoneIdx] : 0;
-				Inf.Weight = V.BoneWeights[j] / 255.0f;
-				Influences.Add(Inf);
+				continue;
 			}
+
+			const int32 OrigBoneIdx = V.BoneIndices[j];
+			const int32 BoneIndex = (OrigBoneIdx >= 0 && OrigBoneIdx < NumBones) ? BoneRemapTable[OrigBoneIdx] : 0;
+			BoneWeightArray.Add(UE::AnimationCore::FBoneWeight(static_cast<FBoneIndexType>(BoneIndex), V.BoneWeights[j] / 255.0f));
+		}
+
+		if (BoneWeightArray.Num() == 0)
+		{
+			BoneWeightArray.Add(UE::AnimationCore::FBoneWeight(0, 1.0f));
+		}
+
+		SkinWeightsRef.Set(VertID, UE::AnimationCore::FBoneWeights::Create(BoneWeightArray));
+
+		FVertexInstanceID InstID = MeshDesc.CreateVertexInstance(VertID);
+		VertexInstanceIDs[i] = InstID;
+
+		FVector3f Normal(V.Normal.Y, V.Normal.X, V.Normal.Z);
+		Normal.Normalize();
+		VertexNormals[InstID] = Normal;
+
+		FVector3f Tangent = FVector3f::CrossProduct(Normal, FVector3f(0, 1, 0));
+		if (Tangent.SizeSquared() < 0.001f)
+		{
+			Tangent = FVector3f::CrossProduct(Normal, FVector3f(1, 0, 0));
+		}
+		Tangent.Normalize();
+		VertexTangents[InstID] = Tangent;
+		BinormalSigns[InstID] = 1.0f;
+		VertexUVs.Set(InstID, 0, FVector2f(V.TexCoord.X, V.TexCoord.Y));
+	}
+
+	for (int32 i = 0; i < NumTris; ++i)
+	{
+		TArray<FVertexInstanceID> TriVerts;
+		TriVerts.Reserve(3);
+		for (int32 Corner = 0; Corner < 3; ++Corner)
+		{
+			const int32 VertexIndex = Data.Indices[i * 3 + Corner];
+			if (VertexInstanceIDs.IsValidIndex(VertexIndex))
+			{
+				TriVerts.Add(VertexInstanceIDs[VertexIndex]);
+			}
+		}
+
+		if (TriVerts.Num() == 3)
+		{
+			MeshDesc.CreatePolygon(PolyGroup, TriVerts);
 		}
 	}
 
-	TArray<int32> PointToOriginalMap;
-	PointToOriginalMap.SetNum(NumVerts);
-	for (int32 i = 0; i < NumVerts; ++i)
-		PointToOriginalMap[i] = i;
-
-	// Build the LOD model using MeshUtilities
-	IMeshUtilities& MeshUtils = FModuleManager::Get().LoadModuleChecked<IMeshUtilities>("MeshUtilities");
-	FSkeletalMeshLODModel* LODModel = new FSkeletalMeshLODModel();
-
-	IMeshUtilities::MeshBuildOptions BuildOptions;
-	if (!MeshUtils.BuildSkeletalMesh(*LODModel, ModelName, RefSkel, Influences, Wedges, Faces, Points, PointToOriginalMap, BuildOptions))
+	SkelAttrs.ReserveNewBones(RefSkel.GetNum());
+	auto BoneNames = SkelAttrs.GetBoneNames();
+	auto BoneParentIndices = SkelAttrs.GetBoneParentIndices();
+	auto BonePoses = SkelAttrs.GetBonePoses();
+	for (int32 BoneIndex = 0; BoneIndex < RefSkel.GetNum(); ++BoneIndex)
 	{
-		UE_LOG(LogWowSkelMesh, Error, TEXT("BuildSkeletalMesh failed for '%s'"), *ModelName);
-		delete LODModel;
-		return nullptr;
+		FBoneID BoneID = SkelAttrs.CreateBone();
+		BoneNames[BoneID] = RefSkel.GetBoneName(BoneIndex);
+		BoneParentIndices[BoneID] = RefSkel.GetParentIndex(BoneIndex);
+		BonePoses[BoneID] = RefSkel.GetRefBonePose()[BoneIndex];
 	}
 
-	// Set the LOD model on the imported model
-	FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel();
-	if (ImportedModel)
+	if (FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel())
 	{
 		ImportedModel->LODModels.Empty();
-		ImportedModel->LODModels.Add(LODModel);
+		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
 	}
 
-	// Apply material with first texture
-	if (Data.TexturePaths.Num() > 0 && Mpq && Cache)
-	{
-		const FString& TexPath = Data.TexturePaths[0];
-		if (!TexPath.IsEmpty())
-		{
-			UTexture2D* Tex = Cache->FindTexture(TexPath);
-			if (!Tex)
-			{
-				TArray<uint8> BlpRaw;
-				if (Mpq->ReadFile(TexPath, BlpRaw))
-				{
-					FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
-					if (BlpData.bIsValid)
-					{
-						Tex = FWowTextureFactory::CreateTexture(BlpData, TexPath);
-						if (Tex) Cache->CacheTexture(TexPath, Tex);
-					}
-				}
-			}
-
-			if (Tex)
-			{
-				UMaterial* BaseMat = UMaterial::GetDefaultMaterial(MD_Surface);
-				if (BaseMat)
-				{
-					UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SkelMesh);
-					MID->SetTextureParameterValue(FName(TEXT("BaseColor")), Tex);
-					SkelMesh->GetMaterials().Add(FSkeletalMaterial(MID, true, false, FName(TEXT("M2_Material"))));
-				}
-			}
-		}
-	}
+	SkelMesh->CommitMeshDescription(0);
+	SkelMesh->Build();
 
 	if (SkelMesh->GetMaterials().Num() == 0)
 	{
@@ -379,30 +367,7 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	));
 	SkelMesh->SetImportedBounds(Bounds);
 	SkelMesh->CalculateInvRefMatrices();
-
-	// Build render data directly from the LOD model
-	SkelMesh->AllocateResourceForRendering();
-	FSkeletalMeshRenderData* RenderData = SkelMesh->GetResourceForRendering();
-	if (RenderData && LODModel)
-	{
-		RenderData->LODRenderData.Add(new FSkeletalMeshLODRenderData());
-		FSkeletalMeshLODRenderData& LODRenderData = RenderData->LODRenderData[0];
-		LODRenderData.BuildFromLODModel(LODModel, {});
-
-		// Ensure color vertex buffer is initialized (vertex factory requires it)
-		const int32 RenderVertCount = LODRenderData.GetNumVertices();
-		if (LODRenderData.StaticVertexBuffers.ColorVertexBuffer.GetNumVertices() == 0 && RenderVertCount > 0)
-		{
-			LODRenderData.StaticVertexBuffers.ColorVertexBuffer.InitFromSingleColor(FColor::White, RenderVertCount);
-		}
-
-		RenderData->InitResources(true, SkelMesh);
-		FlushRenderingCommands();
-	}
-	else
-	{
-		UE_LOG(LogWowSkelMesh, Error, TEXT("  Failed to create render data"));
-	}
+	SkelMesh->InitResources();
 
 	UE_LOG(LogWowSkelMesh, Log, TEXT("Created skeletal mesh '%s' with %d verts, %d tris, %d bones"),
 		*ModelName, NumVerts, NumTris, NumBones);
@@ -438,6 +403,7 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 		const float DurationSec = AnimData.Duration / 1000.0f;
 
 		IAnimationDataController& Controller = AnimSeq->GetController();
+		Controller.InitializeModel();
 		Controller.OpenBracket(FText::FromString(TEXT("ImportM2Anim")));
 		Controller.SetFrameRate(FFrameRate(30, 1));
 
@@ -454,6 +420,8 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 			}
 
 			FName BoneName = GetBoneName(BoneIdx);
+			const int32 RefBoneIndex = RefSkel.FindBoneIndex(BoneName);
+			const FTransform BaseTransform = RefBoneIndex != INDEX_NONE ? RefSkel.GetRefBonePose()[RefBoneIndex] : FTransform::Identity;
 			Controller.AddBoneCurve(BoneName);
 
 			int32 MaxKeys = FMath::Max3(
@@ -472,19 +440,19 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 
 			for (int32 k = 0; k < MaxKeys; ++k)
 			{
+				PosKeys[k] = FVector3f(BaseTransform.GetTranslation());
+				RotKeys[k] = FQuat4f(BaseTransform.GetRotation());
+				ScaleKeys[k] = FVector3f(BaseTransform.GetScale3D());
+
 				if (k < Track.TransValues.Num())
 				{
 					const FVector& T = Track.TransValues[k];
-					PosKeys[k] = FVector3f(T.Y * FWowCoordinate::SCALE, T.X * FWowCoordinate::SCALE, T.Z * FWowCoordinate::SCALE);
+					PosKeys[k] += FVector3f(T.Y * FWowCoordinate::SCALE, T.X * FWowCoordinate::SCALE, T.Z * FWowCoordinate::SCALE);
 				}
 				else if (Track.TransValues.Num() > 0)
 				{
 					const FVector& T = Track.TransValues.Last();
-					PosKeys[k] = FVector3f(T.Y * FWowCoordinate::SCALE, T.X * FWowCoordinate::SCALE, T.Z * FWowCoordinate::SCALE);
-				}
-				else
-				{
-					PosKeys[k] = FVector3f::ZeroVector;
+					PosKeys[k] += FVector3f(T.Y * FWowCoordinate::SCALE, T.X * FWowCoordinate::SCALE, T.Z * FWowCoordinate::SCALE);
 				}
 
 				if (k < Track.RotValues.Num())
@@ -497,10 +465,6 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 					const FQuat& R = Track.RotValues.Last();
 					RotKeys[k] = FQuat4f(R.Y, R.X, R.Z, -R.W);
 				}
-				else
-				{
-					RotKeys[k] = FQuat4f::Identity;
-				}
 
 				if (k < Track.ScaleValues.Num())
 				{
@@ -512,16 +476,13 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 					const FVector& S = Track.ScaleValues.Last();
 					ScaleKeys[k] = FVector3f(S.X, S.Y, S.Z);
 				}
-				else
-				{
-					ScaleKeys[k] = FVector3f::OneVector;
-				}
 			}
 
 			Controller.SetBoneTrackKeys(BoneName, PosKeys, RotKeys, ScaleKeys);
 		}
 
 		Controller.CloseBracket();
+		Controller.NotifyPopulated();
 		Result.Add(AnimSeq);
 
 		UE_LOG(LogWowSkelMesh, Log, TEXT("  Created animation '%s' (%.2fs, %s)"),

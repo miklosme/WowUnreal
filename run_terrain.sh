@@ -28,18 +28,25 @@ find_log() {
     ls -t "$LOG_DIR"/WowUnreal*.log 2>/dev/null | head -1
 }
 
-echo "Launching terrain viewer..."
+SCREENSHOT_DIR="$PROJECT_DIR/Saved/Screenshots"
+mkdir -p "$SCREENSHOT_DIR"
+SCREENSHOT_PATH="$SCREENSHOT_DIR/terrain_verify.png"
+
+echo "Launching terrain viewer above Northshire Abbey..."
 "$UE_DIR/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor" \
     "$PROJECT_DIR/WowUnreal.uproject" \
     -game -log -windowed -resx=1280 -resy=720 \
     "-wowdata=$WOW_DATA" \
-    -autologin \
+    -autologin -startpos \
+    "-autoscreenshot=$SCREENSHOT_PATH" \
+    -autoscreenshotdelay=30 \
+    -ExecCmds="r.VolumetricFog 0,r.Fog 0" \
     2>/dev/null &
 
 GAME_PID=$!
 echo "Game PID: $GAME_PID"
 echo "Waiting for terrain to load..."
-sleep 30
+sleep 35
 
 LOG_FILE=$(find_log)
 if [ -z "$LOG_FILE" ]; then
@@ -50,16 +57,22 @@ echo "Log: $LOG_FILE"
 
 echo ""
 echo "=== Terrain ==="
-grep -i "sections.*textured\|merged mesh\|Spawned.*tile\|Loading tile" "$LOG_FILE" 2>/dev/null | tail -10
+grep -i "sections.*textured\|Loaded terrain material\|Tile.*textured" "$LOG_FILE" 2>/dev/null | tail -5
 echo ""
 echo "=== Objects ==="
-grep -i "Spawned WMO\|doodad.*spawn\|Skipping large" "$LOG_FILE" 2>/dev/null | head -10
-echo ""
-echo "=== Sky ==="
-grep -i "sky\|skydome\|cloud\|LightFloat" "$LOG_FILE" 2>/dev/null | head -5
+grep -i "Spawned WMO\|Instanced.*doodad\|Skipping large" "$LOG_FILE" 2>/dev/null | head -10
 echo ""
 echo "=== Errors ==="
-grep -i "fatal\|error.*metal\|crash\|error.*wow\|warning.*failed\|FinalPreExposure" "$LOG_FILE" 2>/dev/null | grep -v "LogConfig\|LogInit\|LogAudio\|LogSlate\|CrashGUID\|CrashReport\|LogStreaming\|r.GPU" | head -10
+grep -i "fatal\|error.*metal\|crash\|error.*wow\|warning.*failed\|Failed to compile" "$LOG_FILE" 2>/dev/null | grep -v "LogConfig\|LogInit\|LogAudio\|LogSlate\|CrashGUID\|CrashReport\|LogStreaming\|r.GPU\|LogHLSL\|LogRHI\|LogWowXml" | head -10
+
+echo ""
+echo "=== Screenshot ==="
+if [ -f "$SCREENSHOT_PATH" ]; then
+    SIZE=$(stat -f%z "$SCREENSHOT_PATH" 2>/dev/null || echo "0")
+    echo "Screenshot saved: $SCREENSHOT_PATH ($SIZE bytes)"
+else
+    echo "Screenshot not yet saved (may appear after more frames render)"
+fi
 
 echo ""
 echo "Game running with fly camera. Use WASD + mouse to fly, scroll to adjust speed."

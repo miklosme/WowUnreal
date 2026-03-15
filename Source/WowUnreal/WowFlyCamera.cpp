@@ -3,6 +3,9 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputActionValue.h"
 #include "GameFramework/FloatingPawnMovement.h"
+#include "Coord/WowCoordinate.h"
+#include "Misc/FileHelper.h"
+#include "ImageUtils.h"
 
 AWowFlyCamera::AWowFlyCamera()
 {
@@ -27,10 +30,38 @@ void AWowFlyCamera::BeginPlay()
         Mov->Deceleration = FlySpeed * 4.0f;
     }
 
-    // Start looking down at the terrain instead of at the horizon
+    // If -startpos, teleport to Northshire Abbey at safe altitude
+    if (FString(FCommandLine::Get()).Contains(TEXT("startpos")))
+    {
+        // Northshire Abbey: WoW (-8949, -132, 84) → 15m above terrain
+        FVector NorthshirePos = FWowCoordinate::WowToUE(-8949.0f, -132.0f, 84.0f);
+        NorthshirePos.Z += 1500.0f; // 15m above ground for overview with visible objects
+        SetActorLocation(NorthshirePos);
+        UE_LOG(LogTemp, Warning, TEXT("FlyCamera teleported to Northshire: %s"), *NorthshirePos.ToString());
+    }
+
+    // Start looking down at the terrain
     if (APlayerController* PC = Cast<APlayerController>(GetController()))
     {
-        PC->SetControlRotation(FRotator(-30.0f, PC->GetControlRotation().Yaw, 0.0f));
+        PC->SetControlRotation(FRotator(-15.0f, 0.0f, 0.0f));
+    }
+
+    // Auto-screenshot after delay if requested
+    FString ScreenshotPath;
+    if (FParse::Value(FCommandLine::Get(), TEXT("autoscreenshot="), ScreenshotPath))
+    {
+        float Delay = 15.0f;
+        FParse::Value(FCommandLine::Get(), TEXT("autoscreenshotdelay="), Delay);
+        FTimerHandle TimerHandle;
+        GetWorldTimerManager().SetTimer(TimerHandle, [this, ScreenshotPath]()
+        {
+            FString Cmd = FString::Printf(TEXT("HighResShot 1 filename=\"%s\""), *ScreenshotPath);
+            if (APlayerController* PC = Cast<APlayerController>(GetController()))
+            {
+                PC->ConsoleCommand(TEXT("Shot"));
+            }
+            UE_LOG(LogTemp, Warning, TEXT("Auto-screenshot triggered: %s"), *ScreenshotPath);
+        }, Delay, false);
     }
 }
 

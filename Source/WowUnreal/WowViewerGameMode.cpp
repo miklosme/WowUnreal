@@ -31,17 +31,20 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
 AWowViewerGameMode::AWowViewerGameMode()
 {
-    // Use fly camera when startpos override is specified (terrain testing mode)
-    if (FString(FCommandLine::Get()).Contains(TEXT("startpos")))
-    {
-        DefaultPawnClass = AWowFlyCamera::StaticClass();
-    }
-    else
-    {
-        DefaultPawnClass = AWowPlayerCharacter::StaticClass();
-    }
+    // Default pawn; overridden by GetDefaultPawnClassForController at runtime
+    DefaultPawnClass = AWowPlayerCharacter::StaticClass();
     PlayerControllerClass = AWowGameplayController::StaticClass();
     HUDClass = AWowDebugHUD::StaticClass();
+}
+
+UClass* AWowViewerGameMode::GetDefaultPawnClassForController_Implementation(AController* InController)
+{
+    // Use fly camera when -startpos is specified (terrain viewing mode)
+    if (FString(FCommandLine::Get()).Contains(TEXT("startpos")))
+    {
+        return AWowFlyCamera::StaticClass();
+    }
+    return DefaultPawnClass;
 }
 
 void AWowViewerGameMode::SetupPostProcess(UWorld* World)

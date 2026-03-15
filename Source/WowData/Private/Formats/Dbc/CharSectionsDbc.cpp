@@ -16,12 +16,12 @@ bool FCharSectionsDbc::Load(const FDbcParser& Parser)
         E.ID = Parser.GetUInt(i, 0);
         E.RaceID = Parser.GetUInt(i, 1);
         E.SexID = Parser.GetUInt(i, 2);
-        E.Variation = Parser.GetUInt(i, 3);
+        E.Type = Parser.GetUInt(i, 3);
         E.Textures[0] = Parser.GetString(i, 4);
         E.Textures[1] = Parser.GetString(i, 5);
         E.Textures[2] = Parser.GetString(i, 6);
         E.Flags = Parser.GetUInt(i, 7);
-        E.Type = Parser.GetUInt(i, 8);
+        E.Variation = Parser.GetUInt(i, 8);
         E.Color = Parser.GetUInt(i, 9);
 
         IdIndex.Add(E.ID, Entries.Num());
