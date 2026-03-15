@@ -9,7 +9,7 @@ class USkeleton;
 class UAnimSequence;
 class UStaticMeshComponent;
 class USkeletalMeshComponent;
-class UHierarchicalInstancedStaticMeshComponent;
+class UInstancedStaticMeshComponent;
 struct FAdtDoodadPlacement;
 struct FM2Data;
 
@@ -36,7 +36,7 @@ public:
      * Groups placements by M2 model and creates one HISMC per unique model.
      * Returns the created HISMC components (caller owns them).
      */
-    static TArray<UHierarchicalInstancedStaticMeshComponent*> SpawnDoodadsInstanced(
+    static TArray<UInstancedStaticMeshComponent*> SpawnDoodadsInstanced(
         AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
         const TArray<FString>& DoodadPaths, FMpqManager* Mpq, FWowAssetCache* Cache);
 
@@ -62,6 +62,9 @@ private:
 
     /** Build skin file path from M2 path */
     static FString GetSkinPath(const FString& M2Path);
+
+    /** Load a BLP texture from MPQ, with caching */
+    static UTexture2D* LoadBlpTexture(const FString& Path, FMpqManager* Mpq, FWowAssetCache* Cache);
 
     /** Create a UStaticMesh from M2 geometry data */
     static UStaticMesh* CreateStaticMeshFromM2(const FM2Data& Data, const FString& M2Path,

@@ -478,7 +478,8 @@ UMaterial* FWowTerrainMaterial::GetSimpleObjectMaterial()
     CachedMat = NewObject<UMaterial>(MatPackage, TEXT("M_WowSimpleObject"),
         RF_Public | RF_Standalone);
     CachedMat->SetShadingModel(MSM_DefaultLit);
-    CachedMat->TwoSided = false;
+    CachedMat->BlendMode = BLEND_Masked; // Alpha masking for foliage/transparent textures
+    CachedMat->TwoSided = true; // Foliage needs two-sided rendering
     CachedMat->bUsedWithInstancedStaticMeshes = true; // Required for HISMC/ISM rendering
 
     UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
@@ -503,6 +504,7 @@ UMaterial* FWowTerrainMaterial::GetSimpleObjectMaterial()
     Exprs.AddExpression(Sampler);
 
     CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, Sampler);
+    CachedMat->GetEditorOnlyData()->OpacityMask.Connect(4, Sampler); // Output 4 = Alpha channel
 
     auto* RoughnessConst = NewObject<UMaterialExpressionConstant>(CachedMat);
     RoughnessConst->R = 0.8f;

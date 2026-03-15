@@ -12,7 +12,7 @@
 #include "Formats/AdtTypes.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
@@ -496,11 +496,11 @@ UStaticMesh* FWowDoodadManager::GetOrCreateStaticMesh(const FString& M2Path, FMp
     return SM;
 }
 
-TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
+TArray<UInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDoodadsInstanced(
     AActor* ParentActor, const TArray<FAdtDoodadPlacement>& Placements,
     const TArray<FString>& DoodadPaths, FMpqManager* Mpq, FWowAssetCache* Cache)
 {
-    TArray<UHierarchicalInstancedStaticMeshComponent*> Result;
+    TArray<UInstancedStaticMeshComponent*> Result;
 
     if (!ParentActor || !Mpq || !Cache || Placements.Num() == 0)
     {
@@ -529,26 +529,27 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
         UStaticMesh* SM = GetOrCreateStaticMesh(M2Path, Mpq, Cache);
         if (!SM) continue;
 
-        // Create HISMC for instanced rendering
-        FName CompName = *FString::Printf(TEXT("HISMC_%s"), *FPaths::GetBaseFilename(M2Path));
-        UHierarchicalInstancedStaticMeshComponent* HISMC = NewObject<UHierarchicalInstancedStaticMeshComponent>(ParentActor, CompName);
-        HISMC->SetupAttachment(ParentActor->GetRootComponent());
-        HISMC->SetStaticMesh(SM);
-        HISMC->SetCastShadow(false);
-        HISMC->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        HISMC->SetMobility(EComponentMobility::Static);
+        // Use plain ISM instead of HISMC — more reliable bounds for runtime meshes
+        FName CompName = *FString::Printf(TEXT("ISM_%s"), *FPaths::GetBaseFilename(M2Path));
+        UInstancedStaticMeshComponent* ISM = NewObject<UInstancedStaticMeshComponent>(ParentActor, CompName);
+        ISM->SetupAttachment(ParentActor->GetRootComponent());
+        ISM->SetStaticMesh(SM);
+        ISM->SetCastShadow(false);
+        ISM->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        ISM->SetMobility(EComponentMobility::Static);
+        ISM->bNeverDistanceCull = true;
 
-        // Override materials on the HISMC component (SM materials may not transfer)
+        // Override materials on the ISM component
         for (int32 MatIdx = 0; MatIdx < SM->GetStaticMaterials().Num(); ++MatIdx)
         {
             if (SM->GetStaticMaterials()[MatIdx].MaterialInterface)
             {
-                HISMC->SetMaterial(MatIdx, SM->GetStaticMaterials()[MatIdx].MaterialInterface);
+                ISM->SetMaterial(MatIdx, SM->GetStaticMaterials()[MatIdx].MaterialInterface);
             }
         }
 
         // Must register BEFORE adding instances so the component transform is set
-        HISMC->RegisterComponent();
+        ISM->RegisterComponent();
 
         // Add all instances for this model
         for (const FAdtDoodadPlacement* Placement : GroupPlacements)
@@ -560,14 +561,12 @@ TArray<UHierarchicalInstancedStaticMeshComponent*> FWowDoodadManager::SpawnDooda
                 Placement->Rotation.X, Placement->Rotation.Y, Placement->Rotation.Z);
 
             FTransform InstanceTransform(Rot, UEPos, FVector(ScaleVal));
-            HISMC->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
+            ISM->AddInstance(InstanceTransform, /*bWorldSpace=*/true);
         }
 
-        // Force tree rebuild and bounds update after all instances are added
-        HISMC->BuildTreeIfOutdated(true, true);
-        HISMC->MarkRenderStateDirty();
+        ISM->MarkRenderStateDirty();
 
-        Result.Add(HISMC);
+        Result.Add(ISM);
         TotalInstances += GroupPlacements.Num();
     }
 

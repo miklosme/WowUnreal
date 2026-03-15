@@ -7,7 +7,7 @@
 struct FAdtData;
 class FMpqManager;
 class FWowAssetCache;
-class UHierarchicalInstancedStaticMeshComponent;
+class UInstancedStaticMeshComponent;
 class URuntimeVirtualTexture;
 class UStaticMeshComponent;
 
@@ -37,7 +37,7 @@ public:
 
     /** HISMC components for instanced doodads (one per unique M2 model) */
     UPROPERTY()
-    TArray<TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> InstancedDoodads;
+    TArray<TObjectPtr<UInstancedStaticMeshComponent>> InstancedDoodads;
 
     /** Whether this tile's doodads are using HISMC instancing */
     bool bUsesInstancedDoodads = false;
