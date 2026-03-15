@@ -4,14 +4,14 @@
 
 struct FCharSectionsDbcEntry
 {
-    uint32 ID = 0;            // 0
-    uint32 RaceID = 0;        // 1
-    uint32 SexID = 0;         // 2
-    uint32 Variation = 0;     // 3
-    FString Textures[3];      // 4-6
-    uint32 Flags = 0;         // 7
-    uint32 Type = 0;          // 8
-    uint32 Color = 0;         // 9
+    uint32 ID = 0;            // col 0
+    uint32 RaceID = 0;        // col 1
+    uint32 SexID = 0;         // col 2
+    uint32 Type = 0;          // col 3 — section type (0=Skin,1=Face,2=FacialHair,3=Hair,4=Underwear)
+    FString Textures[3];      // col 4-6
+    uint32 Flags = 0;         // col 7
+    uint32 Variation = 0;     // col 8 — style index
+    uint32 Color = 0;         // col 9 — color index
 };
 
 class WOWDATA_API FCharSectionsDbc

@@ -77,7 +77,7 @@ struct WOWDATA_API FM2AnimationData
 
 struct WOWDATA_API FM2Attachment
 {
-    uint32 Id = 0;           // Attachment point ID (0=right hand, 1=left hand, 5=right shoulder, etc.)
+    uint32 Id = 0;           // Attachment point ID (1=right palm, 2=left palm, 5=right shoulder, 11=helmet, etc.)
     int32 Bone = -1;         // Bone index this attachment is parented to
     FVector Position = FVector::ZeroVector; // Position relative to the bone
 };

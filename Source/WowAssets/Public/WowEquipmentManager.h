@@ -15,16 +15,18 @@ struct FM2Data;
 class WOWASSETS_API FWowEquipmentManager
 {
 public:
-    /** Well-known attachment point IDs from M2 format */
+    /** Well-known attachment point IDs from M2 format (wowdev.wiki/M2#Attachments)
+     *  0=MountPoint/LeftWrist, 1=RightPalm, 2=LeftPalm, 5=RShoulder, 6=LShoulder,
+     *  11=Helmet, 12=Back, 26=RightBackSheath */
     enum class EAttachmentPoint : uint32
     {
-        RightHand = 0,
-        LeftHand = 1,
-        Back = 2,
+        RightHand = 1,       // RIGHT_PALM — main-hand weapon grip
+        LeftHand = 2,        // LEFT_PALM — off-hand weapon grip
         RightShoulder = 5,
         LeftShoulder = 6,
         Helmet = 11,
-        Shield = 26
+        Back = 12,           // BACK — cape/cloak attachment
+        Shield = 26          // RIGHT_BACK_SHEATH — shield sheathed on back
     };
 
     /**

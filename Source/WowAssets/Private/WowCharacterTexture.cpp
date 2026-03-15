@@ -44,6 +44,12 @@ FString FWowCharacterTexture::GetSectionTexture(uint32 RaceId, uint32 Gender, ES
             Score += 4;
         }
 
+        // When variation is unspecified, prefer variation 0 (the default)
+        if (Variation == INDEX_NONE && Entry.Variation == 0)
+        {
+            Score += 1;
+        }
+
         for (int32 i = 0; i < 3; ++i)
         {
             if (!Entry.Textures[i].IsEmpty() && Score > BestScore)
