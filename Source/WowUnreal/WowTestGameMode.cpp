@@ -124,19 +124,40 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
     {
         UE_LOG(LogWowTestMode, Log, TEXT("Setting up CharacterTest scene"));
 
+        // Sky manager provides sun directional light + sky atmosphere + sky light
         SpawnSkyManager(World);
-        SpawnGroundPlane(World, FVector(80.0f, 0.0f, -5.0f), 18.0f);
+
+        // Also add an explicit directional light for guaranteed illumination
+        SpawnDirectionalLight(World);
+
+        // Large ground plane so nothing floats in the void
+        SpawnGroundPlane(World, FVector(200.0f, 0.0f, -5.0f), 40.0f);
+
+        // Front fill light to reduce harsh shadows on characters
         if (APointLight* FillLight = World->SpawnActor<APointLight>(
-            APointLight::StaticClass(), FTransform(FRotator::ZeroRotator, FVector(-180.0f, -40.0f, 220.0f))))
+            APointLight::StaticClass(), FTransform(FRotator::ZeroRotator, FVector(-400.0f, 0.0f, 300.0f))))
         {
             if (UPointLightComponent* FillLightComponent = Cast<UPointLightComponent>(FillLight->GetLightComponent()))
             {
-                FillLightComponent->SetIntensity(15000.0f);
-                FillLightComponent->SetAttenuationRadius(1200.0f);
+                FillLightComponent->SetIntensity(20000.0f);
+                FillLightComponent->SetAttenuationRadius(2000.0f);
                 FillLightComponent->SetLightColor(FLinearColor(1.0f, 0.97f, 0.92f));
             }
         }
 
+        // Back fill light for rim lighting
+        if (APointLight* BackLight = World->SpawnActor<APointLight>(
+            APointLight::StaticClass(), FTransform(FRotator::ZeroRotator, FVector(600.0f, 0.0f, 250.0f))))
+        {
+            if (UPointLightComponent* BackLightComponent = Cast<UPointLightComponent>(BackLight->GetLightComponent()))
+            {
+                BackLightComponent->SetIntensity(10000.0f);
+                BackLightComponent->SetAttenuationRadius(2000.0f);
+                BackLightComponent->SetLightColor(FLinearColor(0.85f, 0.9f, 1.0f));
+            }
+        }
+
+        // Position camera to view the full gallery (delayed one frame for pawn to spawn)
         FTimerHandle CameraFrameTimer;
         World->GetTimerManager().SetTimer(CameraFrameTimer, [this]()
         {
@@ -144,8 +165,8 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
             {
                 if (APawn* Pawn = PC->GetPawn())
                 {
-                    Pawn->SetActorLocation(FVector(-360.0f, -110.0f, 135.0f));
-                    PC->SetControlRotation(FRotator(-11.0f, 18.0f, 0.0f));
+                    Pawn->SetActorLocation(FVector(-500.0f, 0.0f, 150.0f));
+                    PC->SetControlRotation(FRotator(-8.0f, 10.0f, 0.0f));
                 }
             }
         }, 0.1f, false);
@@ -160,6 +181,12 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
         FWowAssetCache* AssetCache = WorldManager->GetAssetCache();
         const FCharacterTestEquipment Equipment = FindCharacterTestEquipment(Mpq);
 
+        // --- Row 1: Player characters (front row, spaced along Y) ---
+        const float CharacterRowX = 0.0f;
+        const float CharacterSpacing = 250.0f;
+        const FRotator FacingCamera(0.0f, -90.0f, 0.0f);
+
+        // 1. Human Male (center) with equipment
         FWowCharacterBuilder::FCharacterParams HumanMale;
         HumanMale.Race = FWowCharacterBuilder::ERace::Human;
         HumanMale.Gender = FWowCharacterBuilder::EGender::Male;
@@ -172,8 +199,9 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
         AddEquipmentIfAvailable(HumanMale.Equipment, Equipment.ShoulderDisplayId, FWowEquipmentManager::EAttachmentPoint::LeftShoulder);
         AddEquipmentIfAvailable(HumanMale.Equipment, Equipment.ShoulderDisplayId, FWowEquipmentManager::EAttachmentPoint::RightShoulder);
         FWowCharacterBuilder::SpawnCharacterWithEquipment(World, Mpq, AssetCache,
-            HumanMale, FVector(40.0f, 0.0f, 0.0f), FRotator(0.0f, -90.0f, 0.0f));
+            HumanMale, FVector(CharacterRowX, 0.0f, 0.0f), FacingCamera);
 
+        // 2. Human Female (right of center)
         FWowCharacterBuilder::FCharacterParams HumanFemale;
         HumanFemale.Race = FWowCharacterBuilder::ERace::Human;
         HumanFemale.Gender = FWowCharacterBuilder::EGender::Female;
@@ -183,8 +211,9 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
         HumanFemale.Customization.FaceVariation = 2;
         AddEquipmentIfAvailable(HumanFemale.Equipment, Equipment.WeaponDisplayId, FWowEquipmentManager::EAttachmentPoint::RightHand);
         FWowCharacterBuilder::SpawnCharacterWithEquipment(World, Mpq, AssetCache,
-            HumanFemale, FVector(0.0f, 180.0f, 0.0f), FRotator(0.0f, -90.0f, 0.0f));
+            HumanFemale, FVector(CharacterRowX, CharacterSpacing, 0.0f), FacingCamera);
 
+        // 3. Orc Male (left of center)
         FWowCharacterBuilder::FCharacterParams OrcMale;
         OrcMale.Race = FWowCharacterBuilder::ERace::Orc;
         OrcMale.Gender = FWowCharacterBuilder::EGender::Male;
@@ -193,10 +222,25 @@ void AWowTestGameMode::SetupTestScene(UWorld* World, AWowWorldManager* WorldMana
         OrcMale.Customization.SkinColor = 1;
         OrcMale.Customization.FaceVariation = 1;
         FWowCharacterBuilder::SpawnCharacterWithEquipment(World, Mpq, AssetCache,
-            OrcMale, FVector(0.0f, -180.0f, 0.0f), FRotator(0.0f, -90.0f, 0.0f));
+            OrcMale, FVector(CharacterRowX, -CharacterSpacing, 0.0f), FacingCamera);
 
+        // --- Row 2: Creatures (back row, spaced along Y) ---
+        const float CreatureRowX = 350.0f;
+        const float CreatureSpacing = 300.0f;
+
+        // Wolf (DisplayId 604)
         FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
-            3167, FVector(220.0f, 0.0f, 0.0f), FRotator(0.0f, -90.0f, 0.0f));
+            604, FVector(CreatureRowX, -CreatureSpacing, 0.0f), FacingCamera);
+
+        // Boar (DisplayId 454)
+        FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
+            454, FVector(CreatureRowX, 0.0f, 0.0f), FacingCamera);
+
+        // Murloc (DisplayId 2192)
+        FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
+            2192, FVector(CreatureRowX, CreatureSpacing, 0.0f), FacingCamera);
+
+        UE_LOG(LogWowTestMode, Log, TEXT("CharacterTest: spawned 3 characters + 3 creatures"));
         return;
     }
 

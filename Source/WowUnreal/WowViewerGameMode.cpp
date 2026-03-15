@@ -247,15 +247,21 @@ void AWowViewerGameMode::SetupCharacterTestScene(UWorld* World)
     UE_LOG(LogWowGameMode, Log, TEXT("Starting character/animation test scene"));
 
     SpawnDirectionalLight(World);
-    SpawnGroundPlane(World, FVector::ZeroVector, 100.0f);
+    SpawnGroundPlane(World, FVector(150.0f, 0.0f, -5.0f), 40.0f);
 
-    // Position camera in front of the character, looking at it
-    APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0);
-    if (PC && PC->GetPawn())
+    // Position camera to view the full gallery
+    FTimerHandle CamTimer;
+    World->GetTimerManager().SetTimer(CamTimer, [this]()
     {
-        PC->GetPawn()->SetActorLocation(FVector(-800.0f, 0.0f, 150.0f));
-        PC->SetControlRotation(FRotator(-5.0f, 0.0f, 0.0f));
-    }
+        if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+        {
+            if (APawn* Pawn = PC->GetPawn())
+            {
+                Pawn->SetActorLocation(FVector(-500.0f, 0.0f, 150.0f));
+                PC->SetControlRotation(FRotator(-8.0f, 10.0f, 0.0f));
+            }
+        }
+    }, 0.1f, false);
 
     // Spawn world manager for MPQ access (terrain loading skipped via -testscene check in WM::BeginPlay)
     AWowWorldManager* WM = SpawnWorldManager(World);
@@ -264,11 +270,16 @@ void AWowViewerGameMode::SetupCharacterTestScene(UWorld* World)
     {
         FMpqManager* Mpq = WM->GetMpqManager();
         FWowAssetCache* AssetCache = WM->GetAssetCache();
+        const FRotator FacingCamera(0.0f, 180.0f, 0.0f);
+
+        // --- Row 1: Player characters ---
+        const float CharRowX = 0.0f;
+        const float CharSpacing = 250.0f;
 
         // 1. Human Male with composite texture (skin + face + underwear)
         FWowCharacterBuilder::SpawnCharacter(World, Mpq, AssetCache,
             FWowCharacterBuilder::ERace::Human, FWowCharacterBuilder::EGender::Male,
-            FVector(0.0f, 0.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+            FVector(CharRowX, 0.0f, 0.0f), FacingCamera);
 
         // 2. Human Female with different skin color variation
         {
@@ -281,7 +292,7 @@ void AWowViewerGameMode::SetupCharacterTestScene(UWorld* World)
             Params.Customization.FaceVariation = 1;
 
             FWowCharacterBuilder::SpawnCharacterWithEquipment(World, Mpq, AssetCache,
-                Params, FVector(0.0f, 300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+                Params, FVector(CharRowX, CharSpacing, 0.0f), FacingCamera);
         }
 
         // 3. Orc Male
@@ -294,12 +305,26 @@ void AWowViewerGameMode::SetupCharacterTestScene(UWorld* World)
             Params.Customization.SkinColor = 1;
 
             FWowCharacterBuilder::SpawnCharacterWithEquipment(World, Mpq, AssetCache,
-                Params, FVector(0.0f, -300.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+                Params, FVector(CharRowX, -CharSpacing, 0.0f), FacingCamera);
         }
 
-        // 4. NPC creature via display ID (Stormwind Guard = 3167)
+        // --- Row 2: Creatures ---
+        const float CreatureRowX = 350.0f;
+        const float CreatureSpacing = 300.0f;
+
+        // Wolf (DisplayId 604)
         FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
-            3167, FVector(500.0f, 0.0f, 0.0f), FRotator(0.0f, 180.0f, 0.0f));
+            604, FVector(CreatureRowX, -CreatureSpacing, 0.0f), FacingCamera);
+
+        // Boar (DisplayId 454)
+        FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
+            454, FVector(CreatureRowX, 0.0f, 0.0f), FacingCamera);
+
+        // Murloc (DisplayId 2192)
+        FWowCharacterBuilder::SpawnCreatureByDisplayId(World, Mpq, AssetCache,
+            2192, FVector(CreatureRowX, CreatureSpacing, 0.0f), FacingCamera);
+
+        UE_LOG(LogWowGameMode, Log, TEXT("CharacterTest: spawned 3 characters + 3 creatures"));
     }
 }
 
