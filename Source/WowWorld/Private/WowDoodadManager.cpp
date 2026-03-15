@@ -390,16 +390,7 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
         }
     }
 
-    // Build static mesh from description
-    TArray<const FMeshDescription*> MeshDescs;
-    MeshDescs.Add(&MeshDesc);
-
-    UStaticMesh::FBuildMeshDescriptionsParams Params;
-    Params.bBuildSimpleCollision = false;
-    Params.bFastBuild = true;
-    StaticMesh->BuildFromMeshDescriptions(MeshDescs, Params);
-
-    // Apply per-batch materials — use simple UV0-based material for doodads
+    // Build materials BEFORE mesh so sections are initialized correctly
     UMaterial* BaseMat = FWowTerrainMaterial::GetSimpleObjectMaterial();
     UMaterial* FallbackMat = LoadObject<UMaterial>(nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial"));
 
@@ -419,14 +410,31 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
             {
                 UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, StaticMesh);
                 MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
-                StaticMesh->SetMaterial(BatchIdx, MID);
+                StaticMesh->GetStaticMaterials().Add(FStaticMaterial(MID));
             }
-            else if (FallbackMat)
+            else
             {
-                StaticMesh->SetMaterial(BatchIdx, FallbackMat);
+                StaticMesh->GetStaticMaterials().Add(FStaticMaterial(FallbackMat));
             }
         }
     }
+    else
+    {
+        for (int32 i = 0; i < Batches.Num(); ++i)
+        {
+            StaticMesh->GetStaticMaterials().Add(FStaticMaterial(FallbackMat));
+        }
+    }
+
+    // Build static mesh from description
+    TArray<const FMeshDescription*> MeshDescs;
+    MeshDescs.Add(&MeshDesc);
+
+    UStaticMesh::FBuildMeshDescriptionsParams Params;
+    Params.bBuildSimpleCollision = false;
+    Params.bFastBuild = true;
+    Params.bCommitMeshDescription = true;
+    StaticMesh->BuildFromMeshDescriptions(MeshDescs, Params);
 
     return StaticMesh;
 }
