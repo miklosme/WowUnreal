@@ -243,7 +243,18 @@ UTexture2D* FWowDoodadManager::LoadBlpTexture(const FString& Path, FMpqManager* 
     if (Tex) return Tex;
 
     TArray<uint8> BlpRaw;
-    if (!Mpq->ReadFile(Path, BlpRaw)) return nullptr;
+    if (!Mpq->ReadFile(Path, BlpRaw))
+    {
+        // Log failed texture reads for debugging
+        static int32 sFailLog = 0;
+        if (sFailLog < 10)
+        {
+            sFailLog++;
+            UE_LOG(LogWowDoodad, Warning, TEXT("Failed to read BLP from MPQ: '%s' (exists=%d)"),
+                *Path, Mpq->FileExists(Path) ? 1 : 0);
+        }
+        return nullptr;
+    }
 
     FBlpTexture BlpData = FBlpParser::Parse(BlpRaw);
     if (!BlpData.bIsValid) return nullptr;
@@ -408,16 +419,39 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
                 Tex = LoadBlpTexture(Data.TexturePaths[Batch.TextureIndex], Mpq, Cache);
             }
 
+            // If texture failed to load, try alternate paths
+            if (!Tex && Batch.TextureIndex >= 0 && Batch.TextureIndex < Data.TexturePaths.Num())
+            {
+                const FString& FailedPath = Data.TexturePaths[Batch.TextureIndex];
+                FString TexFilename = FPaths::GetCleanFilename(FailedPath);
+
+                // Try 1: look in the M2 model's own directory
+                FString M2Dir = FPaths::GetPath(M2Path);
+                Tex = LoadBlpTexture(M2Dir / TexFilename, Mpq, Cache);
+
+                // Try 2: Interface/ textures often have duplicates in World/ paths
+                if (!Tex && FailedPath.Contains(TEXT("Interface"), ESearchCase::IgnoreCase))
+                {
+                    // Try the StormWind passive doodads directory (common for Elwynn trees)
+                    Tex = LoadBlpTexture(FString(TEXT("World/Generic/Human/Passive Doodads/StormWind/")) + TexFilename, Mpq, Cache);
+                }
+
+                // Try 3: look in parent directories of the M2
+                if (!Tex)
+                {
+                    FString ParentDir = FPaths::GetPath(M2Dir);
+                    Tex = LoadBlpTexture(ParentDir / TexFilename, Mpq, Cache);
+                }
+            }
+
+            // Always create a proper MID — use texture if available, otherwise
+            // create a solid-color material (brown for trunks, grey for generic)
+            UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, StaticMesh);
             if (Tex)
             {
-                UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, StaticMesh);
                 MID->SetTextureParameterValue(FName(TEXT("Layer0Texture")), Tex);
-                BatchMaterials.Add(MID);
             }
-            else
-            {
-                BatchMaterials.Add(FallbackMat);
-            }
+            BatchMaterials.Add(MID);
         }
     }
     else
