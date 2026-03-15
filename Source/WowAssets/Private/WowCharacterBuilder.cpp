@@ -21,9 +21,15 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "ProceduralMeshComponent.h"
 #include "Coord/WowCoordinate.h"
+#include "UObject/SoftObjectPath.h"
+#include "Misc/PackageName.h"
+#include "UObject/SavePackage.h"
 #if WITH_EDITOR
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
+#include "Materials/MaterialExpressionConstant.h"
 #include "UObject/UObjectGlobals.h"
+#include "ShaderCompiler.h"
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowCharacter, Log, All);
@@ -38,44 +44,104 @@ namespace
 {
 UMaterial* GetCharacterMaterial()
 {
-    static TWeakObjectPtr<UMaterial> CachedMaterial;
-    if (!CachedMaterial.IsValid())
+    static UMaterial* CachedMat = nullptr;
+    if (CachedMat && CachedMat->IsValidLowLevel()) return CachedMat;
+
+    // Try loading a pre-compiled version first
+    const TCHAR* MatPaths[] = {
+        TEXT("/Game/Wow/Materials/M_WowCharacter"),
+        TEXT("/Game/Materials/M_WowCharacter")
+    };
+    for (const TCHAR* Path : MatPaths)
     {
+        FSoftObjectPath MatPath(FString(Path) + TEXT(".") + FPaths::GetBaseFilename(Path));
+        if (MatPath.ResolveObject() || FPackageName::DoesPackageExist(MatPath.GetLongPackageName()))
+        {
+            CachedMat = LoadObject<UMaterial>(nullptr, Path);
+            if (CachedMat)
+            {
+                UE_LOG(LogWowCharacter, Log, TEXT("Loaded character material from %s"), Path);
 #if WITH_EDITOR
-        UMaterial* Material = NewObject<UMaterial>(GetTransientPackage(), TEXT("M_WowCharacterRuntimeTransient"));
-        if (Material)
-        {
-            Material->SetShadingModel(MSM_Unlit);
-            Material->BlendMode = BLEND_Opaque;
-            Material->TwoSided = false;
-
-            UTexture2D* DefaultTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
-            auto& Expressions = Material->GetExpressionCollection();
-
-            UMaterialExpressionTextureSampleParameter2D* TextureSampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(Material);
-            TextureSampler->ParameterName = TEXT("BaseTexture");
-            TextureSampler->SamplerType = SAMPLERTYPE_Color;
-            TextureSampler->Texture = DefaultTexture;
-            Expressions.AddExpression(TextureSampler);
-
-            Material->GetEditorOnlyData()->EmissiveColor.Connect(0, TextureSampler);
-
-            bool bNeedsRecompile = false;
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_SkeletalMesh);
-            Material->SetMaterialUsage(bNeedsRecompile, MATUSAGE_StaticMesh);
-            Material->PreEditChange(nullptr);
-            Material->PostEditChange();
-            Material->ForceRecompileForRendering();
-            CachedMaterial = Material;
-        }
+                if (!CachedMat->IsComplete())
+                {
+                    CachedMat->ForceRecompileForRendering();
+                    if (GShaderCompilingManager)
+                        GShaderCompilingManager->FinishAllCompilation();
+                }
 #endif
-
-        if (!CachedMaterial.IsValid())
-        {
-            CachedMaterial = UMaterial::GetDefaultMaterial(MD_Surface);
+                return CachedMat;
+            }
         }
     }
-    return CachedMaterial.Get();
+
+#if WITH_EDITOR
+    UE_LOG(LogWowCharacter, Log, TEXT("Creating character material (UV0-based, DefaultLit)"));
+
+    UPackage* MatPackage = CreatePackage(TEXT("/Game/Materials/M_WowCharacter"));
+    CachedMat = NewObject<UMaterial>(MatPackage, TEXT("M_WowCharacter"),
+        RF_Public | RF_Standalone);
+    CachedMat->SetShadingModel(MSM_DefaultLit);
+    CachedMat->BlendMode = BLEND_Opaque;
+    CachedMat->TwoSided = false;
+    CachedMat->bUsedWithSkeletalMesh = true;
+
+    UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
+    auto& Expressions = CachedMat->GetExpressionCollection();
+
+    // UV0 for texture sampling
+    auto* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(CachedMat);
+    TexCoord->CoordinateIndex = 0;
+    TexCoord->MaterialExpressionEditorX = -400;
+    TexCoord->MaterialExpressionEditorY = 0;
+    Expressions.AddExpression(TexCoord);
+
+    auto* TextureSampler = NewObject<UMaterialExpressionTextureSampleParameter2D>(CachedMat);
+    TextureSampler->ParameterName = TEXT("BaseTexture");
+    TextureSampler->SamplerType = SAMPLERTYPE_Color;
+    TextureSampler->Texture = WhiteTex;
+    TextureSampler->Coordinates.Connect(0, TexCoord);
+    TextureSampler->MaterialExpressionEditorX = -200;
+    TextureSampler->MaterialExpressionEditorY = 0;
+    Expressions.AddExpression(TextureSampler);
+
+    CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, TextureSampler);
+
+    auto* RoughnessConst = NewObject<UMaterialExpressionConstant>(CachedMat);
+    RoughnessConst->R = 0.8f;
+    RoughnessConst->MaterialExpressionEditorX = 0;
+    RoughnessConst->MaterialExpressionEditorY = 200;
+    Expressions.AddExpression(RoughnessConst);
+    CachedMat->GetEditorOnlyData()->Roughness.Connect(0, RoughnessConst);
+
+    CachedMat->PreEditChange(nullptr);
+    CachedMat->PostEditChange();
+    CachedMat->ForceRecompileForRendering();
+
+    // Block until shader compilation is done — otherwise skeletal meshes render black
+    if (GShaderCompilingManager)
+    {
+        UE_LOG(LogWowCharacter, Log, TEXT("Waiting for character material shader compilation..."));
+        GShaderCompilingManager->FinishAllCompilation();
+        UE_LOG(LogWowCharacter, Log, TEXT("Character material compiled, IsComplete=%d"),
+            CachedMat->IsComplete() ? 1 : 0);
+    }
+
+    // Save to disk so it persists for subsequent launches
+    {
+        FString PackageFilename = FPackageName::LongPackageNameToFilename(
+            TEXT("/Game/Materials/M_WowCharacter"), FPackageName::GetAssetPackageExtension());
+        FSavePackageArgs SaveArgs;
+        SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
+        UPackage::SavePackage(MatPackage, CachedMat, *PackageFilename, SaveArgs);
+        UE_LOG(LogWowCharacter, Log, TEXT("Saved character material to: %s"), *PackageFilename);
+    }
+#endif
+
+    if (!CachedMat)
+    {
+        CachedMat = UMaterial::GetDefaultMaterial(MD_Surface);
+    }
+    return CachedMat;
 }
 
 UTexture2D* LoadBlpTexture(FMpqManager* Mpq, FWowAssetCache* Cache, const FString& TexturePath)

@@ -344,27 +344,27 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		BonePoses[BoneID] = RefSkel.GetRefBonePose()[BoneIndex];
 	}
 
-	if (FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel())
-	{
-		ImportedModel->LODModels.Empty();
-		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
-	}
-
-	SkelMesh->CommitMeshDescription(0);
-	SkelMesh->Build();
-
+	// Materials MUST be set BEFORE Build() — otherwise the mesh renders black/invisible
 	if (SkelMesh->GetMaterials().Num() == 0)
 	{
 		SkelMesh->GetMaterials().Add(FSkeletalMaterial(UMaterial::GetDefaultMaterial(MD_Surface), true, false, FName(TEXT("Default"))));
 	}
 
-	// Set bounds
-	FVector BoxMin = FVector(Data.BoundingBox.Min) * FWowCoordinate::SCALE;
-	FVector BoxMax = FVector(Data.BoundingBox.Max) * FWowCoordinate::SCALE;
-	FBoxSphereBounds Bounds(FBox(
-		FVector(-BoxMax.X, BoxMin.Y, BoxMin.Z),
-		FVector(-BoxMin.X, BoxMax.Y, BoxMax.Z)
-	));
+	SkelMesh->CommitMeshDescription(0);
+	SkelMesh->Build();
+
+	// Set bounds using M2 vertex transform convention: UE = (WoW.Y, WoW.X, WoW.Z) * SCALE
+	const FVector& BMin = Data.BoundingBox.Min;
+	const FVector& BMax = Data.BoundingBox.Max;
+	FBox MeshBox(
+		FVector(FMath::Min(BMin.Y, BMax.Y) * FWowCoordinate::SCALE,
+				FMath::Min(BMin.X, BMax.X) * FWowCoordinate::SCALE,
+				FMath::Min(BMin.Z, BMax.Z) * FWowCoordinate::SCALE),
+		FVector(FMath::Max(BMin.Y, BMax.Y) * FWowCoordinate::SCALE,
+				FMath::Max(BMin.X, BMax.X) * FWowCoordinate::SCALE,
+				FMath::Max(BMin.Z, BMax.Z) * FWowCoordinate::SCALE)
+	);
+	FBoxSphereBounds Bounds(MeshBox);
 	SkelMesh->SetImportedBounds(Bounds);
 	SkelMesh->CalculateInvRefMatrices();
 	SkelMesh->InitResources();
