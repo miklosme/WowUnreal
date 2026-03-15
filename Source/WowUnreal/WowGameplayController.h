@@ -5,6 +5,9 @@
 
 class UWowConnectionManager;
 class UWowUIManager;
+class AWowWorldManager;
+class FMpqManager;
+class FWowAssetCache;
 struct FWowEntity;
 
 UCLASS()
@@ -58,4 +61,16 @@ private:
     // Targeting
     void OnLeftClick();
     void TryTargetUnderCursor();
+
+    // Entity model spawning
+    void OnEntityCreated(const FWowEntity& Entity);
+    void OnEntityDestroyed(uint64 Guid);
+    void SpawnEntityModel(const FWowEntity& Entity);
+    void CacheWorldResources();
+
+    UPROPERTY()
+    TMap<uint64, TObjectPtr<AActor>> SpawnedEntityActors;
+
+    FMpqManager* CachedMpq = nullptr;
+    FWowAssetCache* CachedAssetCache = nullptr;
 };
