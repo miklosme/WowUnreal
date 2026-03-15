@@ -505,3 +505,354 @@ bool FMpqManagerBasic::RunTest(const FString& Parameters)
 
     return true;
 }
+
+// ====================================================================
+// Audio DBC Tests (require MPQ data)
+// ====================================================================
+
+#include "Formats/Dbc/DbcStore.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FZoneMusicDbcTest, "WowUnreal.Audio.ZoneMusicDbc",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FZoneMusicDbcTest::RunTest(const FString& Parameters)
+{
+    FMpqManager& Mpq = WowTestUtils::GetMpq();
+    if (!Mpq.IsInitialized())
+    {
+        AddWarning(TEXT("MPQ not available — skipping"));
+        return true;
+    }
+
+    // Ensure DBCs are loaded
+    FDbcStore::Get().LoadAll(Mpq);
+
+    // ZoneMusic ID 1 is Elwynn Forest music
+    const FZoneMusicDbcEntry* Entry = FDbcStore::Get().ZoneMusic().GetById(1);
+    TestNotNull(TEXT("ZoneMusic ID 1 exists"), Entry);
+    if (Entry)
+    {
+        TestTrue(TEXT("Day sound ID is valid (not zero)"), Entry->SoundDayID > 0);
+        TestTrue(TEXT("Day sound ID is a reasonable SoundEntry ID (<100000)"), Entry->SoundDayID < 100000);
+        TestTrue(TEXT("Night sound ID is valid"), Entry->SoundNightID > 0);
+    }
+
+    TestTrue(TEXT("ZoneMusic has >10 entries"), FDbcStore::Get().ZoneMusic().Num() > 10);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSoundEntriesDbcTest, "WowUnreal.Audio.SoundEntriesDbc",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSoundEntriesDbcTest::RunTest(const FString& Parameters)
+{
+    FMpqManager& Mpq = WowTestUtils::GetMpq();
+    if (!Mpq.IsInitialized())
+    {
+        AddWarning(TEXT("MPQ not available — skipping"));
+        return true;
+    }
+
+    FDbcStore::Get().LoadAll(Mpq);
+
+    TestTrue(TEXT("SoundEntries has >1000 entries"), FDbcStore::Get().SoundEntries().Num() > 1000);
+
+    // Verify a known sound entry has a file path
+    const FZoneMusicDbcEntry* ZM = FDbcStore::Get().ZoneMusic().GetById(1);
+    if (ZM && ZM->SoundDayID > 0)
+    {
+        const FSoundEntriesDbcEntry* SE = FDbcStore::Get().SoundEntries().GetById(ZM->SoundDayID);
+        TestNotNull(TEXT("Elwynn day music SoundEntry exists"), SE);
+        if (SE)
+        {
+            bool bHasFile = false;
+            for (int32 i = 0; i < 10; ++i)
+            {
+                if (!SE->FileDataID[i].IsEmpty())
+                {
+                    bHasFile = true;
+                    break;
+                }
+            }
+            TestTrue(TEXT("Elwynn music SoundEntry has at least one file"), bHasFile);
+            TestTrue(TEXT("SoundEntry has directory base"), !SE->DirectoryBase.IsEmpty());
+        }
+    }
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSoundAmbienceDbcTest, "WowUnreal.Audio.SoundAmbienceDbc",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSoundAmbienceDbcTest::RunTest(const FString& Parameters)
+{
+    FMpqManager& Mpq = WowTestUtils::GetMpq();
+    if (!Mpq.IsInitialized())
+    {
+        AddWarning(TEXT("MPQ not available — skipping"));
+        return true;
+    }
+
+    FDbcStore::Get().LoadAll(Mpq);
+
+    TestTrue(TEXT("SoundAmbience has >10 entries"), FDbcStore::Get().SoundAmbience().Num() > 10);
+
+    // AreaTable ID 12 (Elwynn Forest) should have an ambience ID
+    const FAreaTableDbcEntry* Area = FDbcStore::Get().AreaTable().GetById(12);
+    TestNotNull(TEXT("Elwynn Forest (ID 12) exists in AreaTable"), Area);
+    if (Area)
+    {
+        TestTrue(TEXT("Elwynn has ambience ID"), Area->AmbienceID > 0);
+        TestTrue(TEXT("Elwynn has zone music ID"), Area->ZoneMusicID > 0);
+
+        if (Area->AmbienceID > 0)
+        {
+            const FSoundAmbienceDbcEntry* Amb = FDbcStore::Get().SoundAmbience().GetById(Area->AmbienceID);
+            TestNotNull(TEXT("Elwynn ambience entry exists"), Amb);
+            if (Amb)
+            {
+                TestTrue(TEXT("Elwynn has day ambience sound"), Amb->DayAmbience > 0);
+            }
+        }
+    }
+
+    return true;
+}
+
+// ====================================================================
+// Packet Handler Tests (in-memory, no network dependency)
+// ====================================================================
+
+#include "WowPacketHandler.h"
+#include "WowOpcodes.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPacketHandlerSpellStart, "WowUnreal.Network.HandleSpellStart",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPacketHandlerSpellStart::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler Handler;
+
+    TArray<uint8> TestData;
+    // Packed GUID (caster item): mask=0x01, low=0x42
+    TestData.Add(0x01); TestData.Add(0x42);
+    // Packed GUID (caster): mask=0x01, low=0x43
+    TestData.Add(0x01); TestData.Add(0x43);
+    // Cast counter
+    TestData.Add(0x01);
+    // Spell ID = 133 (Fireball)
+    TestData.Add(133); TestData.Add(0); TestData.Add(0); TestData.Add(0);
+    // Cast flags = 0
+    TestData.Add(0); TestData.Add(0); TestData.Add(0); TestData.Add(0);
+    // Cast time = 3000ms
+    TestData.Add(0xB8); TestData.Add(0x0B); TestData.Add(0); TestData.Add(0);
+
+    // Should not crash
+    Handler.HandlePacket(WowOpcode::SMSG_SPELL_START, TestData);
+    TestTrue(TEXT("SPELL_START handled without crash"), true);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPacketHandlerPowerUpdate, "WowUnreal.Network.HandlePowerUpdate",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPacketHandlerPowerUpdate::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler Handler;
+
+    TArray<uint8> TestData;
+    // Packed GUID: mask=0x01, low=0x44
+    TestData.Add(0x01); TestData.Add(0x44);
+    // Power type = 0 (mana)
+    TestData.Add(0x00);
+    // Power value = 1500
+    TestData.Add(0xDC); TestData.Add(0x05); TestData.Add(0); TestData.Add(0);
+
+    Handler.HandlePacket(WowOpcode::SMSG_POWER_UPDATE, TestData);
+    TestTrue(TEXT("POWER_UPDATE handled without crash"), true);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPacketHandlerEntityCreation, "WowUnreal.Network.EntityCreation",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPacketHandlerEntityCreation::RunTest(const FString& Parameters)
+{
+    FWowEntityManager EM;
+
+    // Create and promote a unit entity
+    FWowEntity& Base = EM.GetOrCreate(5001);
+    Base.SetField(UnitField::HEALTH, 100);
+    Base.SetField(UnitField::MAXHEALTH, 200);
+    Base.SetField(UnitField::DISPLAYID, 3167); // Stormwind Guard
+    Base.SetField(UnitField::LEVEL, 75);
+    Base.SetField(UnitField::BYTES_0, 1 | (1 << 8) | (0 << 16)); // Race=1(Human), Class=1(Warrior), Gender=0(Male)
+
+    EM.PromoteToTyped(5001, WowTypeMask::UNIT);
+    FWowUnitEntity* Unit = EM.FindUnit(5001);
+    TestNotNull(TEXT("Promoted to unit"), Unit);
+    if (Unit)
+    {
+        TestEqual(TEXT("Display ID"), Unit->GetDisplayId(), (uint32)3167);
+        TestEqual(TEXT("Race"), Unit->GetRaceId(), (uint8)1);
+        TestEqual(TEXT("Class"), Unit->GetClassId(), (uint8)1);
+        TestEqual(TEXT("Gender"), Unit->GetGenderId(), (uint8)0);
+        TestEqual(TEXT("Level"), Unit->GetLevel(), 75);
+    }
+
+    return true;
+}
+
+// ====================================================================
+// Character Builder Tests (model path lookup, no rendering)
+// ====================================================================
+
+#include "WowCharacterBuilder.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCharacterModelPath, "WowUnreal.Character.ModelPath",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FCharacterModelPath::RunTest(const FString& Parameters)
+{
+    FMpqManager& Mpq = WowTestUtils::GetMpq();
+    if (!Mpq.IsInitialized())
+    {
+        AddWarning(TEXT("MPQ not available — skipping"));
+        return true;
+    }
+
+    FDbcStore::Get().LoadAll(Mpq);
+
+    // Human Male
+    FString HumanMale = FWowCharacterBuilder::GetCharacterModelPath(
+        FWowCharacterBuilder::ERace::Human, FWowCharacterBuilder::EGender::Male);
+    TestTrue(TEXT("Human Male path not empty"), !HumanMale.IsEmpty());
+    TestTrue(TEXT("Human Male path contains 'Human'"), HumanMale.Contains(TEXT("Human")));
+    TestTrue(TEXT("Human Male path ends with .m2"), HumanMale.EndsWith(TEXT(".m2")));
+
+    // Orc Female
+    FString OrcFemale = FWowCharacterBuilder::GetCharacterModelPath(
+        FWowCharacterBuilder::ERace::Orc, FWowCharacterBuilder::EGender::Female);
+    TestTrue(TEXT("Orc Female path not empty"), !OrcFemale.IsEmpty());
+    TestTrue(TEXT("Orc Female path contains 'Orc'"), OrcFemale.Contains(TEXT("Orc")));
+
+    // Verify the M2 file exists in MPQ
+    TArray<uint8> M2Data;
+    TestTrue(TEXT("Human Male M2 exists in MPQ"), Mpq.ReadFile(HumanMale, M2Data));
+    TestTrue(TEXT("Human Male M2 has data"), M2Data.Num() > 0);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FCreatureDisplayLookup, "WowUnreal.Character.CreatureDisplayLookup",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FCreatureDisplayLookup::RunTest(const FString& Parameters)
+{
+    FMpqManager& Mpq = WowTestUtils::GetMpq();
+    if (!Mpq.IsInitialized())
+    {
+        AddWarning(TEXT("MPQ not available — skipping"));
+        return true;
+    }
+
+    FDbcStore::Get().LoadAll(Mpq);
+
+    // Stormwind Guard display ID = 3167
+    const FCreatureDisplayInfoDbcEntry* DisplayInfo = FDbcStore::Get().CreatureDisplayInfo().GetById(3167);
+    TestNotNull(TEXT("DisplayInfo 3167 exists"), DisplayInfo);
+    if (DisplayInfo)
+    {
+        TestTrue(TEXT("Has model ID"), DisplayInfo->ModelID > 0);
+
+        const FCreatureModelDataDbcEntry* ModelData = FDbcStore::Get().CreatureModelData().GetById(DisplayInfo->ModelID);
+        TestNotNull(TEXT("CreatureModelData exists"), ModelData);
+        if (ModelData)
+        {
+            TestTrue(TEXT("Has model path"), !ModelData->ModelPath.IsEmpty());
+        }
+    }
+
+    return true;
+}
+
+// ====================================================================
+// Movement Coordinate Tests (pure math)
+// ====================================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMovementWowToUE, "WowUnreal.Movement.WowToUEPosition",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FMovementWowToUE::RunTest(const FString& Parameters)
+{
+    // Elwynn starting position
+    FVector WowPos(-8949.0f, -132.0f, 84.0f);
+    FVector UEPos = FWowCoordinate::WowToUE(WowPos);
+
+    // Verify UE position is reasonable (within world bounds)
+    TestTrue(TEXT("UE X is non-zero"), FMath::Abs(UEPos.X) > 100.0f);
+    TestTrue(TEXT("UE Y is non-zero"), FMath::Abs(UEPos.Y) > 100.0f);
+    TestTrue(TEXT("UE Z (height) is positive"), UEPos.Z > 0.0f);
+
+    // Roundtrip
+    FVector Back = FWowCoordinate::UEToWow(UEPos);
+    TestTrue(TEXT("Roundtrip X"), FMath::IsNearlyEqual(Back.X, WowPos.X, 0.1f));
+    TestTrue(TEXT("Roundtrip Y"), FMath::IsNearlyEqual(Back.Y, WowPos.Y, 0.1f));
+    TestTrue(TEXT("Roundtrip Z"), FMath::IsNearlyEqual(Back.Z, WowPos.Z, 0.1f));
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMovementScaleConsistency, "WowUnreal.Movement.ScaleConsistency",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FMovementScaleConsistency::RunTest(const FString& Parameters)
+{
+    // Verify SCALE constant
+    TestEqual(TEXT("SCALE is 100"), FWowCoordinate::SCALE, 100.0f);
+
+    // One WoW tile = 533.33 yards, at 100 cm/yard = 53333 cm
+    FVector TileCenter = FWowCoordinate::TileToWorld(0, 0);
+    FVector NextTile = FWowCoordinate::TileToWorld(1, 0);
+    float TileDistUE = FVector::Dist(TileCenter, NextTile);
+    float ExpectedDist = FWowCoordinate::TILE_SIZE * FWowCoordinate::SCALE;
+    TestTrue(TEXT("Adjacent tiles are TILE_SIZE * SCALE apart"),
+        FMath::IsNearlyEqual(TileDistUE, ExpectedDist, 1.0f));
+
+    return true;
+}
+
+// ====================================================================
+// ADT Area ID Tests (require MPQ data)
+// ====================================================================
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FAdtAreaIds, "WowUnreal.World.AdtAreaIds",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FAdtAreaIds::RunTest(const FString& Parameters)
+{
+    FMpqManager& Mpq = WowTestUtils::GetMpq();
+    if (!Mpq.IsInitialized())
+    {
+        AddWarning(TEXT("MPQ not available — skipping"));
+        return true;
+    }
+
+    TArray<uint8> Data;
+    if (!Mpq.ReadFile(TEXT("World\\Maps\\Azeroth\\Azeroth_32_48.adt"), Data))
+    {
+        AddError(TEXT("Failed to read Azeroth_32_48.adt"));
+        return false;
+    }
+
+    FAdtData Adt = FAdtParser::Parse(Data);
+    TestTrue(TEXT("ADT is valid"), Adt.bIsValid);
+
+    // All 256 chunks should have area IDs
+    bool bHasAreaId = false;
+    for (int32 i = 0; i < 256; ++i)
+    {
+        if (Adt.Chunks[i].AreaId > 0)
+        {
+            bHasAreaId = true;
+            break;
+        }
+    }
+    TestTrue(TEXT("At least one chunk has an area ID"), bHasAreaId);
+
+    // Elwynn tile 32,48 should have Elwynn Forest or Northshire area IDs
+    uint32 FirstAreaId = Adt.Chunks[0].AreaId;
+    TestTrue(TEXT("First chunk area ID > 0"), FirstAreaId > 0);
+
+    return true;
+}

@@ -6,6 +6,6 @@ public class WowTests : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine" });
-        PrivateDependencyModuleNames.AddRange(new string[] { "WowData", "WowNetwork" });
+        PrivateDependencyModuleNames.AddRange(new string[] { "WowData", "WowNetwork", "WowAssets" });
     }
 }

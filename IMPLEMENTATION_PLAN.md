@@ -150,7 +150,7 @@ The project needs proper UE `.umap` levels instead of running everything through
 - [x] Implement gameplay/UI packet handlers: inventory (4 handlers), quest (5 handlers), talent (3 handlers), social (8 handlers) — verified March 14, 2026: 24 total handlers, 8 data structs, 6 delegates, all opcodes defined; builds, screenshot 100.0% non-black
 
 ## Phase 13: Test Coverage
-- [ ] Add first-party automated tests for parsers, world streaming, networking, UI, addon loading, movement, and audio — the current `WowTests` module only contains 13 automation tests for coords/entities/parsers and does not cover world streaming, UI/addon runtime, movement, or audio.
+- [?] Add first-party automated tests for parsers, world streaming, networking, UI, addon loading, movement, and audio — expanded from 15 to 26 automation tests: added Audio.ZoneMusicDbc, Audio.SoundEntriesDbc, Audio.SoundAmbienceDbc (verify DBC parsing and Elwynn Forest zone→music→ambience chain); Network.HandleSpellStart, Network.HandlePowerUpdate, Network.EntityCreation (packet handling and entity promotion with display ID/race/gender); Character.ModelPath, Character.CreatureDisplayLookup (character builder model path and creature display DBC chain); Movement.WowToUEPosition, Movement.ScaleConsistency (coordinate conversion with real game positions); World.AdtAreaIds (ADT chunk area IDs for zone detection); all 26 tests pass March 14, 2026
 
 ## Test Server
 - Host: 127.0.0.1
