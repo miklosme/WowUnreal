@@ -1203,10 +1203,10 @@ void AWowGameplayController::UpdateEntityAnimations()
 
 		// Update animation based on entity movement info
 		// For now, we'll use basic combat/casting state detection
-		bool bIsInCombat = false; // TODO: Detect combat state from entity fields
-		bool bIsCasting = false;  // TODO: Detect casting state from entity fields
+		bool bEntityInCombat = false; // TODO: Detect combat state from entity fields
+		bool bEntityCasting = false;  // TODO: Detect casting state from entity fields
 
-		AnimController->UpdateAnimationState(Entity->Movement, bIsInCombat, bIsCasting);
+		AnimController->UpdateAnimationState(Entity->Movement, bEntityInCombat, bEntityCasting);
 	}
 }
 
@@ -1354,37 +1354,6 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 	}
 }
 
-void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason)
-{
-	if (!ConnectionManager) return;
-
-	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
-
-	if (CasterGuid == LocalGuid)
-	{
-		// Our spell failed
-		bIsCasting = false;
-		CurrentSpellId = 0;
-		CastStartTime = 0.0f;
-		CastDuration = 0.0f;
-
-		// Hide cast bar widget
-		if (CastBarWidget.IsValid())
-		{
-			CastBarWidget->StopCast();
-		}
-
-		UE_LOG(LogWowGameplay, Warning, TEXT("Spell %u failed with reason %u"), SpellId, FailureReason);
-
-		// Show failure message (simplified)
-		FString FailureMessage = FString::Printf(TEXT("Spell failed (reason %u)"), FailureReason);
-		AddCombatMessage(FailureMessage, FLinearColor::Red);
-	}
-	else
-	{
-		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu spell %u failed"), CasterGuid, SpellId);
-	}
-}
 
 void AWowGameplayController::OnChatMessage(const FString& Message)
 {
