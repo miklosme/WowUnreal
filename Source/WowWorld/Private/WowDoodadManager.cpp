@@ -20,6 +20,7 @@
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "WowM2ParticleComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowDoodad, Log, All);
 
