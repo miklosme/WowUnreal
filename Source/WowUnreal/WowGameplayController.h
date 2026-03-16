@@ -111,6 +111,7 @@ private:
     void OnEntityCreated(const FWowEntity& Entity);
     void OnEntityDestroyed(uint64 Guid);
     void SpawnEntityModel(const FWowEntity& Entity);
+    void SetupLocalPlayerCharacterModel(const FWowEntity& Entity);
     void CacheWorldResources();
 
     // Entity movement interpolation
