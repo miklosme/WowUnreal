@@ -811,7 +811,11 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             SkelMesh->SetCastShadow(true);
             SkelMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
             SkelMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+            SkelMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
             SkelMesh->SetCollisionObjectType(ECC_Pawn);
+
+            // Fix M2 model orientation: M2 models face +Y in WoW space, need -90 degree yaw for UE5
+            SkelMesh->SetRelativeRotation(FRotator(0, -90, 0));
 
             if (UMaterial* BaseMat = GetCharacterMaterial())
             {

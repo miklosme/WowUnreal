@@ -14,6 +14,7 @@
 #include "WowCharacterBuilder.h"
 #include "WowCharacterTexture.h"
 #include "WowAssetCache.h"
+#include "WowSessionState.h"
 #include "WowAnimationController.h"
 #include "Mpq/MpqManager.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -392,6 +393,230 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 
 	AActor* TempCharacterActor = nullptr;
 
+	// Try the full equipment version first (use simpler params in the old method)
+	if (false) // Disable for simple method compatibility
+	{
+		TempCharacterActor = FWowCharacterBuilder::SpawnCharacterWithEquipment(
+			World, Mpq, Cache, Params, TempLocation, TempRotation);
+	}
+
+	// Fallback to simple character spawn without equipment if full version fails
+	if (!TempCharacterActor)
+	{
+		UE_LOG(LogWowPlayerChar, Log, TEXT("Falling back to simple character spawn without equipment"));
+		TempCharacterActor = FWowCharacterBuilder::SpawnCharacter(
+			World, Mpq, Cache, Params.Race, Params.Gender, TempLocation, TempRotation);
+	}
+
+	if (!TempCharacterActor)
+	{
+		UE_LOG(LogWowPlayerChar, Warning, TEXT("Failed to spawn any character for model extraction"));
+		return;
+	}
+
+	// Extract skeletal mesh components from the temporary actor
+	TArray<USkeletalMeshComponent*> TempMeshes;
+	TempCharacterActor->GetComponents<USkeletalMeshComponent>(TempMeshes);
+
+	// Get the animation controller from the temp actor first
+	UWowAnimationController* TempAnimController = FWowCharacterBuilder::GetAnimationController(TempCharacterActor);
+
+	if (TempMeshes.Num() > 0)
+	{
+		// Copy the main skeletal mesh to our character's mesh component
+		USkeletalMeshComponent* MainMesh = TempMeshes[0];
+		if (MainMesh && MainMesh->GetSkeletalMeshAsset())
+		{
+			GetMesh()->SetSkeletalMesh(MainMesh->GetSkeletalMeshAsset());
+			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+
+			// Copy materials
+			for (int32 MatIdx = 0; MatIdx < MainMesh->GetNumMaterials(); ++MatIdx)
+			{
+				GetMesh()->SetMaterial(MatIdx, MainMesh->GetMaterial(MatIdx));
+			}
+
+			// Copy animation controller from temp actor
+			if (TempAnimController && TempAnimController->IsInitialized())
+			{
+				UWowAnimationController* PlayerAnimController = NewObject<UWowAnimationController>(this, TEXT("PlayerAnimationController"));
+
+				// Copy all animations from temp controller
+				TArray<UAnimSequence*> Animations;
+				for (const TObjectPtr<UAnimSequence>& Anim : TempAnimController->GetAllAnimations())
+				{
+					Animations.Add(Anim.Get());
+				}
+
+				PlayerAnimController->Initialize(GetMesh(), Animations);
+
+				// Copy the animation ID mapping
+				TMap<int32, int32> IdMap;
+				const TMap<int32, TObjectPtr<UAnimSequence>>& TempCache = TempAnimController->GetAnimationCache();
+				for (const auto& CachePair : TempCache)
+				{
+					// Find the index of this anim in AllAnimations
+					for (int32 Idx = 0; Idx < Animations.Num(); ++Idx)
+					{
+						if (Animations[Idx] == CachePair.Value.Get())
+						{
+							IdMap.Add(CachePair.Key, Idx);
+							break;
+						}
+					}
+				}
+				PlayerAnimController->SetAnimationIdMap(IdMap);
+
+				SetupAnimationController(PlayerAnimController);
+				UE_LOG(LogWowPlayerChar, Log, TEXT("Player animation controller: %d animations, %d ID mappings"),
+					Animations.Num(), IdMap.Num());
+			}
+			else
+			{
+				// Fallback: use single animation mode with idle animation if available
+				if (UAnimSequence* PlayingAnim = Cast<UAnimSequence>(MainMesh->AnimationData.AnimToPlay.Get()))
+				{
+					GetMesh()->PlayAnimation(PlayingAnim, true);
+					UE_LOG(LogWowPlayerChar, Log, TEXT("Playing fallback animation from temp actor"));
+				}
+				else
+				{
+					UE_LOG(LogWowPlayerChar, Log, TEXT("No animation available from temp actor"));
+				}
+			}
+
+			// Position mesh so feet are at capsule bottom
+			GetMesh()->SetRelativeLocation(FVector(0, 0, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+
+			// Fix M2 model orientation: M2 models face +Y in WoW space, need -90 degree yaw for UE5
+			GetMesh()->SetRelativeRotation(FRotator(0, -90, 0));
+
+			UE_LOG(LogWowPlayerChar, Log, TEXT("Applied main character mesh to player"));
+		}
+
+		// Handle additional meshes (like separate hair) - attach as child components
+		for (int32 i = 1; i < TempMeshes.Num(); ++i)
+		{
+			USkeletalMeshComponent* ExtraMesh = TempMeshes[i];
+			if (ExtraMesh && ExtraMesh->GetSkeletalMeshAsset())
+			{
+				// Create a new skeletal mesh component on our character
+				FString ComponentName = FString::Printf(TEXT("CharacterMesh_%d"), i);
+				USkeletalMeshComponent* NewMeshComp = NewObject<USkeletalMeshComponent>(this, *ComponentName);
+				NewMeshComp->SetupAttachment(GetMesh());
+				NewMeshComp->SetSkeletalMesh(ExtraMesh->GetSkeletalMeshAsset());
+				NewMeshComp->SetCastShadow(true);
+				NewMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				NewMeshComp->SetLeaderPoseComponent(GetMesh()); // Follow main mesh animations
+
+				// Copy materials
+				for (int32 MatIdx = 0; MatIdx < ExtraMesh->GetNumMaterials(); ++MatIdx)
+				{
+					NewMeshComp->SetMaterial(MatIdx, ExtraMesh->GetMaterial(MatIdx));
+				}
+
+				NewMeshComp->RegisterComponent();
+				UE_LOG(LogWowPlayerChar, Log, TEXT("Added additional character mesh component: %s"), *ComponentName);
+			}
+		}
+	}
+
+	// Clean up the temporary actor
+	TempCharacterActor->Destroy();
+
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Character model set successfully"));
+}
+
+void AWowPlayerCharacter::SetupAnimationController(UWowAnimationController* AnimController)
+{
+	this->AnimationController = AnimController;
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Animation controller setup for local player character"));
+}
+
+void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
+	uint8 Race, uint8 Gender, uint8 SkinColor, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair, const TArray<FWowCharacterEquipment>* Equipment)
+{
+	if (!World || !Mpq || !Cache)
+	{
+		UE_LOG(LogWowPlayerChar, Warning, TEXT("SetCharacterModelWithEquipment: Missing required parameters"));
+		return;
+	}
+
+	// Build character parameters
+	FWowCharacterBuilder::FCharacterParams Params;
+	Params.Race = static_cast<FWowCharacterBuilder::ERace>(Race);
+	Params.Gender = static_cast<FWowCharacterBuilder::EGender>(Gender);
+	Params.Customization.RaceId = Race;
+	Params.Customization.Gender = Gender;
+	Params.Customization.SkinColor = SkinColor;
+	Params.Customization.FaceVariation = Face;
+	Params.Customization.HairStyle = HairStyle;
+	Params.Customization.HairColor = HairColor;
+	Params.Customization.FacialHairStyle = FacialHair;
+
+	// Map equipment if provided
+	if (Equipment)
+	{
+		Params.BodyEquipment.RaceId = Race;
+		Params.BodyEquipment.Gender = Gender;
+
+		// Map equipment slots based on inventory type
+		// WoW 3.3.5 equipment slots: https://wowdev.wiki/Inventory_type
+		for (const FWowCharacterEquipment& EquipItem : *Equipment)
+		{
+			if (EquipItem.DisplayId > 0)
+			{
+				switch (EquipItem.InventoryType)
+				{
+				case 5:  // Chest/Robe
+					Params.BodyEquipment.ChestDisplayId = EquipItem.DisplayId;
+					break;
+				case 7:  // Legs/Pants
+					Params.BodyEquipment.PantsDisplayId = EquipItem.DisplayId;
+					break;
+				case 8:  // Feet/Boots
+					Params.BodyEquipment.BootsDisplayId = EquipItem.DisplayId;
+					break;
+				case 10: // Hands/Gloves
+					Params.BodyEquipment.GlovesDisplayId = EquipItem.DisplayId;
+					break;
+				case 9:  // Wrists/Bracers
+					Params.BodyEquipment.BracersDisplayId = EquipItem.DisplayId;
+					break;
+				case 4:  // Shirt
+					Params.BodyEquipment.ShirtDisplayId = EquipItem.DisplayId;
+					break;
+				case 19: // Tabard
+					Params.BodyEquipment.TabardDisplayId = EquipItem.DisplayId;
+					break;
+				case 6:  // Waist/Belt
+					Params.BodyEquipment.BeltDisplayId = EquipItem.DisplayId;
+					break;
+				}
+			}
+		}
+	}
+
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Setting character model with equipment: Race=%d Gender=%d Chest=%d Pants=%d"),
+		Race, Gender, Params.BodyEquipment.ChestDisplayId, Params.BodyEquipment.PantsDisplayId);
+
+	// Remove any existing skeletal mesh components (except the default one)
+	TArray<USkeletalMeshComponent*> ExistingMeshes;
+	GetComponents<USkeletalMeshComponent>(ExistingMeshes);
+	for (USkeletalMeshComponent* Mesh : ExistingMeshes)
+	{
+		if (Mesh != GetMesh()) // Keep the default character mesh component
+		{
+			Mesh->DestroyComponent();
+		}
+	}
+
+	// Create a temporary actor to build the character, then extract its components
+	FVector TempLocation = GetActorLocation() + FVector(0, 0, -10000); // Spawn far below to avoid visual artifacts
+	FRotator TempRotation = GetActorRotation();
+
+	AActor* TempCharacterActor = nullptr;
+
 	// Try the full equipment version first
 	if (Params.Equipment.Num() > 0 ||
 		(Params.BodyEquipment.ChestDisplayId > 0 || Params.BodyEquipment.PantsDisplayId > 0 ||
@@ -489,6 +714,9 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 			// Position mesh so feet are at capsule bottom
 			GetMesh()->SetRelativeLocation(FVector(0, 0, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
 
+			// Fix M2 model orientation: M2 models face +Y in WoW space, need -90 degree yaw for UE5
+			GetMesh()->SetRelativeRotation(FRotator(0, -90, 0));
+
 			UE_LOG(LogWowPlayerChar, Log, TEXT("Applied main character mesh to player"));
 		}
 
@@ -522,11 +750,5 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 	// Clean up the temporary actor
 	TempCharacterActor->Destroy();
 
-	UE_LOG(LogWowPlayerChar, Log, TEXT("Character model set successfully"));
-}
-
-void AWowPlayerCharacter::SetupAnimationController(UWowAnimationController* AnimController)
-{
-	this->AnimationController = AnimController;
-	UE_LOG(LogWowPlayerChar, Log, TEXT("Animation controller setup for local player character"));
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Character model with equipment set successfully"));
 }

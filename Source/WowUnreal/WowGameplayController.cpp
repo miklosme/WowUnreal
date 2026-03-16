@@ -517,7 +517,9 @@ void AWowGameplayController::TryTargetUnderCursor()
 
 	// Line trace from mouse cursor into the world
 	FHitResult Hit;
-	if (GetHitResultUnderCursor(ECC_Pawn, false, Hit))
+	FCollisionQueryParams Params;
+	Params.bTraceComplex = true;
+	if (GetHitResultUnderCursor(ECC_Visibility, true, Hit))
 	{
 		AActor* HitActor = Hit.GetActor();
 		if (HitActor)
@@ -1229,6 +1231,7 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 	}
 
 	// If no valid race/gender from entity, try to get from cached character list
+	const FWowCharacterInfo* CachedCharInfo = nullptr;
 	if (RaceId == 0 && ConnectionManager)
 	{
 		const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
@@ -1240,6 +1243,7 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 			{
 				RaceId = CharInfo.Race;
 				Gender = CharInfo.Gender;
+				CachedCharInfo = &CharInfo; // Store reference for equipment data
 				UE_LOG(LogWowGameplay, Log, TEXT("Local player race/gender from cached character: Race=%d Gender=%d"), RaceId, Gender);
 				break;
 			}
@@ -1257,9 +1261,19 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 	// TODO: Extract customization data from player entity fields (PLAYER_BYTES, etc.)
 	// For now, use default customization values
 
-	// Set the character model on the player pawn
-	PlayerChar->SetCharacterModel(World, CachedMpq, CachedAssetCache,
-		RaceId, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair);
+
+	// Use equipment-aware character model if we have equipment data
+	if (CachedCharInfo && CachedCharInfo->Equipment.Num() > 0)
+	{
+		PlayerChar->SetCharacterModelWithEquipment(World, CachedMpq, CachedAssetCache,
+			RaceId, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair, &CachedCharInfo->Equipment);
+	}
+	else
+	{
+		// Fallback to simple character model without equipment
+		PlayerChar->SetCharacterModel(World, CachedMpq, CachedAssetCache,
+			RaceId, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair);
+	}
 }
 
 void AWowGameplayController::UpdatePlayerAnimations()

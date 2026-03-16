@@ -9,6 +9,7 @@ class UInputMappingContext;
 class UInputAction;
 class UWowAnimationController;
 struct FInputActionValue;
+class FWowCharacterBuilder;
 
 UCLASS()
 class WOWUNREAL_API AWowPlayerCharacter : public ACharacter
@@ -89,6 +90,11 @@ public:
     void SetCharacterModel(UWorld* World, class FMpqManager* Mpq, class FWowAssetCache* Cache,
         uint8 Race, uint8 Gender, uint8 SkinColor = 0, uint8 Face = 0, uint8 HairStyle = 0,
         uint8 HairColor = 0, uint8 FacialHair = 0);
+
+    /** Set the character's visual model with equipment */
+    void SetCharacterModelWithEquipment(UWorld* World, class FMpqManager* Mpq, class FWowAssetCache* Cache,
+        uint8 Race, uint8 Gender, uint8 SkinColor = 0, uint8 Face = 0, uint8 HairStyle = 0,
+        uint8 HairColor = 0, uint8 FacialHair = 0, const TArray<struct FWowCharacterEquipment>* Equipment = nullptr);
 
     /** Setup animation controller for local player character model */
     void SetupAnimationController(class UWowAnimationController* AnimController);

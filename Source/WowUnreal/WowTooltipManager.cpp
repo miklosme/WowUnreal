@@ -183,7 +183,9 @@ const FWowEntity* UWowTooltipManager::FindEntityUnderCursor(const FVector2D& Scr
 
     // Perform line trace from mouse cursor into world
     FHitResult Hit;
-    if (PC->GetHitResultUnderCursor(ECC_Pawn, false, Hit))
+    FCollisionQueryParams Params;
+    Params.bTraceComplex = true;
+    if (PC->GetHitResultUnderCursor(ECC_Visibility, true, Hit))
     {
         AActor* HitActor = Hit.GetActor();
         if (HitActor && HitActor->Tags.Num() > 0)
