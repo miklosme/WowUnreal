@@ -4,7 +4,9 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/SOverlay.h"
 #include "Widgets/Images/SImage.h"
+#include "MediaTexture.h"
 
 // ─── Expansion-specific theming ─────────────────────────────────────────────
 
@@ -103,7 +105,18 @@ void SWowLoginWidget::Construct(const FArguments& InArgs)
 
     ChildSlot
     [
-        // Full-screen background
+        SNew(SOverlay)
+
+        // Layer 0: Cinematic video background (hidden until texture is set)
+        + SOverlay::Slot()
+        [
+            SAssignNew(CinematicImage, SImage)
+            .Visibility(EVisibility::Collapsed)
+        ]
+
+        // Layer 1: Color overlay + UI
+        + SOverlay::Slot()
+        [
         SAssignNew(BackgroundBorder, SBorder)
         .BorderBackgroundColor(GetBackgroundColor())
         .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
@@ -248,6 +261,7 @@ void SWowLoginWidget::Construct(const FArguments& InArgs)
                 BuildExpansionTabs()
             ]
         ]
+        ] // SOverlay Layer 1
     ];
 }
 
@@ -321,6 +335,43 @@ TSharedRef<SWidget> SWowLoginWidget::BuildExpansionTabs()
         ];
 }
 
+void SWowLoginWidget::SetCinematicTexture(UMediaTexture* InTexture)
+{
+    if (!CinematicImage.IsValid()) return;
+
+    if (InTexture)
+    {
+        // Create a brush from the media texture
+        CinematicBrush = MakeShared<FSlateBrush>();
+        CinematicBrush->SetResourceObject(InTexture);
+        CinematicBrush->ImageSize = FVector2D(1920, 1080);
+        CinematicBrush->DrawAs = ESlateBrushDrawType::Image;
+        CinematicBrush->Tiling = ESlateBrushTileType::NoTile;
+
+        CinematicImage->SetImage(CinematicBrush.Get());
+        CinematicImage->SetVisibility(EVisibility::SelfHitTestInvisible);
+
+        // Make the color overlay semi-transparent so cinematic shows through
+        if (BackgroundBorder.IsValid())
+        {
+            FLinearColor BgColor = GetBackgroundColor();
+            BgColor.A = 0.3f; // Let video show through
+            BackgroundBorder->SetBorderBackgroundColor(BgColor);
+        }
+    }
+    else
+    {
+        CinematicImage->SetVisibility(EVisibility::Collapsed);
+        CinematicBrush.Reset();
+
+        // Restore opaque background
+        if (BackgroundBorder.IsValid())
+        {
+            BackgroundBorder->SetBorderBackgroundColor(GetBackgroundColor());
+        }
+    }
+}
+
 void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
 {
     CurrentExpansion = Expansion;
@@ -328,7 +379,13 @@ void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
     // Update visuals
     if (BackgroundBorder.IsValid())
     {
-        BackgroundBorder->SetBorderBackgroundColor(GetBackgroundColor());
+        // If cinematic is playing, keep semi-transparent; otherwise opaque
+        FLinearColor BgColor = GetBackgroundColor();
+        if (CinematicImage.IsValid() && CinematicImage->GetVisibility() != EVisibility::Collapsed)
+        {
+            BgColor.A = 0.3f;
+        }
+        BackgroundBorder->SetBorderBackgroundColor(BgColor);
     }
     if (TitleText.IsValid())
     {
@@ -340,8 +397,8 @@ void SWowLoginWidget::SetExpansion(EWowExpansion Expansion)
         SubtitleText->SetText(FText::FromString(GetExpansionSubtitle()));
     }
 
-    // Rebuild the widget to update tab styling (simpler than managing all states)
-    // For now just update colors — the tabs show the selection state
+    // Notify controller to switch cinematic
+    OnExpansionChanged.ExecuteIfBound(static_cast<uint8>(Expansion));
 }
 
 // ─── Login logic ────────────────────────────────────────────────────────────

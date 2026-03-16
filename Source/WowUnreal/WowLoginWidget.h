@@ -1,21 +1,18 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "WowExpansionTypes.h"
 
 DECLARE_DELEGATE_FourParams(FOnLoginSubmit, const FString& /*Server*/, int32 /*Port*/, const FString& /*User*/, const FString& /*Pass*/);
+DECLARE_DELEGATE_OneParam(FOnExpansionChanged, uint8 /*ExpansionIndex*/);
 
-/** WoW expansion for login screen theming */
-enum class EWowExpansion : uint8
-{
-    Classic = 0,
-    BurningCrusade,
-    WrathOfTheLichKing,
-    Count
-};
+class UMediaTexture;
+struct FSlateBrush;
 
 /**
  * WoW-themed login screen with expansion switcher.
  * Mimics the look of the original client login screens.
+ * Supports cinematic video background via media texture.
  */
 class SWowLoginWidget : public SCompoundWidget
 {
@@ -26,7 +23,13 @@ public:
     void Construct(const FArguments& InArgs);
     void SetStatusText(const FString& Text);
 
+    /** Set the media texture for cinematic background */
+    void SetCinematicTexture(UMediaTexture* InTexture);
+
     FOnLoginSubmit OnLoginSubmit;
+    FOnExpansionChanged OnExpansionChanged;
+
+    EWowExpansion GetCurrentExpansion() const { return CurrentExpansion; }
 
 private:
     FReply OnLoginClicked();
@@ -50,6 +53,10 @@ private:
     TSharedPtr<STextBlock> TitleText;
     TSharedPtr<STextBlock> SubtitleText;
     TSharedPtr<SBorder> BackgroundBorder;
+
+    // Cinematic background
+    TSharedPtr<SImage> CinematicImage;
+    TSharedPtr<FSlateBrush> CinematicBrush;
 
     // Expansion tab buttons for styling updates
     TSharedPtr<SBorder> ClassicTab;

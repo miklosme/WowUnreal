@@ -8,6 +8,7 @@ class UWowConnectionManager;
 class AWowWorldManager;
 class AWowAudioManager;
 class UWowUIManager;
+class FWowCinematicManager;
 class SWowLoginWidget;
 class SWowRealmSelectWidget;
 class SWowCharacterSelectWidget;
@@ -45,9 +46,13 @@ private:
     void HandleCharacterCreated(const FString& Name, uint8 Race, uint8 Class, uint8 Gender,
         uint8 Skin, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair);
     void HandleBackToCharSelect();
+    void HandleExpansionChanged(uint8 ExpansionIndex);
 
     /** Initialize world systems when entering the game world */
     void InitializeWorldSystems();
+
+    /** Initialize and start cinematic playback */
+    void InitializeCinematics();
 
     void ShowLoginScreen();
     void ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Realms);
@@ -61,4 +66,7 @@ private:
     TSharedPtr<SWowCharacterSelectWidget> CharSelectWidget;
     TSharedPtr<SWowCharacterCreateWidget> CharCreateWidget;
     TSharedPtr<SWidget> CurrentWidget;
+
+    /** Cinematic manager for login screen backgrounds (owned, cleaned up in EndPlay) */
+    FWowCinematicManager* CinematicManager = nullptr;
 };

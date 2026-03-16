@@ -4,6 +4,7 @@
 #include "WowRealmSelectWidget.h"
 #include "WowCharacterSelectWidget.h"
 #include "WowCharacterCreateWidget.h"
+#include "WowCinematicManager.h"
 #include "WowGameplayController.h"
 #include "WowWorldManager.h"
 #include "WowAudioManager.h"
@@ -27,6 +28,12 @@ void AWowLoginController::BeginPlay()
 void AWowLoginController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     ClearCurrentScreen();
+    if (CinematicManager)
+    {
+        CinematicManager->StopCinematic();
+        delete CinematicManager;
+        CinematicManager = nullptr;
+    }
     Super::EndPlay(EndPlayReason);
 }
 
@@ -67,6 +74,12 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
         break;
     case EWowSessionState::WorldInGame:
         UE_LOG(LogWowLogin, Log, TEXT("Entered world — removing login UI and initializing world"));
+        if (CinematicManager)
+        {
+            CinematicManager->StopCinematic();
+            delete CinematicManager;
+            CinematicManager = nullptr;
+        }
         ClearCurrentScreen();
         InitializeWorldSystems();
         if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
@@ -213,6 +226,50 @@ void AWowLoginController::HandleBackToCharSelect()
     ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
 }
 
+void AWowLoginController::InitializeCinematics()
+{
+    if (!WorldManager || !WorldManager->GetMpqManager()) return;
+
+    CinematicManager = new FWowCinematicManager();
+
+    // Extract all expansion cinematics
+    FMpqManager* Mpq = WorldManager->GetMpqManager();
+    CinematicManager->PrepareCinematic(Mpq, EWowExpansion::Classic);
+    CinematicManager->PrepareCinematic(Mpq, EWowExpansion::BurningCrusade);
+    CinematicManager->PrepareCinematic(Mpq, EWowExpansion::WrathOfTheLichKing);
+
+    // Bind media texture to the login widget
+    if (LoginWidget.IsValid())
+    {
+        LoginWidget->SetCinematicTexture(CinematicManager->GetMediaTexture());
+    }
+
+    // Play the cinematic for the current expansion
+    EWowExpansion CurrentExp = LoginWidget.IsValid() ? LoginWidget->GetCurrentExpansion() : EWowExpansion::WrathOfTheLichKing;
+    if (CinematicManager->HasCinematic(CurrentExp))
+    {
+        CinematicManager->PlayCinematic(CurrentExp);
+        UE_LOG(LogWowLogin, Log, TEXT("Playing login cinematic for expansion %d"), static_cast<int32>(CurrentExp));
+    }
+}
+
+void AWowLoginController::HandleExpansionChanged(uint8 ExpansionIndex)
+{
+    if (!CinematicManager) return;
+
+    EWowExpansion Exp = static_cast<EWowExpansion>(ExpansionIndex);
+    if (CinematicManager->HasCinematic(Exp))
+    {
+        CinematicManager->PlayCinematic(Exp);
+        UE_LOG(LogWowLogin, Log, TEXT("Switched cinematic to expansion %d"), ExpansionIndex);
+    }
+    else
+    {
+        CinematicManager->StopCinematic();
+        UE_LOG(LogWowLogin, Log, TEXT("No cinematic for expansion %d"), ExpansionIndex);
+    }
+}
+
 void AWowLoginController::ClearCurrentScreen()
 {
     if (CurrentWidget.IsValid())
@@ -235,12 +292,16 @@ void AWowLoginController::ShowLoginScreen()
 
     LoginWidget = SNew(SWowLoginWidget);
     LoginWidget->OnLoginSubmit.BindUObject(this, &AWowLoginController::HandleLoginSubmit);
+    LoginWidget->OnExpansionChanged.BindUObject(this, &AWowLoginController::HandleExpansionChanged);
     CurrentWidget = LoginWidget;
 
     if (GEngine && GEngine->GameViewport)
     {
         GEngine->GameViewport->AddViewportWidgetContent(CurrentWidget.ToSharedRef(), 100);
     }
+
+    // Initialize cinematics after showing the widget
+    InitializeCinematics();
 }
 
 void AWowLoginController::ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Realms)
