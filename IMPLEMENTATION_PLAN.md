@@ -111,15 +111,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 
 ## In Progress / Needs Fixing
 
-### P1: 3D Login Screen Backgrounds
-Render authentic WoW login backgrounds using M2/WMO models instead of video:
-- [ ] Classic: Dark Portal scene (WMO from World/wmo/Azeroth/DarkPortal/ + effects)
-- [ ] Burning Crusade: Outland portal scene
-- [ ] Wrath of the Lich King: Sindragosa/Icecrown scene (creature/frostwyrm M2)
-- [ ] Slow-orbit camera animation per expansion
-- [ ] Login music per expansion from MPQ
-
-### P2: Expand Lua API Coverage
+### P1: Expand Lua API Coverage
 Currently ~50/1200+ functions. Needed for WoW UI to actually render:
 - [ ] Font loading (.ttf from MPQ → UFont)
 - [ ] Texture loading for UI frames (BLP → UTexture for frames)
@@ -134,7 +126,7 @@ Currently ~50/1200+ functions. Needed for WoW UI to actually render:
 - [ ] Guild API
 - [ ] CVar system (GetCVar, SetCVar)
 
-### P3: Visual Gameplay Features
+### P2: Visual Gameplay Features
 - [ ] Minimap rendering from terrain data
 - [ ] Nameplates (name + health bar above entities)
 - [ ] Combat log
@@ -142,7 +134,7 @@ Currently ~50/1200+ functions. Needed for WoW UI to actually render:
 - [ ] WoW mouse cursor textures
 - [ ] Tooltip system (items, spells, NPCs)
 
-### P4: Gameplay Systems
+### P3: Gameplay Systems
 - [ ] Warden anti-cheat responses (will get kicked without)
 - [ ] Teleport handling (MSG_MOVE_TELEPORT_ACK)
 - [ ] Death/corpse run
@@ -153,12 +145,12 @@ Currently ~50/1200+ functions. Needed for WoW UI to actually render:
 - [ ] Duel system
 - [ ] Group/raid UI
 
-### P5: NPC/Creature Behavior
+### P4: NPC/Creature Behavior
 - [ ] NPC movement from SMSG_MONSTER_MOVE waypoint packets
 - [ ] Creature idle/walk/run animation states
 - [ ] Player movement interpolation (smooth network sync)
 
-### P6: Effects & Polish
+### P5: Effects & Polish
 - [ ] M2 particle emitters → Niagara systems
 - [ ] Fire/smoke effects (campfires, torches)
 - [ ] M2 ribbon emitters (weapon trails)
@@ -166,16 +158,24 @@ Currently ~50/1200+ functions. Needed for WoW UI to actually render:
 - [ ] WMO interior lighting from Light.dbc
 - [ ] Spell visuals (SpellVisual → SpellVisualKit chain)
 
-### P7: Terrain Polish
+### P6: Terrain Polish
 - [ ] Custom terrain shader (reduce 256 draw calls/tile)
 - [ ] Shadow flickering fix on WMOs
 - [ ] Distance-based UV scaling
 
-### P8: Full WoW UI Boot
+### P7: Full WoW UI Boot
 - [ ] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
 - [ ] Full addon loading from Interface/AddOns/
 - [ ] Font rendering with WoW .ttf fonts
 - [ ] Character creation 3D preview with customization sliders
+
+### P8: 3D Login Screen Backgrounds
+Render authentic WoW login backgrounds using M2/WMO models instead of video:
+- [ ] Classic: Dark Portal scene (WMO from World/wmo/Azeroth/DarkPortal/ + effects)
+- [ ] Burning Crusade: Outland portal scene
+- [ ] Wrath of the Lich King: Sindragosa/Icecrown scene (creature/frostwyrm M2)
+- [ ] Slow-orbit camera animation per expansion
+- [ ] Login music per expansion from MPQ
 
 ---
 
