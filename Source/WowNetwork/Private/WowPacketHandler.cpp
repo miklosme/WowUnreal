@@ -51,6 +51,11 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_PARTY_COMMAND_RESULT,     &FWowPacketHandler::HandlePartyCommandResult);
     Handlers.Add(WowOpcode::SMSG_WHO,                      &FWowPacketHandler::HandleWho);
 
+    // ── Death / Corpse / Resurrection handlers ──────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_CORPSE_RECLAIM_DELAY,     &FWowPacketHandler::HandleCorpseReclaimDelay);
+    Handlers.Add(WowOpcode::SMSG_RESURRECT_REQUEST,        &FWowPacketHandler::HandleResurrectRequest);
+    Handlers.Add(WowOpcode::SMSG_MOVE_TELEPORT,            &FWowPacketHandler::HandleMoveTeleport);
+
     // Movement handlers — all use the same parser
     for (uint16 Op = WowOpcode::MSG_MOVE_START_FORWARD; Op <= WowOpcode::MSG_MOVE_SET_PITCH; ++Op)
     {
@@ -196,6 +201,18 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
                     Entity->Scale = 1.0f;
                 }
             }
+
+            // Check for player death
+            if (Entity->Guid == EntityManager.LocalPlayerGuid && Entity->IsUnit())
+            {
+                int32 Health = Entity->GetHealth();
+                if (Health == 0)
+                {
+                    UE_LOG(LogWowPacket, Warning, TEXT("Player has died! Health = 0"));
+                    OnPlayerDeath.Broadcast();
+                }
+            }
+
             EntitiesUpdated++;
             EntityManager.OnEntityUpdated.Broadcast(*Entity);
         }
@@ -1598,28 +1615,96 @@ void FWowPacketHandler::SendWardenResponse(uint32 Opcode, const TArray<uint8>& D
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Death / Corpse / Resurrection Handlers
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── SMSG_CORPSE_RECLAIM_DELAY ────────────────────────────────────────────
+// uint32 delayTimeInSeconds
+
+void FWowPacketHandler::HandleCorpseReclaimDelay(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 DelayTime = R.ReadU32();
+    float DelayInSeconds = static_cast<float>(DelayTime);
+
+    UE_LOG(LogWowPacket, Log, TEXT("CORPSE_RECLAIM_DELAY: delay=%u seconds"), DelayTime);
+
+    OnCorpseReclaimDelay.Broadcast(DelayInSeconds);
+}
+
+// ── SMSG_RESURRECT_REQUEST ───────────────────────────────────────────────
+// uint64 resurrectorGuid, FString resurrectorName, uint8 unk
+
+void FWowPacketHandler::HandleResurrectRequest(FPacketReader& R)
+{
+    if (!R.CanRead(8)) return;
+
+    uint64 ResurrectorGuid = R.ReadU64();
+    FString ResurrectorName = R.ReadCString();
+    uint8 Unknown = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("RESURRECT_REQUEST: resurrector=%llu name=%s"),
+        ResurrectorGuid, *ResurrectorName);
+
+    OnResurrectRequest.Broadcast(ResurrectorName);
+}
+
 // ── Teleport Handling ────────────────────────────────────────────────────────
 
 void FWowPacketHandler::HandleMoveTeleport(FPacketReader& R)
 {
-    // MSG_MOVE_TELEPORT / SMSG_MOVE_TELEPORT
-    // PackedGUID + uint32 flags + uint32 time + float x + float y + float z + float orientation
+    // Handle both old format (MSG_MOVE_TELEPORT with PackedGUID) and new format (SMSG_MOVE_TELEPORT with full GUID)
 
-    uint64 Guid = R.ReadPackedGuid();
-    uint32 Flags = R.ReadU32();
-    uint32 Time = R.ReadU32();
+    uint64 Guid = 0;
+    uint32 Flags = 0;
+    uint32 Time = 0;
+    uint32 MapId = 0;
+
+    // Try to read as new format first (SMSG_MOVE_TELEPORT)
+    if (R.CanRead(8 + 4 + 4 + 4*4 + 1))
+    {
+        Guid = R.ReadU64();
+        uint32 Counter = R.ReadU32();
+        MapId = R.ReadU32();
+    float X = R.ReadFloat();
+    float Y = R.ReadFloat();
+    float Z = R.ReadFloat();
+    float Orientation = R.ReadFloat();
+    }
+    else
+    {
+        // Try to read as old format (MSG_MOVE_TELEPORT with PackedGUID)
+        Guid = R.ReadPackedGuid();
+        Flags = R.ReadU32();
+        Time = R.ReadU32();
+    }
+
     float X = R.ReadFloat();
     float Y = R.ReadFloat();
     float Z = R.ReadFloat();
     float Orientation = R.ReadFloat();
 
+    // Read optional unknown byte if available
+    if (R.CanRead(1))
+    {
+        uint8 Unknown = R.ReadU8();
+    }
+
     FVector Position(X, Y, Z);
 
-    UE_LOG(LogWowPacket, Log, TEXT("MOVE_TELEPORT: guid=%llu pos=(%.1f,%.1f,%.1f) orient=%.2f"),
-           Guid, X, Y, Z, Orientation);
+    UE_LOG(LogWowPacket, Log, TEXT("MOVE_TELEPORT: guid=%llu map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
+        Guid, MapId, X, Y, Z, Orientation);
 
-    // Broadcast teleport request
+    // Broadcast both legacy teleport request and new player teleport for compatibility
     OnTeleportRequest.Broadcast(Guid, Flags, Time, Position, Orientation);
+
+    // Check if this is for the local player
+    if (Guid == EntityManager.LocalPlayerGuid)
+    {
+        OnPlayerTeleport.Broadcast(MapId, X, Y, Z);
+    }
 }
 
 void FWowPacketHandler::HandleTransferPending(FPacketReader& R)
@@ -1660,4 +1745,5 @@ void FWowPacketHandler::HandleNewWorld(FPacketReader& R)
 
     // Broadcast map transfer
     OnMapTransfer.Broadcast(MapId, X, Y, Z, Orientation);
+}
 }

@@ -10,12 +10,16 @@
 #include "WowCharacterBuilder.h"
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
+#include "WowDeathManager.h"
+#include "WowCursorManager.h"
+#include "WowTooltipManager.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/GameViewportClient.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "Framework/Application/SlateApplication.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
@@ -35,6 +39,11 @@ void AWowGameplayController::BeginPlay()
 	{
 		UIManager = GI->GetSubsystem<UWowUIManager>();
 	}
+
+	// Create managers
+	DeathManager = NewObject<UWowDeathManager>(this);
+	CursorManager = NewObject<UWowCursorManager>(this);
+	TooltipManager = NewObject<UWowTooltipManager>(this);
 }
 
 void AWowGameplayController::SetupInputComponent()
@@ -87,6 +96,9 @@ void AWowGameplayController::BindEntityEvents()
 	{
 		UIManager = GI->GetSubsystem<UWowUIManager>();
 	}
+
+	// Initialize managers once connection is established
+	InitializeManagers();
 }
 
 void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation)
@@ -235,6 +247,13 @@ void AWowGameplayController::Tick(float DeltaTime)
 	if (UIManager && UIManager->GetEventSystem())
 	{
 		UIManager->GetEventSystem()->TickOnUpdate(DeltaTime);
+	}
+
+	// Update tooltip manager
+	if (TooltipManager && FSlateApplication::IsInitialized())
+	{
+		FVector2D MousePosition = FSlateApplication::Get().GetCursorPos();
+		TooltipManager->Update(MousePosition);
 	}
 
 	if (!ConnectionManager) return;
@@ -835,4 +854,41 @@ void AWowGameplayController::OnEntityHealthChanged(const FWowEntity& Entity, int
 	}
 
 	AddCombatMessage(Message, MessageColor);
+}
+
+void AWowGameplayController::InitializeManagers()
+{
+	if (!ConnectionManager)
+	{
+		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot initialize managers: ConnectionManager is null"));
+		return;
+	}
+
+	CacheWorldResources();
+
+	// TODO: Get root widget for UI overlay
+	// In a real implementation, this would get the viewport widget or main UI overlay
+	TSharedPtr<SWidget> RootWidget; // Placeholder
+
+	// Initialize death manager
+	if (DeathManager)
+	{
+		DeathManager->Initialize(ConnectionManager, RootWidget);
+	}
+
+	// Initialize cursor manager
+	if (CursorManager && CachedMpq && CachedAssetCache)
+	{
+		CursorManager->Initialize(CachedMpq, CachedAssetCache);
+		CursorManager->LoadCursors();
+	}
+
+	// Initialize tooltip manager
+	if (TooltipManager)
+	{
+		TooltipManager->Initialize(ConnectionManager, RootWidget);
+	}
+
+	UE_LOG(LogWowGameplay, Log, TEXT("All managers initialized"));
+}
 }

@@ -18,6 +18,10 @@ DECLARE_MULTICAST_DELEGATE(FOnGuildRosterUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGroupUpdated);
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnTeleportRequest, uint64 /*Guid*/, uint32 /*Flags*/, uint32 /*Time*/, FVector /*Position*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnMapTransfer, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
+DECLARE_MULTICAST_DELEGATE(FOnPlayerDeath);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnCorpseReclaimDelay, float /*DelayInSeconds*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnResurrectRequest, const FString& /*RequesterName*/);
+DECLARE_MULTICAST_DELEGATE_FourParams(FOnPlayerTeleport, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -139,6 +143,10 @@ public:
     FOnGroupUpdated OnGroupUpdated;
     FOnTeleportRequest OnTeleportRequest;
     FOnMapTransfer OnMapTransfer;
+    FOnPlayerDeath OnPlayerDeath;
+    FOnCorpseReclaimDelay OnCorpseReclaimDelay;
+    FOnResurrectRequest OnResurrectRequest;
+    FOnPlayerTeleport OnPlayerTeleport;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
@@ -203,6 +211,10 @@ private:
     void HandleMoveTeleport(FPacketReader& R);
     void HandleTransferPending(FPacketReader& R);
     void HandleNewWorld(FPacketReader& R);
+
+    // ── Death / Corpse / Resurrection handlers ──────────────────────────────
+    void HandleCorpseReclaimDelay(FPacketReader& R);
+    void HandleResurrectRequest(FPacketReader& R);
 
     // Internal parsing
     void ParseUpdateBlock(FPacketReader& R);

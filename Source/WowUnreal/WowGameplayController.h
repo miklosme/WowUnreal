@@ -7,6 +7,9 @@
 class UWowConnectionManager;
 class UWowUIManager;
 class AWowWorldManager;
+class UWowDeathManager;
+class UWowCursorManager;
+class UWowTooltipManager;
 class FMpqManager;
 class FWowAssetCache;
 class SWowCombatLog;
@@ -30,8 +33,23 @@ public:
     UPROPERTY()
     TObjectPtr<UWowUIManager> UIManager;
 
+    /** Death manager for player death handling */
+    UPROPERTY()
+    TObjectPtr<UWowDeathManager> DeathManager;
+
+    /** Cursor manager for WoW custom cursors */
+    UPROPERTY()
+    TObjectPtr<UWowCursorManager> CursorManager;
+
+    /** Tooltip manager for entity tooltips */
+    UPROPERTY()
+    TObjectPtr<UWowTooltipManager> TooltipManager;
+
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();
+
+    /** Initialize all managers */
+    void InitializeManagers();
 
     /** Currently targeted entity GUID */
     UPROPERTY()
