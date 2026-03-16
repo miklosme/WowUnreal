@@ -1,6 +1,7 @@
 #include "WowPacketHandler.h"
 #include "WowOpcodes.h"
 #include "WowUpdateFields.h"
+#include "WowWardenHandler.h"
 #include "Compression.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowPacket, Log, All);
@@ -58,6 +59,18 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::MSG_MOVE_ROOT, &FWowPacketHandler::HandleMovement);
     Handlers.Add(WowOpcode::MSG_MOVE_UNROOT, &FWowPacketHandler::HandleMovement);
     Handlers.Add(WowOpcode::MSG_MOVE_HEARTBEAT, &FWowPacketHandler::HandleMovement);
+
+    // Warden and teleport handlers
+    Handlers.Add(WowOpcode::SMSG_WARDEN_DATA,       &FWowPacketHandler::HandleWardenData);
+    Handlers.Add(WowOpcode::MSG_MOVE_TELEPORT,      &FWowPacketHandler::HandleMoveTeleport);
+    Handlers.Add(WowOpcode::SMSG_TRANSFER_PENDING,  &FWowPacketHandler::HandleTransferPending);
+    Handlers.Add(WowOpcode::SMSG_NEW_WORLD,         &FWowPacketHandler::HandleNewWorld);
+
+    // Bind Warden response delegate to send packets
+    WardenHandler.OnSendResponse.BindLambda([this](uint32 Opcode, const TArray<uint8>& Data)
+    {
+        SendWardenResponse(Opcode, Data);
+    });
 }
 
 void FWowPacketHandler::HandlePacket(uint16 Opcode, const TArray<uint8>& Data)
@@ -1485,4 +1498,95 @@ void FWowPacketHandler::HandleRemovedSpell(FPacketReader& R)
     KnownSpells.Remove(SpellId);
 
     UE_LOG(LogWowPacket, Log, TEXT("REMOVED_SPELL: spell=%u"), SpellId);
+}
+
+// ── Warden Anti-Cheat ────────────────────────────────────────────────────────
+
+void FWowPacketHandler::InitializeWarden(const TArray<uint8>& SessionKey)
+{
+    WardenHandler.InitializeEncryption(SessionKey);
+}
+
+void FWowPacketHandler::HandleWardenData(FPacketReader& R)
+{
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(R.Remaining());
+    if (R.Remaining() > 0)
+    {
+        FMemory::Memcpy(Data.GetData(), R.Data + R.Pos, R.Remaining());
+    }
+
+    WardenHandler.HandleWardenData(Data);
+}
+
+void FWowPacketHandler::SendWardenResponse(uint32 Opcode, const TArray<uint8>& Data)
+{
+    if (OnSendPacket.IsBound())
+    {
+        OnSendPacket.Execute(Opcode, Data);
+    }
+}
+
+// ── Teleport Handling ────────────────────────────────────────────────────────
+
+void FWowPacketHandler::HandleMoveTeleport(FPacketReader& R)
+{
+    // MSG_MOVE_TELEPORT / SMSG_MOVE_TELEPORT
+    // PackedGUID + uint32 flags + uint32 time + float x + float y + float z + float orientation
+
+    uint64 Guid = R.ReadPackedGuid();
+    uint32 Flags = R.ReadU32();
+    uint32 Time = R.ReadU32();
+    float X = R.ReadFloat();
+    float Y = R.ReadFloat();
+    float Z = R.ReadFloat();
+    float Orientation = R.ReadFloat();
+
+    FVector Position(X, Y, Z);
+
+    UE_LOG(LogWowPacket, Log, TEXT("MOVE_TELEPORT: guid=%llu pos=(%.1f,%.1f,%.1f) orient=%.2f"),
+           Guid, X, Y, Z, Orientation);
+
+    // Broadcast teleport request
+    OnTeleportRequest.Broadcast(Guid, Flags, Time, Position, Orientation);
+}
+
+void FWowPacketHandler::HandleTransferPending(FPacketReader& R)
+{
+    // SMSG_TRANSFER_PENDING
+    // uint32 mapId, optional transport info
+
+    uint32 MapId = R.ReadU32();
+
+    // Note: In some versions there may be transport GUID data here,
+    // but for basic implementation we'll just handle the map change
+
+    UE_LOG(LogWowPacket, Log, TEXT("TRANSFER_PENDING: mapId=%u"), MapId);
+
+    // This indicates a map transfer is about to happen
+    // The client should expect SMSG_NEW_WORLD next
+}
+
+void FWowPacketHandler::HandleNewWorld(FPacketReader& R)
+{
+    // SMSG_NEW_WORLD
+    // uint32 mapId + float x + float y + float z + float orientation
+
+    if (!R.CanRead(20)) // 4 + 4*4
+    {
+        UE_LOG(LogWowPacket, Error, TEXT("NEW_WORLD packet too short"));
+        return;
+    }
+
+    uint32 MapId = R.ReadU32();
+    float X = R.ReadFloat();
+    float Y = R.ReadFloat();
+    float Z = R.ReadFloat();
+    float Orientation = R.ReadFloat();
+
+    UE_LOG(LogWowPacket, Log, TEXT("NEW_WORLD: map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
+           MapId, X, Y, Z, Orientation);
+
+    // Broadcast map transfer
+    OnMapTransfer.Broadcast(MapId, X, Y, Z, Orientation);
 }

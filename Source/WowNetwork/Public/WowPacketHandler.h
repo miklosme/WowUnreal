@@ -2,6 +2,7 @@
 #include "CoreMinimal.h"
 #include "WowOpcodes.h"
 #include "WowEntityManager.h"
+#include "WowWardenHandler.h"
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
@@ -15,6 +16,8 @@ DECLARE_MULTICAST_DELEGATE(FOnTalentsUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnFriendListUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGuildRosterUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGroupUpdated);
+DECLARE_MULTICAST_DELEGATE_FiveParams(FOnTeleportRequest, uint64 /*Guid*/, uint32 /*Flags*/, uint32 /*Time*/, FVector /*Position*/, float /*Orientation*/);
+DECLARE_MULTICAST_DELEGATE_FiveParams(FOnMapTransfer, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -109,6 +112,9 @@ public:
     /** Known talents */
     TArray<FWowTalentInfo> Talents;
 
+    /** Warden anti-cheat handler */
+    FWowWardenHandler WardenHandler;
+
     /** ── Social System ──────────────────────────────────────────────────── */
     /** Friends list */
     TArray<FWowFriendInfo> FriendsList;
@@ -131,9 +137,14 @@ public:
     FOnFriendListUpdated OnFriendListUpdated;
     FOnGuildRosterUpdated OnGuildRosterUpdated;
     FOnGroupUpdated OnGroupUpdated;
+    FOnTeleportRequest OnTeleportRequest;
+    FOnMapTransfer OnMapTransfer;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
+
+    /** Initialize Warden encryption with session key */
+    void InitializeWarden(const TArray<uint8>& SessionKey);
 
     /** Fired for every processed SMSG opcode — wire to EventSystem for UI events */
     FOnOpcodeReceived OnOpcodeReceived;
@@ -187,10 +198,19 @@ private:
     void HandlePartyCommandResult(FPacketReader& R);
     void HandleWho(FPacketReader& R);
 
+    // ── Warden / Teleport handlers ──────────────────────────────────────────
+    void HandleWardenData(FPacketReader& R);
+    void HandleMoveTeleport(FPacketReader& R);
+    void HandleTransferPending(FPacketReader& R);
+    void HandleNewWorld(FPacketReader& R);
+
     // Internal parsing
     void ParseUpdateBlock(FPacketReader& R);
     void ParseMovementInfo(FPacketReader& R, FWowMovementInfo& Out);
     void ParseUpdateFields(FPacketReader& R, FWowEntity& Entity);
+
+    // Internal Warden response sender (bound to WardenHandler)
+    void SendWardenResponse(uint32 Opcode, const TArray<uint8>& Data);
 
     // Stats
     int32 EntitiesCreated = 0;

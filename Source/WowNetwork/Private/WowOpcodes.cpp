@@ -51,6 +51,13 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case CMSG_GROUP_INVITE:             return TEXT("CMSG_GROUP_INVITE");
     case CMSG_GROUP_ACCEPT:             return TEXT("CMSG_GROUP_ACCEPT");
 
+    // Warden and teleport opcodes
+    case CMSG_WARDEN_DATA:              return TEXT("CMSG_WARDEN_DATA");
+    case SMSG_TRANSFER_PENDING:         return TEXT("SMSG_TRANSFER_PENDING");
+    case SMSG_NEW_WORLD:                return TEXT("SMSG_NEW_WORLD");
+    case MSG_MOVE_TELEPORT:             return TEXT("MSG_MOVE_TELEPORT");
+    case MSG_MOVE_WORLDPORT_ACK:        return TEXT("MSG_MOVE_WORLDPORT_ACK");
+
     default:                            return TEXT("UNKNOWN");
     }
 }

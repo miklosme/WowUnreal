@@ -146,6 +146,9 @@ void UWowConnectionManager::OnWorldAuthResult(bool bSuccess)
     {
         UE_LOG(LogWowNet, Log, TEXT("World server authenticated"));
         SetState(EWowSessionState::WorldAuthenticated);
+
+        // Initialize Warden anti-cheat system with session key
+        PacketHandler.InitializeWarden(SessionKey);
     }
     else
     {

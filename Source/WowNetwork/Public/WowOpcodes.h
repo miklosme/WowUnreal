@@ -21,6 +21,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_TIME_SYNC_RESP          = 0x0391;
     inline constexpr uint16 CMSG_KEEP_ALIVE             = 0x0406;
     inline constexpr uint16 CMSG_WORLD_STATE_UI_TIMER_UPDATE = 0x04F6;
+    inline constexpr uint16 CMSG_WARDEN_DATA             = 0x02E7;
 
     // ── Movement (bidirectional MSG) ─────────────────────────────────────────
     inline constexpr uint16 MSG_MOVE_START_FORWARD       = 0x00B5;
@@ -81,6 +82,8 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_CHAR_CREATE              = 0x003A;
     inline constexpr uint16 SMSG_CHAR_ENUM               = 0x003B;
     inline constexpr uint16 SMSG_CHAR_DELETE              = 0x003C;
+    inline constexpr uint16 SMSG_TRANSFER_PENDING        = 0x003F;
+    inline constexpr uint16 SMSG_NEW_WORLD               = 0x003E;
 
     // Inventory system opcodes
     inline constexpr uint16 CMSG_AUTOEQUIP_ITEM          = 0x010A;
