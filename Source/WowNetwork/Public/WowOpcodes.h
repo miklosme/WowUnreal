@@ -78,6 +78,8 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_TIME_SYNC_REQ           = 0x0390;
     inline constexpr uint16 SMSG_POWER_UPDATE            = 0x0480;
     inline constexpr uint16 SMSG_AURA_UPDATE             = 0x0495;
+    inline constexpr uint16 SMSG_ATTACKERSTATEUPDATE     = 0x014A;
+    inline constexpr uint16 SMSG_SPELL_FAILURE           = 0x0133;
     inline constexpr uint16 SMSG_CHAR_CREATE              = 0x003A;
     inline constexpr uint16 SMSG_CHAR_ENUM               = 0x003B;
     inline constexpr uint16 SMSG_CHAR_DELETE              = 0x003C;

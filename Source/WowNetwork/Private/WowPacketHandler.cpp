@@ -18,6 +18,8 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_TIME_SYNC_REQ,            &FWowPacketHandler::HandleTimeSyncReq);
     Handlers.Add(WowOpcode::SMSG_SPELL_START,              &FWowPacketHandler::HandleSpellStart);
     Handlers.Add(WowOpcode::SMSG_SPELL_GO,                 &FWowPacketHandler::HandleSpellGo);
+    Handlers.Add(WowOpcode::SMSG_SPELL_FAILURE,            &FWowPacketHandler::HandleSpellFailure);
+    Handlers.Add(WowOpcode::SMSG_ATTACKERSTATEUPDATE,      &FWowPacketHandler::HandleAttackerStateUpdate);
     Handlers.Add(WowOpcode::SMSG_AURA_UPDATE,              &FWowPacketHandler::HandleAuraUpdate);
     Handlers.Add(WowOpcode::SMSG_POWER_UPDATE,             &FWowPacketHandler::HandlePowerUpdate);
     Handlers.Add(WowOpcode::SMSG_MONSTER_MOVE,             &FWowPacketHandler::HandleMonsterMove);
@@ -689,7 +691,70 @@ void FWowPacketHandler::HandleSpellGo(FPacketReader& R)
     UE_LOG(LogWowPacket, Log, TEXT("SPELL_GO: caster=%llu spell=%u hits=%d misses=%d"),
         CasterGuid, SpellId, HitCount, MissCount);
 
+    OnSpellGo.Broadcast(CasterGuid, SpellId, CastFlags);
+
     // Skip remaining data (targets and additional cast flag data)
+}
+
+// ── SMSG_SPELL_FAILURE ──────────────────────────────────────────────────
+// packed guid caster, uint8 cast counter, uint32 spell id, uint8 failure reason
+
+void FWowPacketHandler::HandleSpellFailure(FPacketReader& R)
+{
+    if (!R.CanRead(7)) // minimum: packed guid (1) + cast counter + spell id + failure reason
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("SPELL_FAILURE: packet too short"));
+        return;
+    }
+
+    uint64 CasterGuid = R.ReadPackedGuid();
+    uint8 CastCounter = R.ReadU8();
+    uint32 SpellId = R.ReadU32();
+    uint8 FailureReason = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("SPELL_FAILURE: caster=%llu spell=%u reason=%u"),
+        CasterGuid, SpellId, FailureReason);
+
+    OnSpellFailure.Broadcast(CasterGuid, SpellId, FailureReason);
+}
+
+// ── SMSG_ATTACKERSTATEUPDATE ────────────────────────────────────────────
+// uint32 hit_info, packed guid attacker, packed guid target, uint32 damage, uint8 damage_school_count
+// for each school: uint32 damage, uint32 absorbed
+
+void FWowPacketHandler::HandleAttackerStateUpdate(FPacketReader& R)
+{
+    if (!R.CanRead(8)) // minimum: hit_info + 2 packed guids (at least 1 byte each)
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("ATTACKERSTATEUPDATE: packet too short"));
+        return;
+    }
+
+    uint32 HitInfo = R.ReadU32();
+    uint64 AttackerGuid = R.ReadPackedGuid();
+    uint64 TargetGuid = R.ReadPackedGuid();
+
+    if (!R.CanRead(5)) // damage + school count
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("ATTACKERSTATEUPDATE: packet truncated"));
+        return;
+    }
+
+    uint32 TotalDamage = R.ReadU32();
+    uint8 DamageSchoolCount = R.ReadU8();
+
+    // Parse damage by school (for now just track total damage)
+    for (uint8 i = 0; i < DamageSchoolCount && R.CanRead(8); ++i)
+    {
+        uint32 SchoolDamage = R.ReadU32();
+        uint32 SchoolAbsorbed = R.ReadU32();
+        // We could track school-specific damage but for basic combat text, total damage is enough
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("ATTACKERSTATEUPDATE: attacker=%llu target=%llu damage=%u hitInfo=0x%08X"),
+        AttackerGuid, TargetGuid, TotalDamage, HitInfo);
+
+    OnAttackerStateUpdate.Broadcast(AttackerGuid, TargetGuid, HitInfo, TotalDamage);
 }
 
 // ── SMSG_AURA_UPDATE ────────────────────────────────────────────────────

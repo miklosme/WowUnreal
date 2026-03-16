@@ -11,6 +11,12 @@
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
+#include "SWowCastBar.h"
+#include "WowFloatingText.h"
+#include "Formats/Dbc/DbcStore.h"
+#include "Engine/GameViewportClient.h"
+#include "Widgets/SWeakWidget.h"
+#include "Widgets/SCanvas.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
@@ -30,6 +36,31 @@ void AWowGameplayController::BeginPlay()
 	{
 		UIManager = GI->GetSubsystem<UWowUIManager>();
 	}
+
+	// Create cast bar widget wrapped in positioning container
+	TSharedRef<SWidget> CastBarContainer =
+		SNew(SCanvas)
+		+ SCanvas::Slot()
+		.Position(TAttribute<FVector2D>::Create(TAttribute<FVector2D>::FGetter::CreateLambda([this]()
+		{
+			// Position at bottom center of screen
+			FVector2D ViewportSize;
+			if (GEngine && GEngine->GameViewport)
+			{
+				GEngine->GameViewport->GetViewportSize(ViewportSize);
+			}
+			return FVector2D(ViewportSize.X * 0.5f - 150.0f, ViewportSize.Y - 100.0f); // Center horizontally, near bottom
+		})))
+		.Size(FVector2D(300.0f, 40.0f))
+		[
+			SAssignNew(CastBarWidget, SWowCastBar)
+		];
+
+	// Add cast bar to viewport
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->AddViewportWidgetForPlayer(GetLocalPlayer(), CastBarContainer, 1000);
+	}
 }
 
 void AWowGameplayController::SetupInputComponent()
@@ -39,6 +70,17 @@ void AWowGameplayController::SetupInputComponent()
 	// Left click for targeting
 	InputComponent->BindAction(TEXT("LeftClick"), IE_Released, this, &AWowGameplayController::OnLeftClick);
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &AWowGameplayController::OnLeftClick);
+
+	// Right click for auto-attack
+	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &AWowGameplayController::OnRightClick);
+
+	// Spell casting keys (1-6)
+	InputComponent->BindKey(EKeys::One, IE_Released, this, &AWowGameplayController::OnSpellKey1);
+	InputComponent->BindKey(EKeys::Two, IE_Released, this, &AWowGameplayController::OnSpellKey2);
+	InputComponent->BindKey(EKeys::Three, IE_Released, this, &AWowGameplayController::OnSpellKey3);
+	InputComponent->BindKey(EKeys::Four, IE_Released, this, &AWowGameplayController::OnSpellKey4);
+	InputComponent->BindKey(EKeys::Five, IE_Released, this, &AWowGameplayController::OnSpellKey5);
+	InputComponent->BindKey(EKeys::Six, IE_Released, this, &AWowGameplayController::OnSpellKey6);
 }
 
 void AWowGameplayController::BindEntityEvents()
@@ -62,6 +104,16 @@ void AWowGameplayController::BindEntityEvents()
 	// Forward SMSG opcodes to UI event system
 	ConnectionManager->PacketHandler.OnOpcodeReceived.AddUObject(
 		this, &AWowGameplayController::OnOpcodeReceived);
+
+	// Bind combat events
+	ConnectionManager->PacketHandler.OnSpellStart.AddUObject(
+		this, &AWowGameplayController::OnSpellStart);
+	ConnectionManager->PacketHandler.OnSpellGo.AddUObject(
+		this, &AWowGameplayController::OnSpellGo);
+	ConnectionManager->PacketHandler.OnSpellFailure.AddUObject(
+		this, &AWowGameplayController::OnSpellFailure);
+	ConnectionManager->PacketHandler.OnAttackerStateUpdate.AddUObject(
+		this, &AWowGameplayController::OnAttackerStateUpdate);
 
 	// Cache UIManager for tick dispatch
 	if (UGameInstance* GI = GetGameInstance())
@@ -205,6 +257,14 @@ void AWowGameplayController::Tick(float DeltaTime)
 	{
 		KeepAliveTimer = 0.0f;
 		ConnectionManager->SendKeepAlive();
+	}
+
+	// Update cast bar progress
+	if (bIsCasting && CastBarWidget.IsValid())
+	{
+		float ElapsedTime = GetWorld()->GetTimeSeconds() - CastStartTime;
+		float Progress = FMath::Clamp(ElapsedTime / CastDuration, 0.0f, 1.0f);
+		CastBarWidget->UpdateProgress(Progress);
 	}
 }
 
@@ -387,5 +447,240 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		// Tag actor with GUID for targeting
 		SpawnedActor->Tags.Add(FName(*FString::Printf(TEXT("%llu"), Entity.Guid)));
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
+	}
+}
+
+// ── Combat System ───────────────────────────────────────────────────────
+
+void AWowGameplayController::CastSpell(int32 SpellId)
+{
+	if (!ConnectionManager) return;
+
+	// Don't cast if already casting
+	if (bIsCasting)
+	{
+		UE_LOG(LogWowGameplay, Warning, TEXT("Already casting spell %u"), CurrentSpellId);
+		return;
+	}
+
+	int64 TargetGuidSigned = static_cast<int64>(TargetGuid);
+	ConnectionManager->SendCastSpell(SpellId, TargetGuidSigned);
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Cast spell %u on target %llu"), SpellId, TargetGuid);
+}
+
+void AWowGameplayController::StartAutoAttack()
+{
+	if (!ConnectionManager || TargetGuid == 0) return;
+
+	// Stop any existing auto-attack
+	if (bIsAutoAttacking && AutoAttackTargetGuid != TargetGuid)
+	{
+		StopAutoAttack();
+	}
+
+	// Start auto-attack on new target
+	if (!bIsAutoAttacking)
+	{
+		bIsAutoAttacking = true;
+		AutoAttackTargetGuid = TargetGuid;
+		ConnectionManager->SendAttackSwing(static_cast<int64>(TargetGuid));
+		UE_LOG(LogWowGameplay, Log, TEXT("Started auto-attack on target %llu"), TargetGuid);
+	}
+}
+
+void AWowGameplayController::StopAutoAttack()
+{
+	if (!ConnectionManager || !bIsAutoAttacking) return;
+
+	bIsAutoAttacking = false;
+	AutoAttackTargetGuid = 0;
+	ConnectionManager->SendAttackStop();
+	UE_LOG(LogWowGameplay, Log, TEXT("Stopped auto-attack"));
+}
+
+void AWowGameplayController::OnRightClick()
+{
+	// If we have a hostile target, start auto-attack
+	if (TargetGuid != 0)
+	{
+		// Check if target is hostile (simplified check for now)
+		const FWowEntity* TargetEntity = nullptr;
+		if (ConnectionManager)
+		{
+			TargetEntity = ConnectionManager->PacketHandler.EntityManager.Find(TargetGuid);
+		}
+
+		if (TargetEntity && TargetEntity->IsUnit())
+		{
+			// For now, assume all NPCs are hostile (in a real implementation, check faction)
+			if (!TargetEntity->IsPlayer())
+			{
+				StartAutoAttack();
+			}
+		}
+	}
+	else
+	{
+		// No target - try to target something under cursor first
+		TryTargetUnderCursor();
+		// If we successfully targeted something hostile, start auto-attack
+		if (TargetGuid != 0)
+		{
+			OnRightClick(); // Recursive call to handle the new target
+		}
+	}
+}
+
+void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags, int32 CastTime)
+{
+	if (!ConnectionManager) return;
+
+	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+
+	if (CasterGuid == LocalGuid)
+	{
+		// We're casting a spell
+		bIsCasting = true;
+		CurrentSpellId = SpellId;
+		CastStartTime = GetWorld()->GetTimeSeconds();
+		CastDuration = CastTime / 1000.0f; // Convert milliseconds to seconds
+
+		// Get spell name from DBC
+		FString SpellName = FString::Printf(TEXT("Spell %u"), SpellId);
+		const FDbcStore& DbcStore = FDbcStore::Get();
+		if (DbcStore.IsLoaded())
+		{
+			if (const auto* SpellEntry = DbcStore.Spells().GetById(SpellId))
+			{
+				SpellName = SpellEntry->SpellName;
+			}
+		}
+
+		UE_LOG(LogWowGameplay, Log, TEXT("Started casting %s (%.1fs cast time)"), *SpellName, CastDuration);
+
+		// Show cast bar if cast time > 0
+		if (CastBarWidget.IsValid() && CastTime > 0)
+		{
+			CastBarWidget->StartCast(SpellName, CastDuration);
+		}
+	}
+	else
+	{
+		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu started casting spell %u"), CasterGuid, SpellId);
+	}
+}
+
+void AWowGameplayController::OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags)
+{
+	if (!ConnectionManager) return;
+
+	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+
+	if (CasterGuid == LocalGuid)
+	{
+		// Our spell cast completed
+		bIsCasting = false;
+		CurrentSpellId = 0;
+		CastStartTime = 0.0f;
+		CastDuration = 0.0f;
+
+		UE_LOG(LogWowGameplay, Log, TEXT("Completed casting spell %u"), SpellId);
+
+		// Hide cast bar widget
+		if (CastBarWidget.IsValid())
+		{
+			CastBarWidget->StopCast();
+		}
+	}
+	else
+	{
+		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu completed casting spell %u"), CasterGuid, SpellId);
+	}
+}
+
+void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason)
+{
+	if (!ConnectionManager) return;
+
+	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+
+	if (CasterGuid == LocalGuid)
+	{
+		// Our spell cast failed
+		bIsCasting = false;
+		CurrentSpellId = 0;
+		CastStartTime = 0.0f;
+		CastDuration = 0.0f;
+
+		UE_LOG(LogWowGameplay, Warning, TEXT("Spell %u failed with reason %u"), SpellId, FailureReason);
+
+		// Hide cast bar widget
+		if (CastBarWidget.IsValid())
+		{
+			CastBarWidget->StopCast();
+		}
+
+		// TODO: Show error message based on failure reason
+	}
+	else
+	{
+		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu spell %u failed"), CasterGuid, SpellId);
+	}
+}
+
+void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage)
+{
+	if (!ConnectionManager) return;
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Combat: Attacker %llu hit target %llu for %u damage (hitInfo=0x%08X)"),
+		AttackerGuid, VictimGuid, Damage, HitInfo);
+
+	// Show floating combat text
+	TObjectPtr<AActor>* TargetActorPtr = SpawnedEntityActors.Find(VictimGuid);
+	if (TargetActorPtr && *TargetActorPtr && Damage > 0)
+	{
+		FWowFloatingTextInfo TextInfo;
+		TextInfo.Text = FString::Printf(TEXT("%u"), Damage);
+		TextInfo.Duration = 2.0f;
+		TextInfo.Speed = 100.0f;
+		TextInfo.FontSize = 32.0f;
+
+		// Color based on hit info (simplified)
+		const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+		if (AttackerGuid == LocalGuid)
+		{
+			// Our damage - white for physical, colored for schools
+			TextInfo.Color = FLinearColor::White;
+		}
+		else if (VictimGuid == LocalGuid)
+		{
+			// Damage to us - red
+			TextInfo.Color = FLinearColor::Red;
+		}
+		else
+		{
+			// Other damage - gray
+			TextInfo.Color = FLinearColor(0.7f, 0.7f, 0.7f, 1.0f);
+		}
+
+		// Check for critical hit (bit 1 in HitInfo)
+		if (HitInfo & 0x2)
+		{
+			TextInfo.Text += TEXT("!");
+			TextInfo.Color = FLinearColor::Yellow;
+			TextInfo.FontSize = 40.0f;
+		}
+
+		UWowFloatingText::SpawnFloatingText(*TargetActorPtr, TextInfo);
+
+		UE_LOG(LogWowGameplay, Log, TEXT("Spawned floating damage text: %s"), *TextInfo.Text);
+	}
+
+	// Check if our auto-attack target died (simplified check)
+	if (bIsAutoAttacking && VictimGuid == AutoAttackTargetGuid)
+	{
+		// In a real implementation, we'd check if target health reached 0
+		// For now, we'll keep auto-attacking until manually stopped
 	}
 }
