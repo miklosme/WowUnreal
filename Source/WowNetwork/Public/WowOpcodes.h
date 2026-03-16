@@ -140,6 +140,13 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_GROUP_INVITE            = 0x006E;
     inline constexpr uint16 CMSG_GROUP_ACCEPT            = 0x0072;
 
+    // ── Death / Corpse / Resurrection ────────────────────────────────────────
+    inline constexpr uint16 CMSG_REPOP_REQUEST          = 0x015A;
+    inline constexpr uint16 SMSG_CORPSE_RECLAIM_DELAY   = 0x015B;
+    inline constexpr uint16 SMSG_RESURRECT_REQUEST      = 0x015C;
+    inline constexpr uint16 CMSG_RESURRECT_RESPONSE     = 0x015F;
+    inline constexpr uint16 SMSG_MOVE_TELEPORT          = 0x02F0;
+
     // Auth result codes
     inline constexpr uint8 AUTH_OK = 0x0C;
 

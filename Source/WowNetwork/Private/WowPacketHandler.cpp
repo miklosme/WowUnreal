@@ -50,6 +50,11 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_PARTY_COMMAND_RESULT,     &FWowPacketHandler::HandlePartyCommandResult);
     Handlers.Add(WowOpcode::SMSG_WHO,                      &FWowPacketHandler::HandleWho);
 
+    // ── Death / Corpse / Resurrection handlers ──────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_CORPSE_RECLAIM_DELAY,     &FWowPacketHandler::HandleCorpseReclaimDelay);
+    Handlers.Add(WowOpcode::SMSG_RESURRECT_REQUEST,        &FWowPacketHandler::HandleResurrectRequest);
+    Handlers.Add(WowOpcode::SMSG_MOVE_TELEPORT,            &FWowPacketHandler::HandleMoveTeleport);
+
     // Movement handlers — all use the same parser
     for (uint16 Op = WowOpcode::MSG_MOVE_START_FORWARD; Op <= WowOpcode::MSG_MOVE_SET_PITCH; ++Op)
     {
@@ -183,6 +188,18 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
                     Entity->Scale = 1.0f;
                 }
             }
+
+            // Check for player death
+            if (Entity->Guid == EntityManager.LocalPlayerGuid && Entity->IsUnit())
+            {
+                int32 Health = Entity->GetHealth();
+                if (Health == 0)
+                {
+                    UE_LOG(LogWowPacket, Warning, TEXT("Player has died! Health = 0"));
+                    OnPlayerDeath.Broadcast();
+                }
+            }
+
             EntitiesUpdated++;
             EntityManager.OnEntityUpdated.Broadcast(*Entity);
         }
@@ -1485,4 +1502,66 @@ void FWowPacketHandler::HandleRemovedSpell(FPacketReader& R)
     KnownSpells.Remove(SpellId);
 
     UE_LOG(LogWowPacket, Log, TEXT("REMOVED_SPELL: spell=%u"), SpellId);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Death / Corpse / Resurrection Handlers
+// ──────────────────────────────────────────────────────────────────────────
+
+// ── SMSG_CORPSE_RECLAIM_DELAY ────────────────────────────────────────────
+// uint32 delayTimeInSeconds
+
+void FWowPacketHandler::HandleCorpseReclaimDelay(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 DelayTime = R.ReadU32();
+    float DelayInSeconds = static_cast<float>(DelayTime);
+
+    UE_LOG(LogWowPacket, Log, TEXT("CORPSE_RECLAIM_DELAY: delay=%u seconds"), DelayTime);
+
+    OnCorpseReclaimDelay.Broadcast(DelayInSeconds);
+}
+
+// ── SMSG_RESURRECT_REQUEST ───────────────────────────────────────────────
+// uint64 resurrectorGuid, FString resurrectorName, uint8 unk
+
+void FWowPacketHandler::HandleResurrectRequest(FPacketReader& R)
+{
+    if (!R.CanRead(8)) return;
+
+    uint64 ResurrectorGuid = R.ReadU64();
+    FString ResurrectorName = R.ReadCString();
+    uint8 Unknown = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("RESURRECT_REQUEST: resurrector=%llu name=%s"),
+        ResurrectorGuid, *ResurrectorName);
+
+    OnResurrectRequest.Broadcast(ResurrectorName);
+}
+
+// ── SMSG_MOVE_TELEPORT ───────────────────────────────────────────────────
+// uint64 guid, uint32 counter, uint32 mapId, float x, y, z, orientation, uint8 unk
+
+void FWowPacketHandler::HandleMoveTeleport(FPacketReader& R)
+{
+    if (!R.CanRead(8 + 4 + 4 + 4*4 + 1)) return;
+
+    uint64 Guid = R.ReadU64();
+    uint32 Counter = R.ReadU32();
+    uint32 MapId = R.ReadU32();
+    float X = R.ReadFloat();
+    float Y = R.ReadFloat();
+    float Z = R.ReadFloat();
+    float Orientation = R.ReadFloat();
+    uint8 Unknown = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("MOVE_TELEPORT: guid=%llu map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
+        Guid, MapId, X, Y, Z, Orientation);
+
+    // Check if this is for the local player
+    if (Guid == EntityManager.LocalPlayerGuid)
+    {
+        OnPlayerTeleport.Broadcast(MapId, X, Y, Z);
+    }
 }
