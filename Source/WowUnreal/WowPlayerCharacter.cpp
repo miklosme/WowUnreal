@@ -34,12 +34,12 @@ AWowPlayerCharacter::AWowPlayerCharacter()
 	// Capsule defaults (roughly human-sized)
 	GetCapsuleComponent()->InitCapsuleSize(35.0f, 88.0f);
 
-	// Don't rotate character with controller — camera orbits independently
+	// Standard UE5 third person setup
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
 
-	// Movement
+	// Movement — character faces movement direction
 	UCharacterMovementComponent* Mov = GetCharacterMovement();
 	Mov->bOrientRotationToMovement = true;
 	Mov->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
@@ -53,17 +53,14 @@ AWowPlayerCharacter::AWowPlayerCharacter()
 	Mov->SetWalkableFloorAngle(50.0f);
 	Mov->MaxSwimSpeed = RunSpeed * SwimSpeedFactor;
 
-	// Spring arm (camera boom)
+	// Spring arm — follows controller rotation (standard UE5 3rd person)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 800.0f; // ~8 yards default
-	CameraBoom->bUsePawnControlRotation = false;
+	CameraBoom->TargetArmLength = 400.0f;
+	CameraBoom->bUsePawnControlRotation = true;
 	CameraBoom->bDoCollisionTest = true;
 	CameraBoom->ProbeSize = 12.0f;
 	CameraBoom->ProbeChannel = ECC_Camera;
-	CameraBoom->bInheritPitch = false;
-	CameraBoom->bInheritYaw = false;
-	CameraBoom->bInheritRoll = false;
 
 	// Camera
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
@@ -136,35 +133,17 @@ void AWowPlayerCharacter::BeginPlay()
 		}
 	}
 
-	// Initialize camera rotation
-	CameraBoom->SetWorldRotation(FRotator(CameraPitch, CameraYaw, 0.0f));
 }
 
 void AWowPlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// Smoothly interpolate camera boom to target rotation
-	FRotator Target(CameraPitch, CameraYaw, 0.0f);
-	FRotator Current = CameraBoom->GetComponentRotation();
-	CameraBoom->SetWorldRotation(FMath::RInterpTo(Current, Target, DeltaTime, 15.0f));
-
-	// First-person mode at minimum zoom
-	if (FollowCamera && CameraBoom)
-	{
-		const bool bFirstPerson = CameraBoom->TargetArmLength <= MinCameraDistance + 10.0f;
-		// Hide character mesh in first person (when mesh exists)
-		if (GetMesh())
-		{
-			GetMesh()->SetOwnerNoSee(bFirstPerson);
-		}
-	}
-
 	// Auto-run: inject forward movement each tick
 	if (bIsAutoRunning)
 	{
-		const FRotator CameraRot(0.0f, CameraYaw, 0.0f);
-		const FVector Forward = FRotationMatrix(CameraRot).GetUnitAxis(EAxis::X);
+		const FRotator ControlRot = GetControlRotation();
+		const FVector Forward = FRotationMatrix(FRotator(0, ControlRot.Yaw, 0)).GetUnitAxis(EAxis::X);
 		AddMovementInput(Forward, 1.0f);
 	}
 
@@ -177,19 +156,6 @@ void AWowPlayerCharacter::Tick(float DeltaTime)
 			bIsFalling = true;
 			FallStartZ = GetActorLocation().Z;
 		}
-	}
-
-	// Left mouse drag: turn character to face camera direction
-	APlayerController* PC = Cast<APlayerController>(GetController());
-	if (PC && PC->IsInputKeyDown(EKeys::LeftMouseButton))
-	{
-		bLeftMouseTurning = true;
-		// Orient character to camera yaw while left mouse is held
-		SetActorRotation(FRotator(0.0f, CameraYaw, 0.0f));
-	}
-	else
-	{
-		bLeftMouseTurning = false;
 	}
 }
 
@@ -238,33 +204,16 @@ void AWowPlayerCharacter::OnMove(const FInputActionValue& Value)
 	const FVector2D Input = Value.Get<FVector2D>();
 	if (Input.IsNearlyZero()) return;
 
-	// Any manual movement cancels auto-run
 	if (bIsAutoRunning)
 	{
 		bIsAutoRunning = false;
-		UE_LOG(LogWowPlayerChar, Log, TEXT("Auto-run cancelled by movement input"));
 	}
 
-	// Backpedal speed: 60% when moving backward (negative Y = S key)
-	UCharacterMovementComponent* Mov = GetCharacterMovement();
-	if (Mov)
-	{
-		const float BaseSpeed = bIsWalking ? RunSpeed * WalkSpeedFactor : RunSpeed;
-		if (Input.Y < -0.1f)
-		{
-			// Backpedaling
-			Mov->MaxWalkSpeed = BaseSpeed * BackpedalFactor;
-		}
-		else
-		{
-			Mov->MaxWalkSpeed = BaseSpeed;
-		}
-	}
-
-	// Movement relative to camera facing
-	const FRotator CameraRot(0.0f, CameraYaw, 0.0f);
-	const FVector Forward = FRotationMatrix(CameraRot).GetUnitAxis(EAxis::X);
-	const FVector Right = FRotationMatrix(CameraRot).GetUnitAxis(EAxis::Y);
+	// Movement relative to controller (camera) facing — standard UE5 3rd person
+	const FRotator ControlRot = GetControlRotation();
+	const FRotator YawRot(0.0f, ControlRot.Yaw, 0.0f);
+	const FVector Forward = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+	const FVector Right = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
 
 	AddMovementInput(Forward, Input.Y); // W/S
 	AddMovementInput(Right, Input.X);   // A/D
@@ -274,16 +223,14 @@ void AWowPlayerCharacter::OnLook(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
 
+	// Standard UE5: right mouse held = orbit camera
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	if (!PC) return;
 
-	// Right mouse drag: orbit camera without turning character
-	// Left mouse drag: turn character (handled in Tick via bLeftMouseTurning)
-	// Both behaviors orbit the camera
-	if (PC->IsInputKeyDown(EKeys::RightMouseButton) || PC->IsInputKeyDown(EKeys::LeftMouseButton))
+	if (PC->IsInputKeyDown(EKeys::RightMouseButton))
 	{
-		CameraYaw += Input.X * 0.15f;
-		CameraPitch = FMath::Clamp(CameraPitch + Input.Y * -0.15f, -80.0f, 10.0f);
+		AddControllerYawInput(Input.X);
+		AddControllerPitchInput(Input.Y);
 	}
 }
 
@@ -355,14 +302,15 @@ void AWowPlayerCharacter::ApplyLoginSpawn(const FVector& SpawnPos, float Orienta
 	SetActorLocation(StabilizedPos, false, nullptr, ETeleportType::TeleportPhysics);
 	SetActorRotation(FRotator(0.0f, YawDegrees, 0.0f));
 
-	CameraYaw = YawDegrees;
-	CameraPitch = bIsAutomatedCapture ? -80.0f : -30.0f;
+	// Set controller rotation so spring arm follows
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		float Pitch = bIsAutomatedCapture ? -80.0f : -20.0f;
+		PC->SetControlRotation(FRotator(Pitch, YawDegrees, 0.0f));
+	}
 	if (CameraBoom)
 	{
-		CameraBoom->TargetArmLength = bIsAutomatedCapture
-			? FMath::Max(CameraBoom->TargetArmLength, 4500.0f)
-			: FMath::Max(CameraBoom->TargetArmLength, 900.0f);
-		CameraBoom->SetWorldRotation(FRotator(CameraPitch, CameraYaw, 0.0f));
+		CameraBoom->TargetArmLength = bIsAutomatedCapture ? 4500.0f : 400.0f;
 	}
 
 	if (UCharacterMovementComponent* Mov = GetCharacterMovement())
