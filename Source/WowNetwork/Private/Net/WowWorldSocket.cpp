@@ -473,8 +473,11 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
     TArray<FWowCharacterInfo> Characters;
     Characters.Reserve(NumChars);
 
+    UE_LOG(LogWowWorld, Log, TEXT("CHAR_ENUM: %d chars, %d bytes total"), NumChars, Data.Num());
+
     for (int32 i = 0; i < NumChars && Offset < Data.Num(); ++i)
     {
+        int32 CharStart = Offset;
         FWowCharacterInfo Info;
 
         // uint64 guid
@@ -531,9 +534,13 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
         if (Offset + 4 > Data.Num()) break;
         Offset += 4;
 
-        // uint32 firstLogin (atLoginFlags)
+        // uint32 recustomizationFlags
         if (Offset + 4 > Data.Num()) break;
         Offset += 4;
+
+        // uint8 firstLogin
+        if (Offset + 1 > Data.Num()) break;
+        Offset += 1;
 
         // uint32 petDisplayId, petLevel, petFamily
         if (Offset + 12 > Data.Num()) break;
@@ -546,8 +553,9 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
         Offset += EquipmentBytes;
 
         Characters.Add(Info);
-        UE_LOG(LogWowWorld, Log, TEXT("Character: %s (Level %d, Race %d, Class %d, GUID %llu)"),
-               *Info.Name, Info.Level, Info.Race, Info.Class, Info.Guid);
+        UE_LOG(LogWowWorld, Log, TEXT("Character[%d]: '%s' Level %d Race %d Class %d GUID %llu (offset %d→%d, %d bytes)"),
+               i, *Info.Name, Info.Level, Info.Race, Info.Class, Info.Guid,
+               CharStart, Offset, Offset - CharStart);
     }
 
     UE_LOG(LogWowWorld, Log, TEXT("Received %d characters"), Characters.Num());
