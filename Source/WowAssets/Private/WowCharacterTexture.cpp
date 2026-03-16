@@ -579,7 +579,8 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
     {
         if (Entry.RaceID == Customization.RaceId &&
             Entry.SexID == Customization.Gender &&
-            Entry.Type == static_cast<uint32>(ESectionType::Underwear))
+            Entry.Type == static_cast<uint32>(ESectionType::Underwear) &&
+            Entry.Color == Customization.SkinColor)
         {
             // In 3.3.5: Textures[0] is pelvis/shorts → LEG_UPPER, Textures[1] is chest/bra → TORSO_UPPER
             if (!Entry.Textures[0].IsEmpty())

@@ -82,8 +82,8 @@ UMaterial* GetCharacterMaterial()
     CachedMat = NewObject<UMaterial>(MatPackage, TEXT("M_WowCharacter"),
         RF_Public | RF_Standalone);
     CachedMat->SetShadingModel(MSM_DefaultLit);
-    CachedMat->BlendMode = BLEND_Opaque;
-    CachedMat->TwoSided = false;
+    CachedMat->BlendMode = BLEND_Masked; // Alpha cutout for hair transparency
+    CachedMat->TwoSided = true;          // Hair and some body parts need two-sided
     CachedMat->bUsedWithSkeletalMesh = true;
 
     UTexture2D* WhiteTex = LoadObject<UTexture2D>(nullptr, TEXT("/Engine/EngineResources/WhiteSquareTexture"));
@@ -105,8 +105,9 @@ UMaterial* GetCharacterMaterial()
     TextureSampler->MaterialExpressionEditorY = 0;
     Expressions.AddExpression(TextureSampler);
 
-    // DefaultLit: connect texture to BaseColor and add material properties
+    // DefaultLit: connect texture to BaseColor and alpha to OpacityMask
     CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, TextureSampler);
+    CachedMat->GetEditorOnlyData()->OpacityMask.Connect(4, TextureSampler); // Output 4 = Alpha
 
     // Add Roughness constant (1.0 = fully rough, no specular highlights)
     auto* RoughnessConstant = NewObject<UMaterialExpressionConstant>(CachedMat);

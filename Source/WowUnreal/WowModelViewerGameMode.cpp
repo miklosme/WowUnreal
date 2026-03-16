@@ -105,7 +105,10 @@ void AWowModelViewerGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     if (ViewerWidgetContainer.IsValid())
     {
-        GEngine->GameViewport->RemoveViewportWidgetContent(ViewerWidgetContainer.ToSharedRef());
+        if (GEngine && GEngine->GameViewport)
+        {
+            GEngine->GameViewport->RemoveViewportWidgetContent(ViewerWidgetContainer.ToSharedRef());
+        }
         ViewerWidgetContainer.Reset();
         ViewerWidget.Reset();
     }
