@@ -4,6 +4,7 @@
 #include "WowLuaVM.h"
 #include "WowFrameManager.h"
 #include "WowEventSystem.h"
+#include "WowFontManager.h"
 #include "WowUIManager.generated.h"
 
 struct FWowLuaContext;
@@ -36,6 +37,7 @@ public:
 	FWowLuaVM* GetLuaVM() const { return LuaVM.Get(); }
 	FWowFrameManager* GetFrameManager() const { return FrameManager.Get(); }
 	FWowEventSystem* GetEventSystem() const { return EventSystem.Get(); }
+	FWowFontManager* GetFontManager() const { return FontManager.Get(); }
 
 	bool IsUILoaded() const { return bUILoaded; }
 
@@ -43,6 +45,7 @@ private:
 	TUniquePtr<FWowLuaVM> LuaVM;
 	TUniquePtr<FWowFrameManager> FrameManager;
 	TUniquePtr<FWowEventSystem> EventSystem;
+	TUniquePtr<FWowFontManager> FontManager;
 
 	FWowLuaContext* UIContext = nullptr;
 	bool bUILoaded = false;

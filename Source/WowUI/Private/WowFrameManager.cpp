@@ -1,5 +1,6 @@
 #include "WowFrameManager.h"
 #include "WowEventSystem.h"
+#include "WowFontManager.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Button.h"
@@ -453,9 +454,20 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			// Apply color
 			TextWidget->SetColorAndOpacity(FSlateColor(FS.Color));
 
-			// Apply font size
-			FSlateFontInfo FontInfo = TextWidget->GetFont();
-			FontInfo.Size = static_cast<int32>(FS.FontHeight);
+			// Apply font from font manager or fallback to default
+			FSlateFontInfo FontInfo;
+			if (FontManager && FontManager->IsInitialized())
+			{
+				// Try to get the font based on inheritance or use default
+				FString FontName = FS.Inherits.IsEmpty() ? TEXT("GameFontNormal") : FS.Inherits;
+				FontInfo = FontManager->GetFont(FontName, static_cast<int32>(FS.FontHeight));
+			}
+			else
+			{
+				// Fallback to default UE font
+				FontInfo = TextWidget->GetFont();
+				FontInfo.Size = static_cast<int32>(FS.FontHeight);
+			}
 			TextWidget->SetFont(FontInfo);
 
 			// Apply justification

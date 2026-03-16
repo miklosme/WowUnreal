@@ -2,6 +2,7 @@
 #include "WowLuaVM.h"
 #include "WowFrameManager.h"
 #include "WowEventSystem.h"
+#include "WowFontManager.h"
 #include "WowFrameXmlParser.h"
 #include "WowAddonLoader.h"
 #include "LuaApi/LuaApiRegistry.h"
@@ -22,6 +23,7 @@ void UWowUIManager::Initialize(FSubsystemCollectionBase& Collection)
 	LuaVM = MakeUnique<FWowLuaVM>();
 	FrameManager = MakeUnique<FWowFrameManager>();
 	EventSystem = MakeUnique<FWowEventSystem>();
+	FontManager = MakeUnique<FWowFontManager>();
 
 	// Initialize the Lua VM
 	if (!LuaVM->Initialize())
@@ -62,6 +64,7 @@ void UWowUIManager::Deinitialize()
 
 	EventSystem.Reset();
 	FrameManager.Reset();
+	FontManager.Reset();
 	LuaVM.Reset();
 
 	bUILoaded = false;
@@ -95,6 +98,16 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq)
 	}
 
 	UE_LOG(LogWowUIManager, Log, TEXT("Loading WoW UI from MPQ..."));
+
+	// 0. Initialize font manager first (required for FrameXML font rendering)
+	if (!FontManager->Initialize(Mpq))
+	{
+		UE_LOG(LogWowUIManager, Error, TEXT("Failed to initialize font manager"));
+		return;
+	}
+
+	// Wire font manager to frame manager
+	FrameManager->SetFontManager(FontManager.Get());
 
 	// 1. Load FrameXML (Interface/FrameXML/FrameXML.toc) — the core UI system
 	TArray<FWowXmlDirective> FrameXmlDirectives = FWowFrameXmlParser::LoadFrameXml(Mpq);
@@ -158,7 +171,11 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq)
 		}
 		case FWowXmlDirective::EType::Font:
 		{
-			UE_LOG(LogWowUIManager, Verbose, TEXT("FrameXML Font: %s"), *Dir.FontName);
+			if (FontManager && !Dir.FontName.IsEmpty())
+			{
+				FontManager->RegisterFontMapping(Dir.FontName, Dir.FontInherits, static_cast<int32>(Dir.FontHeight));
+				UE_LOG(LogWowUIManager, Verbose, TEXT("Registered FrameXML Font: %s"), *Dir.FontName);
+			}
 			break;
 		}
 		}
