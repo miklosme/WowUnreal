@@ -534,6 +534,18 @@ void FWowCharacterBuilder::ApplyGeosetVisibility(USkeletalMeshComponent* MeshCom
     int32 VisibleCount = 0;
     int32 HiddenCount = 0;
 
+    // Debug: log all sections and rules
+    UE_LOG(LogWowCharacter, Log, TEXT("ApplyGeosetVisibility: %d sections, %d rules"), GeosetInfo.Num(), VisibleGeosets.Num());
+    for (const FGeosetSectionInfo& Info : GeosetInfo)
+    {
+        UE_LOG(LogWowCharacter, Verbose, TEXT("  Section %d: geosetId=%d group=%d variant=%d"),
+            Info.SectionIndex, Info.GeosetId, Info.GeosetGroup, Info.GeosetVariant);
+    }
+    for (const auto& Rule : VisibleGeosets)
+    {
+        UE_LOG(LogWowCharacter, Log, TEXT("  Rule: group %d → show variant %d"), Rule.Key, Rule.Value);
+    }
+
     for (const FGeosetSectionInfo& Info : GeosetInfo)
     {
         bool bShouldBeVisible = true; // Default: show unless explicitly filtered
@@ -550,6 +562,11 @@ void FWowCharacterBuilder::ApplyGeosetVisibility(USkeletalMeshComponent* MeshCom
             {
                 // For groups with a rule, show only the matching variant
                 bShouldBeVisible = (Info.GeosetVariant == *DesiredVariant);
+                if (!bShouldBeVisible)
+                {
+                    UE_LOG(LogWowCharacter, Log, TEXT("  HIDING section %d: group=%d has variant=%d but rule wants %d"),
+                        Info.SectionIndex, Info.GeosetGroup, Info.GeosetVariant, *DesiredVariant);
+                }
             }
             // else: Groups not in our rule set: show by default (creatures, etc.)
         }
@@ -910,6 +927,12 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                 }
             }
             SkelMesh->RegisterComponent();
+
+            // Apply geoset visibility to hide/show sections based on equipment
+            if (GeosetInfo.Num() > 0 && VisibleGeosets.Num() > 0)
+            {
+                ApplyGeosetVisibility(SkelMesh, GeosetInfo, VisibleGeosets);
+            }
 
             // Build SEPARATE hair mesh if there are hair-textured sections
             if (bHasHairSections && Customization)

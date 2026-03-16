@@ -732,6 +732,20 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 				}
 			}
 
+            // Copy geoset section visibility from temp actor mesh
+            // (ShowMaterialSection state does not transfer with SetSkeletalMesh)
+            int32 HiddenSections = 0;
+            for (int32 SecIdx = 0; SecIdx < MainMesh->GetNumMaterials(); ++SecIdx)
+            {
+                bool bVisible = MainMesh->IsMaterialSectionShown(SecIdx, 0);
+                GetMesh()->ShowMaterialSection(SecIdx, SecIdx, bVisible, 0);
+                if (!bVisible) ++HiddenSections;
+            }
+            if (HiddenSections > 0)
+            {
+                UE_LOG(LogWowPlayerChar, Log, TEXT("Copied geoset visibility: %d sections hidden (robe/equipment)"), HiddenSections);
+            }
+
 			// Position mesh so feet are at capsule bottom
 			GetMesh()->SetRelativeLocation(FVector(0, 0, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
 
