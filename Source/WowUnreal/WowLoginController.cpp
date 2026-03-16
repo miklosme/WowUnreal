@@ -84,8 +84,9 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
         ConnectionManager->RequestCharacterList();
         break;
     case EWowSessionState::WorldHaveCharList:
-        // If -createchar flag, auto-create a Human Mage for testing
-        if (FParse::Param(FCommandLine::Get(), TEXT("createchar")) && !bCharCreateSent)
+        // If -createchar flag AND no characters exist, auto-create a Human Mage
+        if (FParse::Param(FCommandLine::Get(), TEXT("createchar")) && !bCharCreateSent
+            && ConnectionManager->GetCachedCharacters().Num() == 0)
         {
             bCharCreateSent = true;
             FString CharName;
@@ -149,7 +150,7 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
             CinematicManager = nullptr;
         }
         ClearCurrentScreen();
-        ShowLoadingScreen();
+        ShowLoadingScreen(0);
         InitializeWorldSystems();
         break;
     default:
@@ -429,20 +430,7 @@ void AWowLoginController::Tick(float DeltaTime)
     }
 }
 
-void AWowLoginController::ShowLoadingScreen()
-{
-    // Create and show the loading screen
-    LoadingScreenWidget = SNew(SWowLoadingScreen);
-    LoadingWidget = LoadingScreenWidget;
-
-    if (GEngine && GEngine->GameViewport)
-    {
-        GEngine->GameViewport->AddViewportWidgetContent(LoadingWidget.ToSharedRef(), 200);
-    }
-
-    bWaitingForInitialLoad = true;
-    LoadingScreenWidget->SetProgress(0.0f, TEXT("Connecting to world server..."));
-}
+// ShowLoadingScreen() removed — use ShowLoadingScreen(uint32 MapId) instead
 
 void AWowLoginController::UpdateLoadingProgress()
 {
@@ -817,20 +805,24 @@ void AWowLoginController::ShowLoadingScreen(uint32 MapId)
         }
     }
 
-    LoadingScreenWidget->SetProgressText(TEXT("Loading..."));
+    LoadingScreenWidget->SetProgress(0.0f, TEXT("Loading terrain..."));
 
+    LoadingWidget = LoadingScreenWidget;
     if (GEngine && GEngine->GameViewport)
     {
-        GEngine->GameViewport->AddViewportWidgetContent(CurrentWidget.ToSharedRef(), 200); // High z-order (above everything)
+        GEngine->GameViewport->AddViewportWidgetContent(LoadingWidget.ToSharedRef(), 200);
     }
+    bWaitingForInitialLoad = true;
 }
 
 void AWowLoginController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation)
 {
-    // Update loading screen with the correct map ID and loading screen image
-    if (LoadingScreenWidget.IsValid())
+    // Update loading screen background image if we have one (don't recreate the widget)
+    if (LoadingScreenWidget.IsValid() && WorldManager && WorldManager->GetMpqManager() && MapId > 0)
     {
-        ShowLoadingScreen(MapId);
+        // Try to load map-specific loading screen image
+        // (the widget is already showing from ShowLoadingScreen(0))
+        UE_LOG(LogWowLogin, Log, TEXT("LoginVerifyWorld: map=%u, could update loading screen image"), MapId);
     }
 
     // Unbind the event since we only need it once

@@ -69,6 +69,7 @@ echo "Launching: $MAP"
     "/Game/Maps/$MAP" \
     -game -log -windowed -resx=1280 -resy=720 \
     "-wowdata=$WOW_DATA" \
+    -ExecCmds="r.Shadow.Virtual.Enable 0,r.VolumetricFog 0,r.Fog 0,r.Lumen.DiffuseIndirect.Allow 0,r.Lumen.Reflections.Allow 0" \
     $EXTRA_ARGS \
     2>/dev/null &
 

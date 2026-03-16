@@ -54,6 +54,23 @@ void AWowViewerGameMode::SetupPostProcess(UWorld* World)
         PreExpCVar->Set(1.0f);
     }
 
+    // Disable heavy rendering features that break on Metal with large world coordinates
+    auto SetCVar = [](const TCHAR* Name, int32 Value)
+    {
+        if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
+        {
+            CVar->Set(Value);
+        }
+    };
+    SetCVar(TEXT("r.Shadow.Virtual.Enable"), 0);
+    SetCVar(TEXT("r.VolumetricFog"), 0);
+    SetCVar(TEXT("r.Lumen.DiffuseIndirect.Allow"), 0);
+    SetCVar(TEXT("r.Lumen.Reflections.Allow"), 0);
+    SetCVar(TEXT("r.Lumen.TranslucencyReflections.FrontLayer.Allow"), 0);
+    SetCVar(TEXT("r.DynamicGlobalIlluminationMethod"), 0); // None instead of Lumen
+    SetCVar(TEXT("r.ReflectionMethod"), 0); // None instead of Lumen
+    SetCVar(TEXT("r.Shadow.CSM.MaxCascades"), 2); // Reduce shadow cascades
+
     APostProcessVolume* PPV = World->SpawnActor<APostProcessVolume>();
     if (PPV)
     {
