@@ -539,4 +539,3 @@ void AWowPlayerCharacter::SetupAnimationController(UWowAnimationController* Anim
 	this->AnimationController = AnimController;
 	UE_LOG(LogWowPlayerChar, Log, TEXT("Animation controller setup for local player character"));
 }
-}

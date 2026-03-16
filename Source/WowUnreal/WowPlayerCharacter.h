@@ -113,6 +113,7 @@ private:
     // Left mouse drag turns character
     bool bLeftMouseTurning = false;
 
+public:
     // Animation controller for character model (if using WoW character model)
     UPROPERTY()
     TObjectPtr<UWowAnimationController> AnimationController;

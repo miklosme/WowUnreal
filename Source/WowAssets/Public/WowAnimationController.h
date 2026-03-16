@@ -1,5 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "WowEntity.h"
 #include "WowAnimationController.generated.h"
 
 class UAnimSequence;
@@ -98,7 +99,7 @@ public:
      * Update animation state based on movement info and entity conditions.
      * Call this from Tick() or when movement state changes.
      */
-    UFUNCTION(BlueprintCallable)
+    
     void UpdateAnimationState(const struct FWowMovementInfo& MovementInfo, bool bIsInCombat = false, bool bIsCasting = false);
 
     /**

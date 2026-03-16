@@ -1875,4 +1875,3 @@ void FWowPacketHandler::HandleCreatureQueryResponse(FPacketReader& R)
 
     // Skip the rest of the packet (icon name, type flags, etc.)
 }
-}

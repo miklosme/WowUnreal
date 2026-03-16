@@ -1076,7 +1076,7 @@ void AWowGameplayController::UpdateEntityAnimations()
 		if (!AnimController) continue;
 
 		// Get the entity data to determine animation state
-		const FWowEntity* Entity = ConnectionManager->PacketHandler.EntityManager.GetEntity(Guid);
+		const FWowEntity* Entity = ConnectionManager->PacketHandler.EntityManager.Find(Guid);
 		if (!Entity) continue;
 
 		// Update animation based on entity movement info
