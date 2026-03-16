@@ -262,7 +262,15 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 			if (Pass.SubmeshIndex >= static_cast<uint16>(Data.Submeshes.Num())) continue;
 
 			bool bInclude = true;
-			if (VisibleGeosets)
+
+			// Skip hair-textured passes (type 6) in the body mesh — hair gets its own mesh
+			if (VisibleGeosets && Pass.TextureIndex < static_cast<uint16>(Data.TextureTypes.Num()) &&
+				Data.TextureTypes[Pass.TextureIndex] == 6)
+			{
+				bInclude = false;
+			}
+
+			if (bInclude && VisibleGeosets)
 			{
 				uint16 GeosetId = Data.Submeshes[Pass.SubmeshIndex].Id;
 				uint16 Group = GeosetId / 100;
@@ -462,15 +470,18 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		BonePoses[BoneID] = RefSkel.GetRefBonePose()[BoneIndex];
 	}
 
-	// Materials MUST be set BEFORE Build() — otherwise the mesh renders black/invisible.
-	// One material slot per section (polygon group) so UE maps sections correctly.
+	// Materials MUST be set BEFORE Build(). Each section needs a UNIQUE material instance
+	// to prevent UE5 from merging sections during Build() (which breaks per-section overrides).
 	{
 		UMaterial* DefaultMat = UMaterial::GetDefaultMaterial(MD_Surface);
 		SkelMesh->GetMaterials().Reset();
 		for (int32 i = 0; i < NumSections; ++i)
 		{
 			FName SlotName = FName(*FString::Printf(TEXT("Section_%d"), i));
-			SkelMesh->GetMaterials().Add(FSkeletalMaterial(DefaultMat, true, false, SlotName));
+			// Create unique MID per section so Build() keeps them separate
+			UMaterialInstanceDynamic* UniqueMat = UMaterialInstanceDynamic::Create(DefaultMat, SkelMesh,
+				FName(*FString::Printf(TEXT("SkelMat_%d"), i)));
+			SkelMesh->GetMaterials().Add(FSkeletalMaterial(UniqueMat, true, false, SlotName));
 		}
 	}
 
@@ -520,6 +531,52 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		*ModelName, NumVerts, NumTris, NumBones);
 
 	return SkelMesh;
+}
+
+USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMeshByTextureType(const FM2Data& Data,
+	USkeleton* Skeleton, const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
+	uint32 TextureType, const TMap<uint16, uint16>* VisibleGeosets)
+{
+	// Build a filter that only includes render passes matching the requested texture type
+	// AND matching geoset visibility rules
+	TMap<uint16, uint16> TextureTypeFilter;
+
+	// We pass a special VisibleGeosets that allows ALL geosets but we filter render passes
+	// by texture type in a custom pass filter
+	// Actually, let's reuse CreateSkeletalMesh with a custom approach:
+	// Create a modified M2Data that only has render passes for the desired texture type
+
+	FM2Data FilteredData = Data; // Copy
+	FilteredData.RenderPasses.Reset();
+
+	for (const FM2RenderPass& Pass : Data.RenderPasses)
+	{
+		// Only include passes that reference the desired texture type
+		if (Pass.TextureIndex < static_cast<uint16>(Data.TextureTypes.Num()) &&
+			Data.TextureTypes[Pass.TextureIndex] == TextureType)
+		{
+			// Also check geoset visibility
+			if (VisibleGeosets && Pass.SubmeshIndex < static_cast<uint16>(Data.Submeshes.Num()))
+			{
+				uint16 GeosetId = Data.Submeshes[Pass.SubmeshIndex].Id;
+				uint16 Group = GeosetId / 100;
+				uint16 Variant = GeosetId % 100;
+				const uint16* DesiredVariant = VisibleGeosets->Find(Group);
+				if (DesiredVariant)
+				{
+					if (GeosetId != 0 && Variant != *DesiredVariant) continue;
+				}
+			}
+			FilteredData.RenderPasses.Add(Pass);
+		}
+	}
+
+	if (FilteredData.RenderPasses.Num() == 0)
+	{
+		return nullptr;
+	}
+
+	return CreateSkeletalMesh(FilteredData, Skeleton, ModelName, Mpq, Cache, nullptr, nullptr);
 }
 
 TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& Data,

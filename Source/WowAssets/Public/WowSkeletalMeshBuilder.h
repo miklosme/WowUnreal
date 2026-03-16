@@ -39,6 +39,12 @@ public:
 		TArray<FGeosetSectionInfo>* OutGeosetInfo = nullptr,
 		const TMap<uint16, uint16>* VisibleGeosets = nullptr);
 
+	/** Build a skeletal mesh containing ONLY render passes that reference a specific texture type.
+	 *  Used to split hair (type 6) into a separate mesh from body (type 1). */
+	static USkeletalMesh* CreateSkeletalMeshByTextureType(const FM2Data& Data, USkeleton* Skeleton,
+		const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
+		uint32 TextureType, const TMap<uint16, uint16>* VisibleGeosets = nullptr);
+
 	/** Build UAnimSequence assets for all parsed animation tracks. */
 	static TArray<UAnimSequence*> CreateAnimations(const FM2Data& Data, USkeleton* Skeleton,
 		const FString& ModelName);

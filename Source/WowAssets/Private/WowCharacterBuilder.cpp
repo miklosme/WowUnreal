@@ -620,15 +620,35 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             }
         }
 
-        // Compute geoset visibility BEFORE building mesh so we only include visible sections
+        // Compute geoset visibility BEFORE building mesh
         TMap<uint16, uint16> VisibleGeosets;
         if (Customization)
         {
             VisibleGeosets = ComputeDefaultGeosets(*Customization);
         }
-        const TMap<uint16, uint16>* GeosetFilter = Customization ? &VisibleGeosets : nullptr;
 
-        // Don't cache character meshes — each customization produces a different filtered mesh
+        // Build BODY mesh (excludes hair sections that need different texture)
+        // Hair sections are identified by M2 texture type 6
+        TMap<uint16, uint16> BodyGeosets = VisibleGeosets;
+        TMap<uint16, uint16> HairOnlyGeosets;
+        bool bHasHairSections = false;
+
+        // Check if any render passes reference type 6 (hair) texture
+        if (Customization && M2Data->TextureTypes.Num() > 0)
+        {
+            for (const FM2RenderPass& Pass : M2Data->RenderPasses)
+            {
+                if (Pass.TextureIndex < static_cast<uint16>(M2Data->TextureTypes.Num()) &&
+                    M2Data->TextureTypes[Pass.TextureIndex] == 6)
+                {
+                    bHasHairSections = true;
+                    break;
+                }
+            }
+        }
+
+        // Build body mesh
+        const TMap<uint16, uint16>* GeosetFilter = Customization ? &BodyGeosets : nullptr;
         TArray<FGeosetSectionInfo> GeosetInfo;
         USkeletalMesh* SkeletalMesh = nullptr;
         if (Skeleton)
@@ -638,26 +658,37 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
 
         if (SkeletalMesh)
         {
-            USkeletalMeshComponent* SkelMesh = NewObject<USkeletalMeshComponent>(Actor, TEXT("CharacterMesh"));
-            SkelMesh->SetupAttachment(Root);
-            SkelMesh->SetSkeletalMesh(SkeletalMesh);
-            SkelMesh->SetWorldScale3D(FVector(Scale));
-            SkelMesh->SetCastShadow(true);
-            SkelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-            SkelMesh->RegisterComponent();
-
-            // Resolve textures: composite skin for body, hair texture for hair sections
+            // Resolve skin texture
             UTexture2D* SkinTexture = OverrideTexture;
             if (!SkinTexture && M2Data->TexturePaths.Num() > 0 && !M2Data->TexturePaths[0].IsEmpty())
             {
                 SkinTexture = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[0]);
             }
 
-            // Load hair texture from CharSections if this is a character with customization
-            UTexture2D* HairTexture = nullptr;
-            if (Customization)
+            // Create body mesh component with skin texture
+            USkeletalMeshComponent* SkelMesh = NewObject<USkeletalMeshComponent>(Actor, TEXT("CharacterMesh"));
+            SkelMesh->SetupAttachment(Root);
+            SkelMesh->SetSkeletalMesh(SkeletalMesh);
+            SkelMesh->SetWorldScale3D(FVector(Scale));
+            SkelMesh->SetCastShadow(true);
+            SkelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+            if (UMaterial* BaseMat = GetCharacterMaterial())
             {
-                // CharSections Hair type (3), Textures[0] = replaceable hair texture
+                for (int32 MatIdx = 0; MatIdx < SkeletalMesh->GetMaterials().Num(); ++MatIdx)
+                {
+                    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SkelMesh);
+                    if (SkinTexture) MID->SetTextureParameterValue(TEXT("BaseTexture"), SkinTexture);
+                    SkelMesh->SetMaterial(MatIdx, MID);
+                }
+            }
+            SkelMesh->RegisterComponent();
+
+            // Build SEPARATE hair mesh if there are hair-textured sections
+            if (bHasHairSections && Customization)
+            {
+                // Load hair texture
+                UTexture2D* HairTexture = nullptr;
                 for (const FCharSectionsDbcEntry& Entry : FDbcStore::Get().CharSections().GetAll())
                 {
                     if (Entry.RaceID == Customization->RaceId && Entry.SexID == Customization->Gender &&
@@ -665,54 +696,41 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                         Entry.Color == Customization->HairColor && !Entry.Textures[0].IsEmpty())
                     {
                         HairTexture = LoadBlpTexture(Mpq, Cache, Entry.Textures[0]);
-                        if (HairTexture)
-                        {
-                            UE_LOG(LogWowCharacter, Log, TEXT("Loaded hair texture: %s"), *Entry.Textures[0]);
-                        }
                         break;
                     }
                 }
-            }
 
-            // Log sections and their texture mapping
-            for (int32 si = 0; si < GeosetInfo.Num(); ++si)
-            {
-                const auto& Info = GeosetInfo[si];
-                uint32 TexType = (Info.TextureIndex < static_cast<uint16>(M2Data->TextureTypes.Num()))
-                    ? M2Data->TextureTypes[Info.TextureIndex] : 999;
-                UE_LOG(LogWowCharacter, Verbose, TEXT("  Section[%d] geoset=%d texIdx=%d texType=%d"),
-                    si, Info.GeosetId, Info.TextureIndex, TexType);
-            }
-
-            // Apply per-section textures: skin composite for body, hair texture for hair sections
-            if (UMaterial* BaseMat = GetCharacterMaterial())
-            {
-                const int32 NumMatSlots = SkeletalMesh->GetMaterials().Num();
-                for (int32 MatIdx = 0; MatIdx < NumMatSlots; ++MatIdx)
+                if (HairTexture)
                 {
-                    UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SkelMesh);
+                    // Build hair-only mesh: include ONLY render passes with texture type 6
+                    USkeletalMesh* HairMesh = FWowSkeletalMeshBuilder::CreateSkeletalMeshByTextureType(
+                        *M2Data, Skeleton, ModelPath + TEXT("_hair"), Mpq, Cache, 6, GeosetFilter);
 
-                    // Check if this section references a hair texture (type 6)
-                    UTexture2D* SectionTex = SkinTexture;
-                    if (HairTexture && GeosetInfo.IsValidIndex(MatIdx))
+                    if (HairMesh)
                     {
-                        uint16 TexIdx = GeosetInfo[MatIdx].TextureIndex;
-                        if (TexIdx < static_cast<uint16>(M2Data->TextureTypes.Num()) &&
-                            M2Data->TextureTypes[TexIdx] == 6) // TEXTURE_CHAR_HAIR
+                        USkeletalMeshComponent* HairComp = NewObject<USkeletalMeshComponent>(Actor, TEXT("HairMesh"));
+                        HairComp->SetupAttachment(Root);
+                        HairComp->SetSkeletalMesh(HairMesh);
+                        HairComp->SetWorldScale3D(FVector(Scale));
+                        HairComp->SetCastShadow(true);
+                        HairComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                        HairComp->SetLeaderPoseComponent(SkelMesh); // Follow body animations
+
+                        if (UMaterial* BaseMat = GetCharacterMaterial())
                         {
-                            SectionTex = HairTexture;
+                            for (int32 MatIdx = 0; MatIdx < HairMesh->GetMaterials().Num(); ++MatIdx)
+                            {
+                                UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, HairComp);
+                                MID->SetTextureParameterValue(TEXT("BaseTexture"), HairTexture);
+                                HairComp->SetMaterial(MatIdx, MID);
+                            }
                         }
+                        HairComp->RegisterComponent();
+                        UE_LOG(LogWowCharacter, Log, TEXT("Created separate hair mesh with texture: %s"),
+                            *HairTexture->GetName());
                     }
-
-                    if (SectionTex)
-                    {
-                        MID->SetTextureParameterValue(TEXT("BaseTexture"), SectionTex);
-                    }
-                    SkelMesh->SetMaterial(MatIdx, MID);
                 }
             }
-
-            // Geoset filtering is done at mesh build time — no post-build visibility needed
 
             TArray<TWeakObjectPtr<UAnimSequence>> CachedAnimations;
             bool bNeedCreateAnimations = true;
