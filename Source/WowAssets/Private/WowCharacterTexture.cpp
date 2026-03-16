@@ -678,8 +678,24 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
     // TextureOverlays[6] → LEG_LOWER (region 6)
     // TextureOverlays[7] → FOOT (region 7)
 
-    // Gender suffix for texture paths (WMVx searchSlotTexture convention)
-    TCHAR GenderChar = (Equipment.Gender == 1) ? TEXT('F') : TEXT('M');
+    // Race+Gender suffix for equipment texture paths
+    // Format: 2-letter race code + gender char (lowercase), e.g. "hum" = Human Male, "bef" = Blood Elf Female
+    FString RaceGenderSuffix;
+    {
+        const FChrRacesDbcEntry* Race = Dbc.ChrRaces().GetById(Equipment.RaceId);
+        if (Race && !Race->ClientPrefix.IsEmpty())
+        {
+            FString RaceCode = Race->ClientPrefix.Left(2).ToLower();
+            TCHAR GenderChar = (Equipment.Gender == 1) ? TEXT('f') : TEXT('m');
+            RaceGenderSuffix = RaceCode + GenderChar;
+        }
+        else
+        {
+            RaceGenderSuffix = (Equipment.Gender == 1) ? TEXT("F") : TEXT("M");
+        }
+        UE_LOG(LogWowCharTex, Log, TEXT("Equipment texture suffix: %s (Race=%d Gender=%d)"),
+            *RaceGenderSuffix, Equipment.RaceId, Equipment.Gender);
+    }
 
     auto ApplyItemOverlays = [&](uint32 DisplayId, const TArray<uint32>& RegionIndices) {
         if (DisplayId == 0) return;
@@ -712,19 +728,14 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
             };
 
             FString Name = Item->TextureOverlays[OverlayIdx];
-            TCHAR GenderSuffix = GenderChar;
-            if (Name.Len() >= 2)
-            {
-                TCHAR SecondLast = Name[Name.Len() - 2];
-                if (SecondLast == TEXT('L') || SecondLast == TEXT('l'))
-                    GenderSuffix = TEXT('U');
-            }
 
-            // Try multiple path formats — WoW 3.3.5 varies by item
+            // Try paths with race+gender suffix first (e.g. "_hum" for Human Male),
+            // then single char suffix, then "U" universal, then bare name
             TArray<FString> Paths = {
-                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%c.blp"), RegionSubdirs[OverlayIdx], *Name, GenderSuffix),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%s.blp"), RegionSubdirs[OverlayIdx], *Name, *RaceGenderSuffix),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%c.blp"), RegionSubdirs[OverlayIdx], *Name, (Equipment.Gender == 1) ? TEXT('F') : TEXT('M')),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_U.blp"), RegionSubdirs[OverlayIdx], *Name),
                 FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s.blp"), RegionSubdirs[OverlayIdx], *Name),
-                FString::Printf(TEXT("Item\\TextureComponents\\%s.blp"), *Name),
             };
 
             uint32 OverlayW, OverlayH;

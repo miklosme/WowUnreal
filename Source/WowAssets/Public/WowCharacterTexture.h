@@ -63,7 +63,8 @@ public:
     /** Body equipment IDs that affect texture overlays */
     struct FBodyEquipment
     {
-        uint32 Gender = 0; // 0=male, 1=female (needed for texture path suffix)
+        uint32 RaceId = 1;  // Race ID for texture path suffix
+        uint32 Gender = 0;  // 0=male, 1=female
         uint32 ChestDisplayId = 0;
         uint32 PantsDisplayId = 0;
         uint32 BootsDisplayId = 0;
