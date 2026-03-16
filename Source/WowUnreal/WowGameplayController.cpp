@@ -11,10 +11,12 @@
 #include "WowAnimationController.h"
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
+#include "SWowChatWindow.h"
 #include "WowDeathManager.h"
 #include "WowCursorManager.h"
 #include "WowTooltipManager.h"
 #include "UI/SWowActionBar.h"
+#include "UI/SWowMinimap.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
@@ -48,6 +50,11 @@ void AWowGameplayController::BeginPlay()
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		UIManager = GI->GetSubsystem<UWowUIManager>();
+		if (UIManager)
+		{
+			// Initialize inventory UI overlays
+			UIManager->SetRootCanvas(nullptr); // We'll use viewport overlay instead
+		}
 	}
 
 	// Create managers
@@ -113,6 +120,16 @@ void AWowGameplayController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Four, IE_Released, this, &AWowGameplayController::OnSpellKey4);
 	InputComponent->BindKey(EKeys::Five, IE_Released, this, &AWowGameplayController::OnSpellKey5);
 	InputComponent->BindKey(EKeys::Six, IE_Released, this, &AWowGameplayController::OnSpellKey6);
+
+	// Minimap toggle
+	InputComponent->BindKey(EKeys::M, IE_Pressed, this, &AWowGameplayController::OnToggleMap);
+
+	// Chat input
+	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &AWowGameplayController::OnEnterKey);
+
+	// Inventory UI keys
+	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &AWowGameplayController::OnBagKey);
+	InputComponent->BindKey(EKeys::C, IE_Pressed, this, &AWowGameplayController::OnCharacterKey);
 }
 
 void AWowGameplayController::BindEntityEvents()
@@ -144,6 +161,10 @@ void AWowGameplayController::BindEntityEvents()
 	// Forward SMSG opcodes to UI event system
 	ConnectionManager->PacketHandler.OnOpcodeReceived.AddUObject(
 		this, &AWowGameplayController::OnOpcodeReceived);
+
+	// Listen for player inventory updates
+	ConnectionManager->PacketHandler.OnPlayerInventoryUpdate.AddUObject(
+		this, &AWowGameplayController::OnPlayerInventoryUpdated);
 
 	// Bind combat log events
 	ConnectionManager->PacketHandler.OnSpellStart.AddUObject(
@@ -239,6 +260,9 @@ void AWowGameplayController::ApplyDeferredSpawn_Internal(const FVector& SpawnPos
 
 	// Create action bar widget when entering the world
 	CreateActionBarWidget();
+
+	// Create minimap widget
+	CreateMinimapWidget();
 }
 
 void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
@@ -888,7 +912,12 @@ void AWowGameplayController::SendWorldportAck()
 
 void AWowGameplayController::AddCombatMessage(const FString& Message, const FLinearColor& Color)
 {
-	if (CombatLog.IsValid())
+	// Forward to chat window (combat tab) if available, otherwise use legacy combat log
+	if (ChatWindow.IsValid())
+	{
+		ChatWindow->AddCombatMessage(Message, Color);
+	}
+	else if (CombatLog.IsValid())
 	{
 		CombatLog->AddCombatMessage(Message, Color);
 	}
@@ -1237,6 +1266,60 @@ void AWowGameplayController::CreateActionBarWidget()
 	UE_LOG(LogWowGameplay, Log, TEXT("Created action bar widget"));
 }
 
+void AWowGameplayController::CreateMinimapWidget()
+{
+	if (!ConnectionManager || MinimapWidget.IsValid())
+	{
+		return;
+	}
+
+	// Get world manager
+	AWowWorldManager* WorldManager = nullptr;
+	if (UWorld* World = GetWorld())
+	{
+		TArray<AActor*> WorldManagers;
+		UGameplayStatics::GetAllActorsOfClass(World, AWowWorldManager::StaticClass(), WorldManagers);
+		if (WorldManagers.Num() > 0)
+		{
+			WorldManager = Cast<AWowWorldManager>(WorldManagers[0]);
+		}
+	}
+
+	if (!WorldManager)
+	{
+		UE_LOG(LogWowGameplay, Warning, TEXT("Could not find WorldManager for minimap"));
+		return;
+	}
+
+	// Create the minimap widget
+	MinimapWidget = SNew(SWowMinimap)
+		.EntityManager(&ConnectionManager->PacketHandler.EntityManager)
+		.WorldManager(WorldManager);
+
+	// Add to viewport
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->AddViewportWidgetContent(
+			MinimapWidget.ToSharedRef(),
+			70 // Z-order (above action bar)
+		);
+
+		// Position at top-right corner
+		MinimapWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(1.0f, 0.0f)));
+		MinimapWidget->SetRenderTransformPivot(FVector2D(1.0f, 0.0f));
+	}
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Created minimap widget"));
+}
+
+void AWowGameplayController::OnToggleMap()
+{
+	if (MinimapWidget.IsValid())
+	{
+		MinimapWidget->ToggleFullScreenMap();
+	}
+}
+
 void AWowGameplayController::CastSpellFromSlot(int32 SlotIndex)
 {
 	if (!ConnectionManager || !ConnectionManager->PacketHandler.ActionButtons.IsValidIndex(SlotIndex))
@@ -1355,10 +1438,18 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 }
 
 
-void AWowGameplayController::OnChatMessage(const FString& Message)
+void AWowGameplayController::OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel)
 {
-	// Show chat messages in the combat log as well (like in WoW)
-	AddCombatMessage(Message, FLinearColor::White);
+	// Forward to chat window if available
+	if (ChatWindow.IsValid())
+	{
+		ChatWindow->AddChatMessage(Type, Language, SenderGuid, SenderName, Message, Channel);
+	}
+	else
+	{
+		// Fallback to combat log for now
+		AddCombatMessage(Message, FLinearColor::White);
+	}
 }
 
 void AWowGameplayController::OnEntityHealthChanged(const FWowEntity& Entity, int32 OldHealth, int32 NewHealth)
@@ -1404,4 +1495,63 @@ void AWowGameplayController::OnEntityHealthChanged(const FWowEntity& Entity, int
 	}
 
 	AddCombatMessage(Message, MessageColor);
+}
+
+void AWowGameplayController::CreateChatWindow()
+{
+	if (!ConnectionManager || ChatWindow.IsValid())
+	{
+		return;
+	}
+
+	// Create the chat window widget
+	ChatWindow = SNew(SWowChatWindow)
+		.ConnectionManager(ConnectionManager);
+
+	// Bind input mode change delegate
+	ChatWindow->OnInputModeChanged.BindUObject(this, &AWowGameplayController::OnChatInputModeChanged);
+}
+
+void AWowGameplayController::OnEnterKey()
+{
+	if (ChatWindow.IsValid())
+	{
+		ChatWindow->ToggleInputFocus();
+	}
+}
+
+void AWowGameplayController::OnChatInputModeChanged(bool bGameAndUI)
+{
+	if (bGameAndUI)
+	{
+		SetInputMode(FInputModeGameAndUI());
+	}
+	else
+	{
+		SetInputMode(FInputModeGameOnly());
+	}
+}
+
+void AWowGameplayController::OnBagKey()
+{
+	if (UIManager)
+	{
+		UIManager->ToggleBagWindow();
+	}
+}
+
+void AWowGameplayController::OnCharacterKey()
+{
+	if (UIManager)
+	{
+		UIManager->ToggleCharacterPanel();
+	}
+}
+
+void AWowGameplayController::OnPlayerInventoryUpdated()
+{
+	if (UIManager)
+	{
+		UIManager->UpdateInventory();
+	}
 }

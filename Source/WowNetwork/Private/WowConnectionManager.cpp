@@ -286,7 +286,7 @@ void UWowConnectionManager::SendMovement(int32 Opcode, const FVector& Position, 
     WorldSocket->SendPacket(static_cast<uint32>(Opcode), Data);
 }
 
-void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, const FString& Language)
+void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, const FString& Target, int32 Language)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
 
@@ -296,13 +296,16 @@ void UWowConnectionManager::SendChatMessage(const FString& Message, int32 Type, 
     TArray<uint8> Data;
     Data.Reserve(TruncatedMessage.Len() + 16);
 
-    // uint32 type (SAY=1, YELL=6, WHISPER=7, CHANNEL=17)
+    // uint32 type (SAY=1, PARTY=4, GUILD=3, YELL=5, WHISPER=6, CHANNEL=17)
     uint32 ChatType = static_cast<uint32>(Type);
     Data.Append(reinterpret_cast<const uint8*>(&ChatType), 4);
 
-    // uint32 language (0 = universal/common)
-    uint32 Lang = 0;
+    // uint32 language (Common=7)
+    uint32 Lang = static_cast<uint32>(Language);
     Data.Append(reinterpret_cast<const uint8*>(&Lang), 4);
+
+    // For whispers and channels, we need the target name first, but for now keep it simple
+    // TODO: Implement proper whisper/channel target handling
 
     // Null-terminated message string (UTF-8)
     FTCHARToUTF8 MsgUtf8(*TruncatedMessage);

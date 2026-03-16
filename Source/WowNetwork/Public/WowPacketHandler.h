@@ -5,7 +5,7 @@
 #include "WowWardenHandler.h"
 
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
-DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
+DECLARE_MULTICAST_DELEGATE_SixParams(FOnChatMessage, uint8 /*Type*/, uint32 /*Language*/, uint64 /*SenderGuid*/, const FString& /*SenderName*/, const FString& /*Message*/, const FString& /*Channel*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellFailure, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint8 /*FailureReason*/);
@@ -19,6 +19,10 @@ DECLARE_MULTICAST_DELEGATE(FOnTalentsUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnFriendListUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGuildRosterUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGroupUpdated);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnGroupInviteReceived, const FString& /*InviterName*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnPartyCommandResult, uint8 /*Command*/, const FString& /*PlayerName*/, uint8 /*Result*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnTaxiNodesShown, uint64 /*NpcGuid*/, uint32 /*CurrentNodeId*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnTaxiActivateReply, uint8 /*Result*/);
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnTeleportRequest, uint64 /*Guid*/, uint32 /*Flags*/, uint32 /*Time*/, FVector /*Position*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnMapTransfer, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE(FOnPlayerDeath);
@@ -27,6 +31,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnResurrectRequest, const FString& /*Reques
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnPlayerTeleport, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlayerNameReceived, uint64 /*Guid*/, const FString& /*Name*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnCreatureNameReceived, uint32 /*Entry*/, const FString& /*Name*/, const FString& /*Title*/);
+DECLARE_MULTICAST_DELEGATE(FOnPlayerInventoryUpdate);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -145,6 +150,12 @@ public:
     FString GuildName;
     FString GuildMotd;
 
+    /** Group/Party information */
+    FWowGroupInfo GroupInfo;
+
+    /** Taxi system data */
+    FWowTaxiData TaxiData;
+
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
@@ -159,6 +170,10 @@ public:
     FOnFriendListUpdated OnFriendListUpdated;
     FOnGuildRosterUpdated OnGuildRosterUpdated;
     FOnGroupUpdated OnGroupUpdated;
+    FOnGroupInviteReceived OnGroupInviteReceived;
+    FOnPartyCommandResult OnPartyCommandResult;
+    FOnTaxiNodesShown OnTaxiNodesShown;
+    FOnTaxiActivateReply OnTaxiActivateReply;
     FOnTeleportRequest OnTeleportRequest;
     FOnMapTransfer OnMapTransfer;
     FOnPlayerDeath OnPlayerDeath;
@@ -167,6 +182,7 @@ public:
     FOnPlayerTeleport OnPlayerTeleport;
     FOnPlayerNameReceived OnPlayerNameReceived;
     FOnCreatureNameReceived OnCreatureNameReceived;
+    FOnPlayerInventoryUpdate OnPlayerInventoryUpdate;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
@@ -226,7 +242,13 @@ private:
     void HandleChannelNotify(FPacketReader& R);
     void HandleGroupList(FPacketReader& R);
     void HandlePartyCommandResult(FPacketReader& R);
+    void HandleGroupInvite(FPacketReader& R);
     void HandleWho(FPacketReader& R);
+
+    // ── Taxi / Flight Path handlers ─────────────────────────────────────────
+    void HandleShowTaxiNodes(FPacketReader& R);
+    void HandleActivateTaxiReply(FPacketReader& R);
+    void HandleNewTaxiPath(FPacketReader& R);
     void HandleNameQueryResponse(FPacketReader& R);
     void HandleCreatureQueryResponse(FPacketReader& R);
 

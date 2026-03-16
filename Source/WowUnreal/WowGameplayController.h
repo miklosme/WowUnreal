@@ -13,9 +13,11 @@ class UWowTooltipManager;
 class FMpqManager;
 class FWowAssetCache;
 class SWowCombatLog;
+class SWowChatWindow;
 struct FWowEntity;
 class SWowActionBar;
 class SWowCastBar;
+class SWowMinimap;
 struct FWowFloatingTextInfo;
 
 UCLASS()
@@ -64,8 +66,14 @@ public:
     /** Combat log widget for displaying spell casts, damage, etc. */
     TSharedPtr<SWowCombatLog> CombatLog;
 
+    /** Chat window widget with input and channel support */
+    TSharedPtr<SWowChatWindow> ChatWindow;
+
     /** Action bar widget */
     TSharedPtr<SWowActionBar> ActionBarWidget;
+
+    /** Minimap widget */
+    TSharedPtr<SWowMinimap> MinimapWidget;
 
     /** Cast a spell on the current target (or self if no target) */
     UFUNCTION(BlueprintCallable)
@@ -115,6 +123,9 @@ public:
 
     /** Create and show the action bar widget */
     void CreateActionBarWidget();
+
+    /** Create and show the minimap widget */
+    void CreateMinimapWidget();
 
     /** Handle keyboard input for action bar slots */
     void HandleActionBarInput();
@@ -195,7 +206,26 @@ private:
     void OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags);
     void OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason);
     void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
-    void OnChatMessage(const FString& Message);
+    void OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel);
+
+    /** Create and show the chat window */
+    void CreateChatWindow();
+
+    /** Handle Enter key for chat input */
+    void OnEnterKey();
+
+    /** Handle B key for bag window */
+    void OnBagKey();
+
+    /** Handle C key for character panel */
+    void OnCharacterKey();
+
+    /** Handle player inventory updates from server */
+    UFUNCTION()
+    void OnPlayerInventoryUpdated();
+
+    /** Handle input mode changes from chat window */
+    void OnChatInputModeChanged(bool bGameAndUI);
     void OnEntityHealthChanged(const FWowEntity& Entity, int32 OldHealth, int32 NewHealth);
 
     // Input handlers for spell casting (1-6 keys)
@@ -207,4 +237,7 @@ private:
     void OnSpellKey6() { CastSpell(475); }  // Remove Curse
 
     void OnRightClick();
+
+    // Minimap input
+    void OnToggleMap(); // 'M' key handler
 };

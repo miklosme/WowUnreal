@@ -16,6 +16,7 @@
 #include "WowUIManager.h"
 #include "SWowLoadingScreen.h"
 #include "SWowCombatLog.h"
+#include "SWowChatWindow.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameViewportClient.h"
 #include "Components/CanvasPanel.h"
@@ -307,25 +308,33 @@ void AWowLoginController::InitializeWorldSystems()
         }
     }
 
-    // 5. Create combat log widget
+    // 5. Create chat window widget
     if (AWowGameplayController* GPC = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
     {
         if (GEngine && GEngine->GameViewport)
         {
+            // Create the chat window
+            GPC->CreateChatWindow();
+
+            if (GPC->ChatWindow.IsValid())
+            {
+                // Add to viewport at bottom-left with z-order 55 (above UI elements)
+                TSharedRef<SWidget> ChatWindowContainer = SNew(SBox)
+                    .HAlign(HAlign_Left)
+                    .VAlign(VAlign_Bottom)
+                    .Padding(FMargin(20.0f, 0.0f, 0.0f, 100.0f))
+                    [
+                        GPC->ChatWindow.ToSharedRef()
+                    ];
+
+                GEngine->GameViewport->AddViewportWidgetContent(ChatWindowContainer, 55);
+
+                UE_LOG(LogWowLogin, Log, TEXT("Created chat window widget"));
+            }
+
+            // Still create legacy combat log as backup
             GPC->CombatLog = SNew(SWowCombatLog);
-
-            // Add to viewport at bottom-left with z-order 50 (below loading screen, above UI canvas)
-            TSharedRef<SWidget> CombatLogContainer = SNew(SBox)
-                .HAlign(HAlign_Left)
-                .VAlign(VAlign_Bottom)
-                .Padding(FMargin(20.0f, 0.0f, 0.0f, 100.0f))
-                [
-                    GPC->CombatLog.ToSharedRef()
-                ];
-
-            GEngine->GameViewport->AddViewportWidgetContent(CombatLogContainer, 50);
-
-            UE_LOG(LogWowLogin, Log, TEXT("Created combat log widget"));
+            UE_LOG(LogWowLogin, Log, TEXT("Created backup combat log widget"));
         }
     }
 }

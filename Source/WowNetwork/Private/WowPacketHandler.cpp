@@ -51,7 +51,13 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_CHANNEL_NOTIFY,           &FWowPacketHandler::HandleChannelNotify);
     Handlers.Add(WowOpcode::SMSG_GROUP_LIST,               &FWowPacketHandler::HandleGroupList);
     Handlers.Add(WowOpcode::SMSG_PARTY_COMMAND_RESULT,     &FWowPacketHandler::HandlePartyCommandResult);
+    Handlers.Add(WowOpcode::SMSG_GROUP_INVITE,             &FWowPacketHandler::HandleGroupInvite);
     Handlers.Add(WowOpcode::SMSG_WHO,                      &FWowPacketHandler::HandleWho);
+
+    // ── Taxi / Flight Path handlers ─────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_SHOWTAXINODES,            &FWowPacketHandler::HandleShowTaxiNodes);
+    Handlers.Add(WowOpcode::SMSG_ACTIVATETAXIREPLY,        &FWowPacketHandler::HandleActivateTaxiReply);
+    Handlers.Add(WowOpcode::SMSG_NEW_TAXI_PATH,            &FWowPacketHandler::HandleNewTaxiPath);
 
     // ── Death / Corpse / Resurrection handlers ──────────────────────────────
     Handlers.Add(WowOpcode::SMSG_CORPSE_RECLAIM_DELAY,     &FWowPacketHandler::HandleCorpseReclaimDelay);
@@ -487,6 +493,8 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
         Mask[i] = R.ReadU32();
     }
 
+    bool bInventoryFieldUpdated = false;
+
     // Each set bit in the mask means a uint32 value follows
     for (int32 Block = 0; Block < BlockCount; ++Block)
     {
@@ -497,8 +505,22 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
                 uint16 FieldIndex = static_cast<uint16>(Block * 32 + Bit);
                 uint32 Value = R.ReadU32();
                 Entity.SetField(FieldIndex, Value);
+
+                // Check if this is a player inventory field update
+                if (Entity.IsPlayer() &&
+                    ((FieldIndex >= PlayerField::INV_SLOT_HEAD && FieldIndex <= PlayerField::PACK_SLOT_END) ||
+                     (FieldIndex >= PlayerField::PACK_SLOT_1 && FieldIndex <= PlayerField::PACK_SLOT_LAST + 1)))
+                {
+                    bInventoryFieldUpdated = true;
+                }
             }
         }
+    }
+
+    // Fire inventory update event if player inventory was updated
+    if (bInventoryFieldUpdated)
+    {
+        OnPlayerInventoryUpdate.Broadcast();
     }
 }
 
@@ -587,8 +609,24 @@ void FWowPacketHandler::HandleMessageChat(FPacketReader& R)
     FString Message = R.ReadCString();
     uint8 ChatTag = R.ReadU8();
 
-    UE_LOG(LogWowPacket, Log, TEXT("CHAT type=%d lang=%d: %s"), Type, Language, *Message);
-    OnChatMessage.Broadcast(Message);
+    // Get sender name from cache
+    FString SenderName;
+    if (SenderGuid != 0)
+    {
+        FString* CachedName = PlayerNameCache.Find(SenderGuid);
+        if (CachedName)
+        {
+            SenderName = *CachedName;
+        }
+        else
+        {
+            SenderName = FString::Printf(TEXT("Player-%llu"), SenderGuid);
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("CHAT type=%d lang=%d sender=%s channel=%s: %s"),
+           Type, Language, *SenderName, *Channel, *Message);
+    OnChatMessage.Broadcast(Type, Language, SenderGuid, SenderName, Message, Channel);
 }
 
 // ── SMSG_INITIAL_SPELLS ──────────────────────────────────────────────────────
@@ -1390,6 +1428,11 @@ void FWowPacketHandler::HandleGroupList(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("GROUP_LIST: type=%d members=%d"), GroupType, MemberCount);
 
+    // Update group info structure
+    GroupInfo.Clear();
+    GroupInfo.GroupType = GroupType;
+    GroupInfo.MemberCount = static_cast<uint8>(MemberCount);
+
     // Read member data
     for (uint32 i = 0; i < MemberCount; ++i)
     {
@@ -1402,8 +1445,29 @@ void FWowPacketHandler::HandleGroupList(FPacketReader& R)
         uint8 MemberFlags = R.ReadU8();
         uint8 MemberRoles = R.ReadU8();
 
-        UE_LOG(LogWowPacket, Verbose, TEXT("  Member: %s (GUID=%llu online=%d)"),
-               *MemberName, MemberGuid, Online);
+        // Create group member structure
+        FWowGroupMember Member;
+        Member.Guid = MemberGuid;
+        Member.Name = MemberName;
+        Member.Group = MemberSubgroup;
+        Member.Flags = MemberFlags;
+        Member.Roles = MemberRoles;
+        Member.Status = Online;
+
+        // Try to get level and class from entity data
+        if (auto* Entity = EntityManager.GetEntity(MemberGuid))
+        {
+            if (Entity->IsUnit())
+            {
+                Member.Level = static_cast<uint8>(Entity->GetLevel());
+                Member.Class = static_cast<uint8>(Entity->GetFieldByte(UnitField::BYTES_0, 1));
+            }
+        }
+
+        GroupInfo.Members.Add(Member);
+
+        UE_LOG(LogWowPacket, Verbose, TEXT("  Member: %s (GUID=%llu online=%d level=%d class=%d)"),
+               *MemberName, MemberGuid, Online, Member.Level, Member.Class);
     }
 
     OnGroupUpdated.Broadcast();
