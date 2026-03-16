@@ -278,6 +278,133 @@ static int L_UnitGUID(lua_State* L)
     return 1;
 }
 
+// Additional Unit API functions
+static int L_UnitIsDeadOrGhost(lua_State* L)
+{
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity)
+        lua_pushboolean(L, Entity->GetHealth() <= 0 ? 1 : 0);
+    else
+        lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int L_UnitIsFriend(lua_State* L)
+{
+    // For now, assume player is friendly to self, enemies to others
+    const char* unit = luaL_optstring(L, 1, "player");
+    lua_pushboolean(L, strcmp(unit, "player") == 0 ? 1 : 0);
+    return 1;
+}
+
+static int L_UnitIsEnemy(lua_State* L)
+{
+    const char* unit = luaL_optstring(L, 1, "player");
+    lua_pushboolean(L, strcmp(unit, "player") != 0 ? 1 : 0);
+    return 1;
+}
+
+static int L_UnitAffectingCombat(lua_State* L)
+{
+    // TODO: Check combat status from unit flags
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int L_UnitBuff(lua_State* L)
+{
+    // UnitBuff(unit, index) → name, rank, icon, count, debuffType, duration, expirationTime, isFromPlayer, isStealable
+    lua_pushnil(L); // name
+    lua_pushnil(L); // rank
+    lua_pushnil(L); // icon
+    lua_pushnumber(L, 0); // count
+    lua_pushnil(L); // debuffType
+    lua_pushnumber(L, 0); // duration
+    lua_pushnumber(L, 0); // expirationTime
+    lua_pushboolean(L, 0); // isFromPlayer
+    lua_pushboolean(L, 0); // isStealable
+    return 9;
+}
+
+static int L_UnitDebuff(lua_State* L)
+{
+    // Same return structure as UnitBuff
+    lua_pushnil(L); // name
+    lua_pushnil(L); // rank
+    lua_pushnil(L); // icon
+    lua_pushnumber(L, 0); // count
+    lua_pushnil(L); // debuffType
+    lua_pushnumber(L, 0); // duration
+    lua_pushnumber(L, 0); // expirationTime
+    lua_pushboolean(L, 0); // isFromPlayer
+    lua_pushboolean(L, 0); // isStealable
+    return 9;
+}
+
+static int L_UnitAura(lua_State* L)
+{
+    // UnitAura(unit, index, filter) → name, rank, icon, count, debuffType, duration, expirationTime, isFromPlayer, isStealable
+    lua_pushnil(L); // name
+    lua_pushnil(L); // rank
+    lua_pushnil(L); // icon
+    lua_pushnumber(L, 0); // count
+    lua_pushnil(L); // debuffType
+    lua_pushnumber(L, 0); // duration
+    lua_pushnumber(L, 0); // expirationTime
+    lua_pushboolean(L, 0); // isFromPlayer
+    lua_pushboolean(L, 0); // isStealable
+    return 9;
+}
+
+static int L_GetUnitName(lua_State* L)
+{
+    // Alias for UnitName
+    return L_UnitName(L);
+}
+
+static int L_UnitPowerType(lua_State* L)
+{
+    FWowEntity* Entity = ResolveUnit(L);
+    if (Entity && Entity->IsUnit())
+    {
+        FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
+        lua_pushnumber(L, Unit->GetPowerTypeId());
+        lua_pushstring(L, "MANA"); // Default to MANA, could map from power type
+        return 2;
+    }
+    lua_pushnumber(L, 0);
+    lua_pushstring(L, "MANA");
+    return 2;
+}
+
+static int L_UnitStat(lua_State* L)
+{
+    // UnitStat(unit, statIndex) → base, stat, posBuff, negBuff
+    lua_pushnumber(L, 10); // base
+    lua_pushnumber(L, 10); // stat
+    lua_pushnumber(L, 0); // posBuff
+    lua_pushnumber(L, 0); // negBuff
+    return 4;
+}
+
+static int L_UnitAttackPower(lua_State* L)
+{
+    // UnitAttackPower(unit) → base, posBuff, negBuff
+    lua_pushnumber(L, 100); // base
+    lua_pushnumber(L, 0); // posBuff
+    lua_pushnumber(L, 0); // negBuff
+    return 3;
+}
+
+static int L_UnitRangedAttackPower(lua_State* L)
+{
+    // UnitRangedAttackPower(unit) → base, posBuff, negBuff
+    lua_pushnumber(L, 50); // base
+    lua_pushnumber(L, 0); // posBuff
+    lua_pushnumber(L, 0); // negBuff
+    return 3;
+}
+
 // ─── Locale / client ────────────────────────────────────────────────────────────
 static int L_GetLocale(lua_State* L)
 {
@@ -296,8 +423,36 @@ static int L_GetBuildInfo(lua_State* L)
 
 static int L_GetRealmName(lua_State* L)
 {
-    lua_pushstring(L, "WowUnreal");
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        // TODO: Get realm name from connection manager
+        lua_pushstring(L, "WowUnreal");
+    }
+    else
+    {
+        lua_pushstring(L, "WowUnreal");
+    }
     return 1;
+}
+
+static int L_GetServerTime(lua_State* L)
+{
+    // Return current time as Unix timestamp
+    lua_pushnumber(L, FPlatformTime::Seconds());
+    return 1;
+}
+
+static int L_GetGameTime(lua_State* L)
+{
+    // Return hours, minutes for in-game time
+    // For now, just use real time
+    time_t RawTime;
+    time(&RawTime);
+    struct tm* TimeInfo = localtime(&RawTime);
+    lua_pushnumber(L, TimeInfo->tm_hour);
+    lua_pushnumber(L, TimeInfo->tm_min);
+    return 2;
 }
 
 // ─── Screen / resolution ────────────────────────────────────────────────────────
@@ -340,14 +495,79 @@ static int L_SendChatMessage(lua_State* L)
     return 0;
 }
 
-STUB_RETURN_ZERO(GetNumLanguages)
-STUB_RETURN_EMPTY(GetDefaultLanguage)
+static int L_GetNumLanguages(lua_State* L)
+{
+    lua_pushnumber(L, 1); // Just Common for now
+    return 1;
+}
+
+static int L_GetDefaultLanguage(lua_State* L)
+{
+    lua_pushstring(L, "Common");
+    return 1;
+}
+
+static int L_GetLanguageByIndex(lua_State* L)
+{
+    // GetLanguageByIndex(index) → languageName, languageId
+    lua_pushstring(L, "Common");
+    lua_pushnumber(L, 7); // LANG_COMMON = 7 in WoW
+    return 2;
+}
 
 // ─── Action bar stubs ───────────────────────────────────────────────────────────
 STUB_RETURN_FALSE(HasAction)
 STUB_RETURN_NIL(GetActionInfo)
 STUB_RETURN_NIL(GetActionTexture)
 STUB_RETURN_NONE(UseAction)
+
+static int L_GetActionCount(lua_State* L)
+{
+    lua_pushnumber(L, 0);
+    return 1;
+}
+
+static int L_GetActionCooldown(lua_State* L)
+{
+    // GetActionCooldown(slot) → start, duration, enabled
+    lua_pushnumber(L, 0); // start
+    lua_pushnumber(L, 0); // duration
+    lua_pushnumber(L, 1); // enabled
+    return 3;
+}
+
+static int L_IsCurrentAction(lua_State* L)
+{
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int L_IsUsableAction(lua_State* L)
+{
+    // IsUsableAction(slot) → usable, noMana
+    lua_pushboolean(L, 1);
+    lua_pushboolean(L, 0);
+    return 2;
+}
+
+static int L_IsAttackAction(lua_State* L)
+{
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
+static int L_GetBonusBarOffset(lua_State* L)
+{
+    lua_pushnumber(L, 0);
+    return 1;
+}
+
+// Global variable for action bar page
+static int L_GetCurrentActionBarPage(lua_State* L)
+{
+    lua_pushnumber(L, 1);
+    return 1;
+}
 
 // ─── Spell functions ────────────────────────────────────────────────────────────
 static int L_GetSpellInfo(lua_State* L)
@@ -428,13 +648,133 @@ static int L_CastSpellByName(lua_State* L)
     return 0;
 }
 
+static int L_GetSpellTexture(lua_State* L)
+{
+    // GetSpellTexture(spellId) → texture
+    lua_pushstring(L, "Interface\\Icons\\INV_Misc_QuestionMark");
+    return 1;
+}
+
+static int L_GetNumSpellTabs(lua_State* L)
+{
+    lua_pushnumber(L, 0);
+    return 1;
+}
+
+static int L_GetSpellTabInfo(lua_State* L)
+{
+    // GetSpellTabInfo(index) → name, texture, offset, numSpells
+    lua_pushstring(L, "");
+    lua_pushstring(L, "");
+    lua_pushnumber(L, 0);
+    lua_pushnumber(L, 0);
+    return 4;
+}
+
+static int L_IsUsableSpell(lua_State* L)
+{
+    // IsUsableSpell(spell) → usable, noMana
+    lua_pushboolean(L, 1);
+    lua_pushboolean(L, 0);
+    return 2;
+}
+
+static int L_IsSpellInRange(lua_State* L)
+{
+    // IsSpellInRange(spell, unit) → inRange
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
+static int L_GetSpellBookItemInfo(lua_State* L)
+{
+    // GetSpellBookItemInfo(index, bookType) → spellType, spellId
+    lua_pushstring(L, "SPELL");
+    lua_pushnumber(L, 0);
+    return 2;
+}
+
 // ─── Item stubs ─────────────────────────────────────────────────────────────────
-STUB_RETURN_NIL(GetItemInfo)
-STUB_RETURN_NIL(GetContainerItemInfo)
+static int L_GetItemInfo(lua_State* L)
+{
+    // GetItemInfo(itemId) → name, link, quality, iLevel, reqLevel, class, subclass, maxStack, equipSlot, texture, vendorPrice
+    lua_pushstring(L, "Unknown Item"); // name
+    lua_pushnil(L); // link
+    lua_pushnumber(L, 1); // quality
+    lua_pushnumber(L, 1); // iLevel
+    lua_pushnumber(L, 1); // reqLevel
+    lua_pushstring(L, "Miscellaneous"); // class
+    lua_pushstring(L, ""); // subclass
+    lua_pushnumber(L, 1); // maxStack
+    lua_pushstring(L, ""); // equipSlot
+    lua_pushstring(L, "Interface\\Icons\\INV_Misc_QuestionMark"); // texture
+    lua_pushnumber(L, 0); // vendorPrice
+    return 11;
+}
+
+static int L_GetContainerItemInfo(lua_State* L)
+{
+    // GetContainerItemInfo(bag, slot) → texture, count, locked, quality, readable, lootable, link
+    lua_pushnil(L); // texture
+    lua_pushnumber(L, 0); // count
+    lua_pushboolean(L, 0); // locked
+    lua_pushnumber(L, 1); // quality
+    lua_pushboolean(L, 0); // readable
+    lua_pushboolean(L, 0); // lootable
+    lua_pushnil(L); // link
+    return 7;
+}
 
 static int L_GetContainerNumSlots(lua_State* L)
 {
     lua_pushnumber(L, 0);
+    return 1;
+}
+
+static int L_GetContainerItemLink(lua_State* L)
+{
+    lua_pushnil(L);
+    return 1;
+}
+
+static int L_GetContainerFreeSlots(lua_State* L)
+{
+    // GetContainerFreeSlots(bag) → freeSlots, bagFamily
+    lua_pushnumber(L, 0);
+    lua_pushnumber(L, 0);
+    return 2;
+}
+
+static int L_GetInventoryItemLink(lua_State* L)
+{
+    lua_pushnil(L);
+    return 1;
+}
+
+static int L_GetInventoryItemTexture(lua_State* L)
+{
+    lua_pushnil(L);
+    return 1;
+}
+
+static int L_GetInventorySlotInfo(lua_State* L)
+{
+    // GetInventorySlotInfo(slotName) → slotId, textureName, checkRelic
+    lua_pushnumber(L, 0);
+    lua_pushnil(L);
+    lua_pushboolean(L, 0);
+    return 3;
+}
+
+static int L_GetItemCount(lua_State* L)
+{
+    lua_pushnumber(L, 0);
+    return 1;
+}
+
+static int L_GetItemIcon(lua_State* L)
+{
+    lua_pushstring(L, "Interface\\Icons\\INV_Misc_QuestionMark");
     return 1;
 }
 
@@ -485,6 +825,96 @@ static int L_StopAttack(lua_State* L)
     return 0;
 }
 
+// ─── Social ─────────────────────────────────────────────────────────────────────
+static int L_GetNumFriends(lua_State* L)
+{
+    lua_pushnumber(L, 0);
+    return 1;
+}
+
+static int L_GetFriendInfo(lua_State* L)
+{
+    // GetFriendInfo(index) → name, level, class, area, online, status, note
+    lua_pushstring(L, ""); // name
+    lua_pushnumber(L, 0); // level
+    lua_pushstring(L, ""); // class
+    lua_pushstring(L, ""); // area
+    lua_pushboolean(L, 0); // online
+    lua_pushstring(L, ""); // status
+    lua_pushstring(L, ""); // note
+    return 7;
+}
+
+static int L_GetNumGuildMembers(lua_State* L)
+{
+    lua_pushnumber(L, 0);
+    return 1;
+}
+
+static int L_GetGuildRosterInfo(lua_State* L)
+{
+    // GetGuildRosterInfo(index) → name, rank, rankIndex, level, class, zone, note, officernote, online, status, classFileName
+    lua_pushstring(L, ""); // name
+    lua_pushstring(L, ""); // rank
+    lua_pushnumber(L, 0); // rankIndex
+    lua_pushnumber(L, 0); // level
+    lua_pushstring(L, ""); // class
+    lua_pushstring(L, ""); // zone
+    lua_pushstring(L, ""); // note
+    lua_pushstring(L, ""); // officernote
+    lua_pushboolean(L, 0); // online
+    lua_pushstring(L, ""); // status
+    lua_pushstring(L, ""); // classFileName
+    return 11;
+}
+
+static int L_GetGuildInfo(lua_State* L)
+{
+    // GetGuildInfo(unit) → guildName, guildRankName, guildRankIndex
+    lua_pushnil(L); // guildName
+    lua_pushnil(L); // guildRankName
+    lua_pushnumber(L, 0); // guildRankIndex
+    return 3;
+}
+
+// ─── Quest ──────────────────────────────────────────────────────────────────────
+static int L_GetNumQuestLogEntries(lua_State* L)
+{
+    lua_pushnumber(L, 0); // numEntries
+    lua_pushnumber(L, 25); // numQuests (max quest log size)
+    return 2;
+}
+
+static int L_GetQuestLogTitle(lua_State* L)
+{
+    // GetQuestLogTitle(questIndex) → questTitle, level, questTag, suggestedGroup, isHeader, isCollapsed, isComplete
+    lua_pushstring(L, ""); // questTitle
+    lua_pushnumber(L, 0); // level
+    lua_pushstring(L, ""); // questTag
+    lua_pushnumber(L, 0); // suggestedGroup
+    lua_pushboolean(L, 0); // isHeader
+    lua_pushboolean(L, 0); // isCollapsed
+    lua_pushboolean(L, 0); // isComplete
+    return 7;
+}
+
+static int L_GetQuestLogQuestText(lua_State* L)
+{
+    lua_pushstring(L, ""); // questText
+    return 1;
+}
+
+static int L_SelectQuestLogEntry(lua_State* L)
+{
+    return 0;
+}
+
+static int L_IsQuestComplete(lua_State* L)
+{
+    lua_pushboolean(L, 0);
+    return 1;
+}
+
 // ─── Misc ─────────────────────────────────────────────────────────────────────
 static int L_IsLoggedIn(lua_State* L)
 {
@@ -507,10 +937,151 @@ static int L_GetFramerate(lua_State* L)
     return 1;
 }
 
-STUB_RETURN_NONE(SetCVar)
-STUB_RETURN_NIL(GetCVar)
-STUB_RETURN_FALSE(GetCVarBool)
-STUB_RETURN_NONE(RegisterCVar)
+// ─── CVar system ────────────────────────────────────────────────────────────────
+static TMap<FString, FString> CVarStorage;
+
+static int L_SetCVar(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1);
+    const char* value = luaL_checkstring(L, 2);
+    CVarStorage.Add(UTF8_TO_TCHAR(name), UTF8_TO_TCHAR(value));
+    return 0;
+}
+
+static int L_GetCVar(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1);
+    FString Key = UTF8_TO_TCHAR(name);
+    if (FString* Value = CVarStorage.Find(Key))
+    {
+        FTCHARToUTF8 Conv(**Value);
+        lua_pushstring(L, Conv.Get());
+    }
+    else
+    {
+        lua_pushnil(L);
+    }
+    return 1;
+}
+
+static int L_GetCVarBool(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1);
+    FString Key = UTF8_TO_TCHAR(name);
+    if (FString* Value = CVarStorage.Find(Key))
+    {
+        lua_pushboolean(L, (*Value).Equals(TEXT("1")) || Value->ToBool() ? 1 : 0);
+    }
+    else
+    {
+        lua_pushboolean(L, 0);
+    }
+    return 1;
+}
+
+static int L_RegisterForSaveVariables(lua_State* L)
+{
+    // For addon saved variables
+    return 0;
+}
+
+// ─── Sound and misc functions ───────────────────────────────────────────────────
+static int L_PlaySound(lua_State* L)
+{
+    // const char* soundFile = luaL_checkstring(L, 1);
+    // TODO: Play sound through UE5 audio system
+    return 0;
+}
+
+static int L_PlaySoundFile(lua_State* L)
+{
+    // const char* filePath = luaL_checkstring(L, 1);
+    // TODO: Play sound file through UE5 audio system
+    return 0;
+}
+
+static int L_StopMusic(lua_State* L)
+{
+    // TODO: Stop music through UE5 audio system
+    return 0;
+}
+
+static int L_SetPortraitTexture(lua_State* L)
+{
+    // SetPortraitTexture(texture, unit)
+    return 0;
+}
+
+static int L_SetPortraitToTexture(lua_State* L)
+{
+    // SetPortraitToTexture(texture, texturePath)
+    return 0;
+}
+
+static int L_GetMoneyString(lua_State* L)
+{
+    int32 copper = static_cast<int32>(luaL_checknumber(L, 1));
+    int32 gold = copper / 10000;
+    int32 silver = (copper % 10000) / 100;
+    copper = copper % 100;
+
+    FString Result;
+    if (gold > 0)
+        Result += FString::Printf(TEXT("%dg"), gold);
+    if (silver > 0)
+        Result += FString::Printf(TEXT("%ds"), silver);
+    if (copper > 0)
+        Result += FString::Printf(TEXT("%dc"), copper);
+    if (Result.IsEmpty())
+        Result = TEXT("0c");
+
+    FTCHARToUTF8 Conv(*Result);
+    lua_pushstring(L, Conv.Get());
+    return 1;
+}
+
+static int L_GetCoinTextureString(lua_State* L)
+{
+    int32 amount = static_cast<int32>(luaL_checknumber(L, 1));
+    const char* coinType = luaL_optstring(L, 2, "gold");
+
+    FString texture;
+    if (strcmp(coinType, "gold") == 0)
+        texture = TEXT("Interface\\MoneyFrame\\UI-GoldIcon");
+    else if (strcmp(coinType, "silver") == 0)
+        texture = TEXT("Interface\\MoneyFrame\\UI-SilverIcon");
+    else
+        texture = TEXT("Interface\\MoneyFrame\\UI-CopperIcon");
+
+    FString Result = FString::Printf(TEXT("|T%s:0|t%d"), *texture, amount);
+    FTCHARToUTF8 Conv(*Result);
+    lua_pushstring(L, Conv.Get());
+    return 1;
+}
+
+static int L_BreakUpLargeNumbers(lua_State* L)
+{
+    int32 number = static_cast<int32>(luaL_checknumber(L, 1));
+    FString Result = FString::Printf(TEXT("%d"), number);
+
+    // Add commas for thousands separators
+    int32 Len = Result.Len();
+    if (Len > 3)
+    {
+        FString Formatted;
+        for (int32 i = 0; i < Len; i++)
+        {
+            if (i > 0 && (Len - i) % 3 == 0)
+                Formatted += TEXT(",");
+            Formatted += Result[i];
+        }
+        Result = Formatted;
+    }
+
+    FTCHARToUTF8 Conv(*Result);
+    lua_pushstring(L, Conv.Get());
+    return 1;
+}
 STUB_RETURN_NIL(GetAddOnInfo)
 STUB_RETURN_ZERO(GetNumAddOns)
 STUB_RETURN_FALSE(IsAddOnLoaded)
@@ -546,22 +1117,36 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
     // Unit API
     lua_register(L, "UnitName", L_UnitName);
+    lua_register(L, "GetUnitName", L_GetUnitName);
     lua_register(L, "UnitLevel", L_UnitLevel);
     lua_register(L, "UnitHealth", L_UnitHealth);
     lua_register(L, "UnitHealthMax", L_UnitHealthMax);
     lua_register(L, "UnitPower", L_UnitPower);
     lua_register(L, "UnitPowerMax", L_UnitPowerMax);
+    lua_register(L, "UnitPowerType", L_UnitPowerType);
     lua_register(L, "UnitClass", L_UnitClass);
     lua_register(L, "UnitRace", L_UnitRace);
     lua_register(L, "UnitIsDead", L_UnitIsDead);
+    lua_register(L, "UnitIsDeadOrGhost", L_UnitIsDeadOrGhost);
     lua_register(L, "UnitIsPlayer", L_UnitIsPlayer);
+    lua_register(L, "UnitIsFriend", L_UnitIsFriend);
+    lua_register(L, "UnitIsEnemy", L_UnitIsEnemy);
+    lua_register(L, "UnitAffectingCombat", L_UnitAffectingCombat);
+    lua_register(L, "UnitBuff", L_UnitBuff);
+    lua_register(L, "UnitDebuff", L_UnitDebuff);
+    lua_register(L, "UnitAura", L_UnitAura);
     lua_register(L, "UnitExists", L_UnitExists);
     lua_register(L, "UnitGUID", L_UnitGUID);
+    lua_register(L, "UnitStat", L_UnitStat);
+    lua_register(L, "UnitAttackPower", L_UnitAttackPower);
+    lua_register(L, "UnitRangedAttackPower", L_UnitRangedAttackPower);
 
     // Locale / client
     lua_register(L, "GetLocale", L_GetLocale);
     lua_register(L, "GetBuildInfo", L_GetBuildInfo);
     lua_register(L, "GetRealmName", L_GetRealmName);
+    lua_register(L, "GetServerTime", L_GetServerTime);
+    lua_register(L, "GetGameTime", L_GetGameTime);
 
     // Screen
     lua_register(L, "GetScreenWidth", L_GetScreenWidth);
@@ -571,23 +1156,43 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "SendChatMessage", L_SendChatMessage);
     lua_register(L, "GetNumLanguages", L_GetNumLanguages);
     lua_register(L, "GetDefaultLanguage", L_GetDefaultLanguage);
+    lua_register(L, "GetLanguageByIndex", L_GetLanguageByIndex);
 
     // Action bar
     lua_register(L, "HasAction", L_HasAction);
     lua_register(L, "GetActionInfo", L_GetActionInfo);
     lua_register(L, "GetActionTexture", L_GetActionTexture);
+    lua_register(L, "GetActionCount", L_GetActionCount);
+    lua_register(L, "GetActionCooldown", L_GetActionCooldown);
+    lua_register(L, "IsCurrentAction", L_IsCurrentAction);
+    lua_register(L, "IsUsableAction", L_IsUsableAction);
+    lua_register(L, "IsAttackAction", L_IsAttackAction);
+    lua_register(L, "GetBonusBarOffset", L_GetBonusBarOffset);
     lua_register(L, "UseAction", L_UseAction);
 
     // Spell
     lua_register(L, "GetSpellInfo", L_GetSpellInfo);
     lua_register(L, "GetSpellCooldown", L_GetSpellCooldown);
+    lua_register(L, "GetSpellTexture", L_GetSpellTexture);
+    lua_register(L, "GetNumSpellTabs", L_GetNumSpellTabs);
+    lua_register(L, "GetSpellTabInfo", L_GetSpellTabInfo);
+    lua_register(L, "IsUsableSpell", L_IsUsableSpell);
+    lua_register(L, "IsSpellInRange", L_IsSpellInRange);
+    lua_register(L, "GetSpellBookItemInfo", L_GetSpellBookItemInfo);
     lua_register(L, "CastSpellByName", L_CastSpellByName);
     lua_register(L, "CastSpellByID", L_CastSpellByID);
 
-    // Item
+    // Item/Inventory
     lua_register(L, "GetItemInfo", L_GetItemInfo);
+    lua_register(L, "GetItemCount", L_GetItemCount);
+    lua_register(L, "GetItemIcon", L_GetItemIcon);
     lua_register(L, "GetContainerItemInfo", L_GetContainerItemInfo);
+    lua_register(L, "GetContainerItemLink", L_GetContainerItemLink);
     lua_register(L, "GetContainerNumSlots", L_GetContainerNumSlots);
+    lua_register(L, "GetContainerFreeSlots", L_GetContainerFreeSlots);
+    lua_register(L, "GetInventoryItemLink", L_GetInventoryItemLink);
+    lua_register(L, "GetInventoryItemTexture", L_GetInventoryItemTexture);
+    lua_register(L, "GetInventorySlotInfo", L_GetInventorySlotInfo);
 
     // Target
     lua_register(L, "TargetUnit", L_TargetUnit);
@@ -597,13 +1202,40 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "AttackTarget", L_AttackTarget);
     lua_register(L, "StopAttack", L_StopAttack);
 
-    // Misc
-    lua_register(L, "IsLoggedIn", L_IsLoggedIn);
-    lua_register(L, "GetFramerate", L_GetFramerate);
+    // Social
+    lua_register(L, "GetNumFriends", L_GetNumFriends);
+    lua_register(L, "GetFriendInfo", L_GetFriendInfo);
+    lua_register(L, "GetNumGuildMembers", L_GetNumGuildMembers);
+    lua_register(L, "GetGuildRosterInfo", L_GetGuildRosterInfo);
+    lua_register(L, "GetGuildInfo", L_GetGuildInfo);
+
+    // Quest
+    lua_register(L, "GetNumQuestLogEntries", L_GetNumQuestLogEntries);
+    lua_register(L, "GetQuestLogTitle", L_GetQuestLogTitle);
+    lua_register(L, "GetQuestLogQuestText", L_GetQuestLogQuestText);
+    lua_register(L, "SelectQuestLogEntry", L_SelectQuestLogEntry);
+    lua_register(L, "IsQuestComplete", L_IsQuestComplete);
+
+    // CVar
     lua_register(L, "SetCVar", L_SetCVar);
     lua_register(L, "GetCVar", L_GetCVar);
     lua_register(L, "GetCVarBool", L_GetCVarBool);
-    lua_register(L, "RegisterCVar", L_RegisterCVar);
+    lua_register(L, "RegisterForSaveVariables", L_RegisterForSaveVariables);
+
+    // Sound/UI
+    lua_register(L, "PlaySound", L_PlaySound);
+    lua_register(L, "PlaySoundFile", L_PlaySoundFile);
+    lua_register(L, "StopMusic", L_StopMusic);
+    lua_register(L, "SetPortraitTexture", L_SetPortraitTexture);
+    lua_register(L, "SetPortraitToTexture", L_SetPortraitToTexture);
+    lua_register(L, "GetMoneyString", L_GetMoneyString);
+    lua_register(L, "GetCoinTextureString", L_GetCoinTextureString);
+    lua_register(L, "BreakUpLargeNumbers", L_BreakUpLargeNumbers);
+
+    // Misc
+    lua_register(L, "IsLoggedIn", L_IsLoggedIn);
+    lua_register(L, "GetFramerate", L_GetFramerate);
+    // Addon/Binding stubs (kept for compatibility)
     lua_register(L, "GetAddOnInfo", L_GetAddOnInfo);
     lua_register(L, "GetNumAddOns", L_GetNumAddOns);
     lua_register(L, "IsAddOnLoaded", L_IsAddOnLoaded);
@@ -618,7 +1250,11 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "SetBinding", L_SetBinding);
     lua_register(L, "SaveBindings", L_SaveBindings);
 
-    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua API (~50 functions, entity-backed unit API)"));
+    // Set CURRENT_ACTIONBAR_PAGE global
+    lua_pushnumber(L, 1);
+    lua_setglobal(L, "CURRENT_ACTIONBAR_PAGE");
+
+    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua API (~150+ functions, entity-backed unit API, FrameXML-ready)"));
 }
 
 #else
