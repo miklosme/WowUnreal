@@ -547,12 +547,11 @@ void AWowLoginController::FinalizeWorldEntry()
                 Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y, Pawn->GetActorLocation().Z);
         }
 
-        // WoW shows cursor at all times — right-drag to orbit camera
+        // WoW shows cursor at all times — game gets all input, cursor stays visible
         GPC->bShowMouseCursor = true;
-        FInputModeGameAndUI InputMode;
-        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockInFullscreen);
-        InputMode.SetHideCursorDuringCapture(false);
-        GPC->SetInputMode(InputMode);
+        GPC->bEnableClickEvents = true;
+        GPC->bEnableMouseOverEvents = true;
+        GPC->SetInputMode(FInputModeGameOnly());
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));

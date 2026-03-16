@@ -568,8 +568,15 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 			{
 				switch (EquipItem.InventoryType)
 				{
-				case 5:  // Chest/Robe
+				case 4:  // Shirt
+					Params.BodyEquipment.ShirtDisplayId = EquipItem.DisplayId;
+					break;
+				case 5:  // Chest
+				case 20: // Robe (renders same as chest)
 					Params.BodyEquipment.ChestDisplayId = EquipItem.DisplayId;
+					break;
+				case 6:  // Waist/Belt
+					Params.BodyEquipment.BeltDisplayId = EquipItem.DisplayId;
 					break;
 				case 7:  // Legs/Pants
 					Params.BodyEquipment.PantsDisplayId = EquipItem.DisplayId;
@@ -577,22 +584,32 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 				case 8:  // Feet/Boots
 					Params.BodyEquipment.BootsDisplayId = EquipItem.DisplayId;
 					break;
-				case 10: // Hands/Gloves
-					Params.BodyEquipment.GlovesDisplayId = EquipItem.DisplayId;
-					break;
 				case 9:  // Wrists/Bracers
 					Params.BodyEquipment.BracersDisplayId = EquipItem.DisplayId;
 					break;
-				case 4:  // Shirt
-					Params.BodyEquipment.ShirtDisplayId = EquipItem.DisplayId;
+				case 10: // Hands/Gloves
+					Params.BodyEquipment.GlovesDisplayId = EquipItem.DisplayId;
 					break;
 				case 19: // Tabard
 					Params.BodyEquipment.TabardDisplayId = EquipItem.DisplayId;
 					break;
-				case 6:  // Waist/Belt
-					Params.BodyEquipment.BeltDisplayId = EquipItem.DisplayId;
+				case 13: // One-hand weapon
+				case 15: // Ranged bow/gun
+				case 17: // Two-hand weapon
+				case 21: // Main hand
+				case 22: // Off hand
+				case 26: // Ranged wand/thrown
+				{
+					FWowCharacterBuilder::FEquipmentSlot Slot;
+					Slot.ItemDisplayId = EquipItem.DisplayId;
+					Slot.AttachPoint = (EquipItem.InventoryType == 22)
+						? FWowEquipmentManager::EAttachmentPoint::LeftHand
+						: FWowEquipmentManager::EAttachmentPoint::RightHand;
+					Params.Equipment.Add(Slot);
 					break;
 				}
+				}
+				UE_LOG(LogWowPlayerChar, Log, TEXT("  Equip slot: invType=%d displayId=%d"), EquipItem.InventoryType, EquipItem.DisplayId);
 			}
 		}
 	}
