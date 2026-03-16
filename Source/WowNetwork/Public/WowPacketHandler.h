@@ -15,6 +15,8 @@ DECLARE_MULTICAST_DELEGATE(FOnTalentsUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnFriendListUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGuildRosterUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGroupUpdated);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlayerNameReceived, uint64 /*Guid*/, const FString& /*Name*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnCreatureNameReceived, uint32 /*Entry*/, const FString& /*Name*/, const FString& /*Title*/);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -109,6 +111,16 @@ public:
     /** Known talents */
     TArray<FWowTalentInfo> Talents;
 
+    /** Action bar data (144 slots, first 12 are main action bar) */
+    TArray<uint32> ActionButtons;
+
+    /** Player name cache */
+    TMap<uint64, FString> PlayerNameCache;
+
+    /** Creature name cache */
+    TMap<uint32, FString> CreatureNameCache;
+    TMap<uint32, FString> CreatureTitleCache;
+
     /** ── Social System ──────────────────────────────────────────────────── */
     /** Friends list */
     TArray<FWowFriendInfo> FriendsList;
@@ -131,6 +143,8 @@ public:
     FOnFriendListUpdated OnFriendListUpdated;
     FOnGuildRosterUpdated OnGuildRosterUpdated;
     FOnGroupUpdated OnGroupUpdated;
+    FOnPlayerNameReceived OnPlayerNameReceived;
+    FOnCreatureNameReceived OnCreatureNameReceived;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
@@ -186,6 +200,8 @@ private:
     void HandleGroupList(FPacketReader& R);
     void HandlePartyCommandResult(FPacketReader& R);
     void HandleWho(FPacketReader& R);
+    void HandleNameQueryResponse(FPacketReader& R);
+    void HandleCreatureQueryResponse(FPacketReader& R);
 
     // Internal parsing
     void ParseUpdateBlock(FPacketReader& R);

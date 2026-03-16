@@ -50,6 +50,10 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_PARTY_COMMAND_RESULT,     &FWowPacketHandler::HandlePartyCommandResult);
     Handlers.Add(WowOpcode::SMSG_WHO,                      &FWowPacketHandler::HandleWho);
 
+    // ── Name query handlers ─────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_NAME_QUERY_RESPONSE,      &FWowPacketHandler::HandleNameQueryResponse);
+    Handlers.Add(WowOpcode::SMSG_CREATURE_QUERY_RESPONSE,  &FWowPacketHandler::HandleCreatureQueryResponse);
+
     // Movement handlers — all use the same parser
     for (uint16 Op = WowOpcode::MSG_MOVE_START_FORWARD; Op <= WowOpcode::MSG_MOVE_SET_PITCH; ++Op)
     {
@@ -590,10 +594,14 @@ void FWowPacketHandler::HandleActionButtons(FPacketReader& R)
     // 144 action buttons × 4 bytes each = 576 bytes
     int32 ButtonCount = FMath::Min(R.Remaining() / 4, 144);
 
+    ActionButtons.Empty(ButtonCount);
+    ActionButtons.AddZeroed(ButtonCount);
+
     int32 NonEmpty = 0;
     for (int32 i = 0; i < ButtonCount; ++i)
     {
         uint32 PackedAction = R.ReadU32();
+        ActionButtons[i] = PackedAction;
         if (PackedAction != 0) NonEmpty++;
     }
 
@@ -1485,4 +1493,60 @@ void FWowPacketHandler::HandleRemovedSpell(FPacketReader& R)
     KnownSpells.Remove(SpellId);
 
     UE_LOG(LogWowPacket, Log, TEXT("REMOVED_SPELL: spell=%u"), SpellId);
+}
+
+// ── SMSG_NAME_QUERY_RESPONSE ─────────────────────────────────────────────────
+// packedGUID, uint8 found, if found: string name, string realmName, uint8 race, uint8 gender, uint8 class
+
+void FWowPacketHandler::HandleNameQueryResponse(FPacketReader& R)
+{
+    uint64 Guid = R.ReadPackedGuid();
+    uint8 Found = R.ReadU8();
+
+    if (Found)
+    {
+        FString Name = R.ReadCString();
+        FString RealmName = R.ReadCString();
+        uint8 Race = R.ReadU8();
+        uint8 Gender = R.ReadU8();
+        uint8 Class = R.ReadU8();
+
+        PlayerNameCache.Add(Guid, Name);
+
+        UE_LOG(LogWowPacket, Log, TEXT("NAME_QUERY_RESPONSE: GUID=%llu, Name=%s, Realm=%s"),
+            Guid, *Name, *RealmName);
+
+        OnPlayerNameReceived.Broadcast(Guid, Name);
+    }
+    else
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("NAME_QUERY_RESPONSE: GUID=%llu not found"), Guid);
+    }
+}
+
+// ── SMSG_CREATURE_QUERY_RESPONSE ─────────────────────────────────────────────────
+// uint32 entry, string name, string subName, string iconName, uint32 typeFlags,
+// uint32 creatureType, uint32 creatureFamily, uint32 rank, uint32 killCredit[2],
+// uint32 displayId[4], float hpMod, float manaMod, uint8 racialLeader
+
+void FWowPacketHandler::HandleCreatureQueryResponse(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 Entry = R.ReadU32();
+    FString Name = R.ReadCString();
+    FString Title = R.ReadCString(); // SubName
+
+    if (!Name.IsEmpty())
+    {
+        CreatureNameCache.Add(Entry, Name);
+        CreatureTitleCache.Add(Entry, Title);
+
+        UE_LOG(LogWowPacket, Log, TEXT("CREATURE_QUERY_RESPONSE: Entry=%u, Name=%s, Title=%s"),
+            Entry, *Name, *Title);
+
+        OnCreatureNameReceived.Broadcast(Entry, Name, Title);
+    }
+
+    // Skip the rest of the packet (icon name, type flags, etc.)
 }

@@ -8,9 +8,12 @@
 #include "WowEventSystem.h"
 #include "WowWorldManager.h"
 #include "WowCharacterBuilder.h"
+#include "UI/SWowActionBar.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
+#include "Widgets/SViewport.h"
+#include "Engine/GameViewportClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
@@ -39,6 +42,20 @@ void AWowGameplayController::SetupInputComponent()
 	// Left click for targeting
 	InputComponent->BindAction(TEXT("LeftClick"), IE_Released, this, &AWowGameplayController::OnLeftClick);
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &AWowGameplayController::OnLeftClick);
+
+	// Action bar keybinds
+	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &AWowGameplayController::OnActionSlot1);
+	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &AWowGameplayController::OnActionSlot2);
+	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &AWowGameplayController::OnActionSlot3);
+	InputComponent->BindKey(EKeys::Four, IE_Pressed, this, &AWowGameplayController::OnActionSlot4);
+	InputComponent->BindKey(EKeys::Five, IE_Pressed, this, &AWowGameplayController::OnActionSlot5);
+	InputComponent->BindKey(EKeys::Six, IE_Pressed, this, &AWowGameplayController::OnActionSlot6);
+	InputComponent->BindKey(EKeys::Seven, IE_Pressed, this, &AWowGameplayController::OnActionSlot7);
+	InputComponent->BindKey(EKeys::Eight, IE_Pressed, this, &AWowGameplayController::OnActionSlot8);
+	InputComponent->BindKey(EKeys::Nine, IE_Pressed, this, &AWowGameplayController::OnActionSlot9);
+	InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &AWowGameplayController::OnActionSlot0);
+	InputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &AWowGameplayController::OnActionSlotMinus);
+	InputComponent->BindKey(EKeys::Equals, IE_Pressed, this, &AWowGameplayController::OnActionSlotEquals);
 }
 
 void AWowGameplayController::BindEntityEvents()
@@ -62,6 +79,21 @@ void AWowGameplayController::BindEntityEvents()
 	// Forward SMSG opcodes to UI event system
 	ConnectionManager->PacketHandler.OnOpcodeReceived.AddUObject(
 		this, &AWowGameplayController::OnOpcodeReceived);
+
+	// Listen for name query responses
+	ConnectionManager->PacketHandler.OnPlayerNameReceived.AddUObject(
+		this, &AWowGameplayController::OnPlayerNameReceived);
+	ConnectionManager->PacketHandler.OnCreatureNameReceived.AddUObject(
+		this, &AWowGameplayController::OnCreatureNameReceived);
+
+	// Listen for action button updates to refresh action bar
+	ConnectionManager->PacketHandler.OnOpcodeReceived.AddLambda([this](uint16 Opcode)
+	{
+		if (Opcode == WowOpcode::SMSG_ACTION_BUTTONS && ActionBarWidget.IsValid())
+		{
+			ActionBarWidget->RefreshActionButtons();
+		}
+	});
 
 	// Cache UIManager for tick dispatch
 	if (UGameInstance* GI = GetGameInstance())
@@ -124,6 +156,9 @@ void AWowGameplayController::ApplyDeferredSpawn_Internal(const FVector& SpawnPos
 
 	bHasServerPosition = true;
 	LastServerPosition = SpawnPos;
+
+	// Create action bar widget when entering the world
+	CreateActionBarWidget();
 }
 
 void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
@@ -306,6 +341,24 @@ void AWowGameplayController::OnEntityCreated(const FWowEntity& Entity)
 	// Skip local player — they already have a pawn
 	if (Entity.Guid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) return;
 
+	// Query names for newly created entities
+	if (Entity.IsPlayer())
+	{
+		// Check if we already have the name
+		if (!ConnectionManager->PacketHandler.PlayerNameCache.Contains(Entity.Guid))
+		{
+			ConnectionManager->SendNameQuery(Entity.Guid);
+		}
+	}
+	else if (Entity.Entry > 0) // Creature or GameObject
+	{
+		// Check if we already have the creature name
+		if (!ConnectionManager->PacketHandler.CreatureNameCache.Contains(Entity.Entry))
+		{
+			ConnectionManager->SendCreatureQuery(Entity.Entry, Entity.Guid);
+		}
+	}
+
 	// Only spawn models for units and players
 	if (!Entity.IsUnit() && !Entity.IsPlayer()) return;
 
@@ -389,3 +442,62 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
 	}
 }
+
+void AWowGameplayController::CreateActionBarWidget()
+{
+	if (!ConnectionManager || ActionBarWidget.IsValid())
+	{
+		return;
+	}
+
+	// Create the action bar widget
+	ActionBarWidget = SNew(SWowActionBar)
+		.ConnectionManager(ConnectionManager);
+
+	// Add to viewport
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->AddViewportWidgetContent(
+			ActionBarWidget.ToSharedRef(),
+			60 // Z-order
+		);
+
+		// Position at bottom center
+		ActionBarWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(0.5f, 1.0f)));
+		ActionBarWidget->SetRenderTransformPivot(FVector2D(0.5f, 1.0f));
+	}
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Created action bar widget"));
+}
+
+void AWowGameplayController::CastSpellFromSlot(int32 SlotIndex)
+{
+	if (!ConnectionManager || !ConnectionManager->PacketHandler.ActionButtons.IsValidIndex(SlotIndex))
+	{
+		return;
+	}
+
+	uint32 PackedAction = ConnectionManager->PacketHandler.ActionButtons[SlotIndex];
+	uint32 ActionId = PackedAction & 0x00FFFFFF;
+	uint8 ActionType = (PackedAction >> 24) & 0xFF;
+
+	// Only handle spell actions (type 0)
+	if (ActionType == 0 && ActionId > 0)
+	{
+		ConnectionManager->SendCastSpell(ActionId);
+		UE_LOG(LogWowGameplay, Log, TEXT("Cast spell %u from slot %d (key pressed)"), ActionId, SlotIndex);
+	}
+}
+
+void AWowGameplayController::OnPlayerNameReceived(uint64 Guid, const FString& Name)
+{
+	// TODO: Update nameplate for matching entity
+	UE_LOG(LogWowGameplay, Log, TEXT("Received player name: GUID=%llu Name=%s"), Guid, *Name);
+}
+
+void AWowGameplayController::OnCreatureNameReceived(uint32 Entry, const FString& Name, const FString& Title)
+{
+	// TODO: Update nameplate for matching entities
+	UE_LOG(LogWowGameplay, Log, TEXT("Received creature name: Entry=%u Name=%s Title=%s"), Entry, *Name, *Title);
+}
+
