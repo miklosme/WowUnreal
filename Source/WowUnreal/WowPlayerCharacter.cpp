@@ -438,15 +438,31 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 	// For now, let's at least set the mesh on the existing character mesh component
 
 	// Create a temporary actor to build the character, then extract its components
-	FVector TempLocation = GetActorLocation();
+	FVector TempLocation = GetActorLocation() + FVector(0, 0, -10000); // Spawn far below to avoid visual artifacts
 	FRotator TempRotation = GetActorRotation();
 
-	AActor* TempCharacterActor = FWowCharacterBuilder::SpawnCharacterWithEquipment(
-		World, Mpq, Cache, Params, TempLocation, TempRotation);
+	AActor* TempCharacterActor = nullptr;
+
+	// Try the full equipment version first
+	if (Params.Equipment.Num() > 0 ||
+		(Params.BodyEquipment.ChestDisplayId > 0 || Params.BodyEquipment.PantsDisplayId > 0 ||
+		 Params.BodyEquipment.BootsDisplayId > 0 || Params.BodyEquipment.GlovesDisplayId > 0))
+	{
+		TempCharacterActor = FWowCharacterBuilder::SpawnCharacterWithEquipment(
+			World, Mpq, Cache, Params, TempLocation, TempRotation);
+	}
+
+	// Fallback to simple character spawn without equipment if full version fails
+	if (!TempCharacterActor)
+	{
+		UE_LOG(LogWowPlayerChar, Log, TEXT("Falling back to simple character spawn without equipment"));
+		TempCharacterActor = FWowCharacterBuilder::SpawnCharacter(
+			World, Mpq, Cache, Params.Race, Params.Gender, TempLocation, TempRotation);
+	}
 
 	if (!TempCharacterActor)
 	{
-		UE_LOG(LogWowPlayerChar, Warning, TEXT("Failed to spawn temporary character for model extraction"));
+		UE_LOG(LogWowPlayerChar, Warning, TEXT("Failed to spawn any character for model extraction"));
 		return;
 	}
 

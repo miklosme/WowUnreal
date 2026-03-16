@@ -11,6 +11,8 @@
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
@@ -140,6 +142,17 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
 			{
 				PlayerChar->ApplyServerSpeeds(Entity.Movement.RunSpeed, Entity.Movement.WalkSpeed);
+			}
+		}
+
+		// Check if this is the first time we're receiving entity data for the local player
+		// and set up character model if we haven't already
+		if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
+		{
+			// Check if the player already has a skeletal mesh set
+			if (!PlayerChar->GetMesh()->GetSkeletalMeshAsset())
+			{
+				SetupLocalPlayerCharacterModel(Entity);
 			}
 		}
 
@@ -399,7 +412,15 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 	CacheWorldResources();
 	if (!CachedMpq || !CachedAssetCache)
 	{
-		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot setup local player model - missing world resources"));
+		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot setup local player model - missing world resources. Retrying later..."));
+
+		// Try again in 1 second - the world manager might not be ready yet
+		GetWorldTimerManager().SetTimer(
+			FTimerHandle(),
+			[this, Entity]() { SetupLocalPlayerCharacterModel(Entity); },
+			1.0f,
+			false
+		);
 		return;
 	}
 
