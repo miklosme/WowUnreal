@@ -12,6 +12,7 @@ class SWowLoginWidget;
 class SWowRealmSelectWidget;
 class SWowCharacterSelectWidget;
 class SWowCharacterCreateWidget;
+class SWowLoadingScreen;
 
 UCLASS()
 class WOWUNREAL_API AWowLoginController : public AActor
@@ -37,6 +38,7 @@ private:
     UFUNCTION() void OnCharacterList(const TArray<FWowCharacterInfo>& Characters);
     UFUNCTION() void OnError(const FString& Msg);
     UFUNCTION() void OnCharCreateResult(uint8 ResultCode);
+    UFUNCTION() void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);
 
     void HandleLoginSubmit(const FString& Server, int32 Port, const FString& User, const FString& Pass);
     void HandleRealmSelected(int32 Index);
@@ -49,6 +51,9 @@ private:
     /** Initialize world systems when entering the game world */
     void InitializeWorldSystems();
 
+    /** Show loading screen for entering the world */
+    void ShowLoadingScreen(uint32 MapId);
+
     void ShowLoginScreen();
     void ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Realms);
     void ShowCharacterSelectScreen(const TArray<FWowCharacterInfo>& Characters);
@@ -60,5 +65,9 @@ private:
     TSharedPtr<SWowRealmSelectWidget> RealmSelectWidget;
     TSharedPtr<SWowCharacterSelectWidget> CharSelectWidget;
     TSharedPtr<SWowCharacterCreateWidget> CharCreateWidget;
+    TSharedPtr<SWowLoadingScreen> LoadingScreenWidget;
     TSharedPtr<SWidget> CurrentWidget;
+
+    /** Handle for login verify world delegate binding */
+    FDelegateHandle LoginVerifyWorldHandle;
 };

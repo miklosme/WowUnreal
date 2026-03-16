@@ -8,6 +8,7 @@ class UWowUIManager;
 class AWowWorldManager;
 class FMpqManager;
 class FWowAssetCache;
+class SWowCombatLog;
 struct FWowEntity;
 
 UCLASS()
@@ -34,6 +35,12 @@ public:
     /** Currently targeted entity GUID */
     UPROPERTY()
     uint64 TargetGuid = 0;
+
+    /** Add a message to the combat log */
+    void AddCombatMessage(const FString& Message, const FLinearColor& Color);
+
+    /** Combat log widget for displaying spell casts, damage, etc. */
+    TSharedPtr<SWowCombatLog> CombatLog;
 
 private:
     // Movement sync
@@ -73,4 +80,9 @@ private:
 
     FMpqManager* CachedMpq = nullptr;
     FWowAssetCache* CachedAssetCache = nullptr;
+
+    // Combat log event handlers
+    void OnSpellStart(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags, int32 CastTime);
+    void OnChatMessage(const FString& Message);
+    void OnEntityHealthChanged(const FWowEntity& Entity, int32 OldHealth, int32 NewHealth);
 };
