@@ -11,6 +11,7 @@
 #include "WowPlayerCharacter.h"
 // removed: now using SWowLoadingScreen.h
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "WowWorldManager.h"
 #include "WowAudioManager.h"
 #include "WowUIManager.h"
@@ -514,8 +515,14 @@ void AWowLoginController::FinalizeWorldEntry()
             UWorld* World = GetWorld();
             if (World && World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
             {
-                // Place pawn 100cm (1 WoW yard) above the ground
-                FVector GroundPos = Hit.ImpactPoint + FVector(0, 0, 100.0f);
+                // Place pawn's capsule bottom on the ground surface
+                // ACharacter origin is at capsule center, so offset by half-height
+                float CapsuleHalfHeight = 88.0f;
+                if (ACharacter* Char = Cast<ACharacter>(Pawn))
+                {
+                    CapsuleHalfHeight = Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+                }
+                FVector GroundPos = Hit.ImpactPoint + FVector(0, 0, CapsuleHalfHeight + 2.0f);
                 Pawn->SetActorLocation(GroundPos, false, nullptr, ETeleportType::TeleportPhysics);
                 UE_LOG(LogWowLogin, Log, TEXT("Snapped to ground: server Z=%.0f → ground Z=%.0f (hit actor: %s)"),
                     PawnPos.Z, GroundPos.Z, *Hit.GetActor()->GetName());
@@ -540,8 +547,12 @@ void AWowLoginController::FinalizeWorldEntry()
                 Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y, Pawn->GetActorLocation().Z);
         }
 
-        GPC->bShowMouseCursor = false;
-        GPC->SetInputMode(FInputModeGameOnly());
+        // WoW shows cursor at all times — right-drag to orbit camera
+        GPC->bShowMouseCursor = true;
+        FInputModeGameAndUI InputMode;
+        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::LockInFullscreen);
+        InputMode.SetHideCursorDuringCapture(false);
+        GPC->SetInputMode(InputMode);
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));

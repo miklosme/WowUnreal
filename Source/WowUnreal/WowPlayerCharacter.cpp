@@ -485,18 +485,20 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 				GetMesh()->SetMaterial(MatIdx, MainMesh->GetMaterial(MatIdx));
 			}
 
-			// Copy animation if any
-			if (MainMesh->GetAnimationMode() == EAnimationMode::AnimationSingleNode && MainMesh->GetAnimInstance())
+			// Copy animation: use SingleNode mode and play the same animation
+			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+			if (UAnimSequence* PlayingAnim = Cast<UAnimSequence>(MainMesh->AnimationData.AnimToPlay.Get()))
 			{
-				if (UAnimMontage* Montage = MainMesh->GetAnimInstance()->GetCurrentActiveMontage())
-				{
-					// For skeletal mesh components, we need to start the montage through the animation instance
-					if (UAnimInstance* AnimInst = GetMesh()->GetAnimInstance())
-					{
-						AnimInst->Montage_Play(Montage, 1.0f);
-					}
-				}
+				GetMesh()->PlayAnimation(PlayingAnim, true);
+				UE_LOG(LogWowPlayerChar, Log, TEXT("Playing animation from temp actor"));
 			}
+			else
+			{
+				UE_LOG(LogWowPlayerChar, Log, TEXT("No animation playing on temp actor mesh"));
+			}
+
+			// Position mesh so feet are at capsule bottom
+			GetMesh()->SetRelativeLocation(FVector(0, 0, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
 
 			UE_LOG(LogWowPlayerChar, Log, TEXT("Applied main character mesh to player"));
 		}
