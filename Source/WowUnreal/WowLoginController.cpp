@@ -6,6 +6,7 @@
 #include "WowCharacterCreateWidget.h"
 #include "WowCinematicManager.h"
 #include "WowCharacterPreview.h"
+#include "WowCredentialStore.h"
 #include "WowGameplayController.h"
 #include "WowWorldManager.h"
 #include "WowAudioManager.h"
@@ -73,6 +74,20 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
     case EWowSessionState::WorldHaveCharList:
         ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
         break;
+    case EWowSessionState::WorldEnteringWorld:
+        // Bind entity events BEFORE the server sends LOGIN_VERIFY_WORLD
+        // so we don't miss the spawn position
+        {
+            AWowGameplayController* GPC = Cast<AWowGameplayController>(
+                UGameplayStatics::GetPlayerController(this, 0));
+            if (GPC && !GPC->ConnectionManager)
+            {
+                GPC->ConnectionManager = ConnectionManager;
+                GPC->BindEntityEvents();
+                UE_LOG(LogWowLogin, Log, TEXT("Pre-bound ConnectionManager to GameplayController (before world entry)"));
+            }
+        }
+        break;
     case EWowSessionState::WorldInGame:
         UE_LOG(LogWowLogin, Log, TEXT("Entered world — removing login UI and initializing world"));
         if (CinematicManager)
@@ -106,6 +121,14 @@ void AWowLoginController::OnRealmList(const TArray<FWowRealmInfo>& Realms)
 void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Characters)
 {
     UE_LOG(LogWowLogin, Log, TEXT("Received %d characters"), Characters.Num());
+
+    // Auto-enter world with first character when -autologin is active
+    if (FParse::Param(FCommandLine::Get(), TEXT("autologin")) && Characters.Num() > 0)
+    {
+        UE_LOG(LogWowLogin, Log, TEXT("Autologin: entering world with '%s' (GUID %lld)"),
+            *Characters[0].Name, Characters[0].Guid);
+        HandleCharacterSelected(Characters[0].Guid);
+    }
 }
 
 void AWowLoginController::OnError(const FString& Msg)
@@ -145,12 +168,16 @@ void AWowLoginController::InitializeWorldSystems()
         WorldManager->EnableTerrainStreaming();
     }
 
-    // 2. Bind ConnectionManager to the GameplayController
+    // 2. Ensure ConnectionManager is bound to GameplayController
+    //    (may already be bound from WorldEnteringWorld state)
     if (AWowGameplayController* GPC = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
     {
-        GPC->ConnectionManager = ConnectionManager;
-        GPC->BindEntityEvents();
-        UE_LOG(LogWowLogin, Log, TEXT("Bound ConnectionManager to GameplayController"));
+        if (!GPC->ConnectionManager)
+        {
+            GPC->ConnectionManager = ConnectionManager;
+            GPC->BindEntityEvents();
+            UE_LOG(LogWowLogin, Log, TEXT("Bound ConnectionManager to GameplayController"));
+        }
     }
 
     // 3. Start AudioManager
@@ -316,8 +343,28 @@ void AWowLoginController::ShowLoginScreen()
         GEngine->GameViewport->AddViewportWidgetContent(CurrentWidget.ToSharedRef(), 100);
     }
 
+    // Prefill from saved credentials
+    UWowCredentialStore* CredStore = NewObject<UWowCredentialStore>(GetTransientPackage());
+    if (CredStore->LoadCredentials())
+    {
+        FWowCredential Cred = CredStore->GetDefaultCredential();
+        if (!Cred.Username.IsEmpty())
+        {
+            FString ServerStr = FString::Printf(TEXT("%s:%d"), *Cred.ServerAddress, Cred.AuthPort);
+            LoginWidget->SetCredentials(ServerStr, Cred.Username, Cred.Password);
+            UE_LOG(LogWowLogin, Log, TEXT("Prefilled credentials for %s@%s"), *Cred.Username, *ServerStr);
+        }
+    }
+
     // Initialize cinematics after showing the widget
     InitializeCinematics();
+
+    // Auto-submit if -autologin flag is set
+    if (FParse::Param(FCommandLine::Get(), TEXT("autologin")))
+    {
+        UE_LOG(LogWowLogin, Log, TEXT("Autologin: auto-submitting login form"));
+        LoginWidget->AutoSubmit();
+    }
 }
 
 void AWowLoginController::ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Realms)

@@ -429,6 +429,18 @@ FReply SWowLoginWidget::OnLoginClicked()
     return FReply::Handled();
 }
 
+void SWowLoginWidget::SetCredentials(const FString& Server, const FString& Username, const FString& Password)
+{
+    if (ServerBox.IsValid()) ServerBox->SetText(FText::FromString(Server));
+    if (UsernameBox.IsValid()) UsernameBox->SetText(FText::FromString(Username));
+    if (PasswordBox.IsValid()) PasswordBox->SetText(FText::FromString(Password));
+}
+
+void SWowLoginWidget::AutoSubmit()
+{
+    OnLoginClicked();
+}
+
 void SWowLoginWidget::SetStatusText(const FString& Text)
 {
     if (StatusLabel.IsValid())

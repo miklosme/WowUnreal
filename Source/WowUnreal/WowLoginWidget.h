@@ -23,6 +23,12 @@ public:
     void Construct(const FArguments& InArgs);
     void SetStatusText(const FString& Text);
 
+    /** Prefill the login fields */
+    void SetCredentials(const FString& Server, const FString& Username, const FString& Password);
+
+    /** Programmatically click the login button */
+    void AutoSubmit();
+
     /** Set the media texture for cinematic background */
     void SetCinematicTexture(UMediaTexture* InTexture);
 

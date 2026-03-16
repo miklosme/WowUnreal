@@ -160,16 +160,8 @@ void AWowViewerGameMode::BeginPlay()
     }
     else
     {
-        // Default: full world with auto-login, or login screen if no -autologin flag
-        bool bAutoLogin = FParse::Param(FCommandLine::Get(), TEXT("autologin"));
-        if (bAutoLogin)
-        {
-            SetupDefaultScene(World);
-        }
-        else
-        {
-            SetupLoginScene(World);
-        }
+        // Always go through login scene — LoginController handles autologin
+        SetupLoginScene(World);
     }
 }
 
