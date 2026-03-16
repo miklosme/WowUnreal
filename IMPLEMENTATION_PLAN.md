@@ -109,73 +109,128 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 
 ---
 
-## In Progress / Needs Fixing
+## Recently Merged (from parallel agents, 2026-03-15)
 
-### P1: Expand Lua API Coverage
-Currently ~50/1200+ functions. Needed for WoW UI to actually render:
-- [ ] Font loading (.ttf from MPQ → UFont)
-- [ ] Texture loading for UI frames (BLP → UTexture for frames)
-- [ ] Complete unit API (UnitBuff, UnitDebuff, UnitAura, etc.)
-- [ ] Action bar API (GetActionInfo, UseAction, etc.)
-- [ ] Bag/inventory API
-- [ ] Spell book API
-- [ ] Quest log API
-- [ ] Achievement/statistics API
-- [ ] Map/minimap API
-- [ ] Social/friends API
-- [ ] Guild API
-- [ ] CVar system (GetCVar, SetCVar)
+- [x] **Lua API expansion**: ~50 → 150+ functions (string, table, math, unit, spell, action bar, chat, inventory, quest, social, CVar)
+- [x] **Warden anti-cheat**: responds to all 6 packet types (module, hash, memory, page, MPQ, timing checks)
+- [x] **Teleport handling**: MSG_MOVE_TELEPORT_ACK, SMSG_TRANSFER_PENDING, SMSG_NEW_WORLD with worldport ACK
+- [x] **NPC waypoint movement**: SMSG_MONSTER_MOVE spline parsing + linear interpolation in tick
+- [x] **Nameplates**: floating name + health bar above entities (UWidgetComponent, color-coded)
+- [x] **Combat log**: scrollable color-coded widget (spells yellow, damage red, heals green)
+- [x] **Loading screen images**: MapDbc → LoadingScreens.dbc → BLP background
+- [x] **Death screen**: full overlay with "Release Spirit", health monitoring, CMSG_REPOP_REQUEST
+- [x] **WoW cursors**: loads BLP from Interface/Cursor/ (Point, Attack, Speak, etc.)
+- [x] **Tooltip system**: hover detection, entity name/level/health with WoW styling
+- [x] **M2 particle effects**: basic point light + billboard for fire/smoke emitters
 
-### P2: Visual Gameplay Features
-- [ ] Minimap rendering from terrain data
-- [ ] Nameplates (name + health bar above entities)
-- [ ] Combat log
-- [ ] Loading screen images from LoadingScreens.dbc
-- [ ] WoW mouse cursor textures
-- [ ] Tooltip system (items, spells, NPCs)
+---
 
-### P3: Gameplay Systems
-- [ ] Warden anti-cheat responses (will get kicked without)
-- [ ] Teleport handling (MSG_MOVE_TELEPORT_ACK)
-- [ ] Death/corpse run
-- [ ] Taxi/flight paths
-- [ ] Bank/mail/auction/trade
-- [ ] Battleground/arena
-- [ ] Pet system
-- [ ] Duel system
-- [ ] Group/raid UI
+## In Progress / Needs Building
 
-### P4: NPC/Creature Behavior
-- [ ] NPC movement from SMSG_MONSTER_MOVE waypoint packets
-- [ ] Creature idle/walk/run animation states
-- [ ] Player movement interpolation (smooth network sync)
+### P1: Fully Playable Character — Animation & Combat
+Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 
-### P5: Effects & Polish
-- [ ] M2 particle emitters → Niagara systems
-- [ ] Fire/smoke effects (campfires, torches)
+**Animation System (local player + networked players + NPCs):**
+- [ ] Animation state machine: idle, walk, run, jump, fall, swim, death, sit, sleep, kneel
+- [ ] Combat animations: attack (1H, 2H, bow, unarmed), parry, dodge, block
+- [ ] Spell cast animations: cast, channel, omni-cast (instant)
+- [ ] Emote animations: dance, wave, cheer, laugh, cry, etc. (AnimationData.dbc mapping)
+- [ ] Wire SMSG_EMOTE and SMSG_TEXT_EMOTE to animation playback
+- [ ] Map M2 animation IDs to UAnimSequence per-race/gender model
+- [ ] Play correct animation based on entity movement flags (walking, running, falling, swimming)
+- [ ] Networked player animations: read movement flags from UPDATE_OBJECT, play matching anims
+
+**Local Player Character Model:**
+- [ ] Spawn local player character model using race/gender from SMSG_CHAR_ENUM
+- [ ] Attach to AWowPlayerCharacter pawn (skeletal mesh on the character)
+- [ ] Apply composite texture (skin + face + hair from customization)
+- [ ] Equipment rendering on local player (weapons, armor, helmet, cape from entity fields)
+- [ ] Update equipment when UNIT_FIELD changes (equip/unequip live)
+
+**Networked Player Models:**
+- [ ] Spawn other player models by race/gender from UNIT_BYTES_0
+- [ ] Apply equipment from UPDATE_OBJECT equipment fields
+- [ ] Name query: send CMSG_NAME_QUERY for unknown player GUIDs, cache responses
+- [ ] Show player name on nameplate (from name query response)
+
+**NPC/Creature Models:**
+- [ ] Spawn NPC by DisplayId (already works)
+- [ ] Name query: send CMSG_CREATURE_QUERY, cache creature name/title
+- [ ] Show NPC name + title on nameplate
+- [ ] NPC scale from CreatureDisplayInfo.dbc
+
+**Combat — Attacking & Spells:**
+- [ ] Right-click to auto-attack targeted enemy (CMSG_ATTACKSWING)
+- [ ] Stop auto-attack (CMSG_ATTACKSTOP)
+- [ ] Cast spell by ID (CMSG_CAST_SPELL) — wire to action bar clicks
+- [ ] Show cast bar during spell casting (from SMSG_SPELL_START CastTime)
+- [ ] Show spell impact effects (basic: flash at target location)
+- [ ] Process SMSG_ATTACKERSTATEUPDATE for damage numbers
+- [ ] Floating combat text (damage/heal numbers above entities)
+
+### P2: Action Bar & Spell Book UI
+- [ ] Action bar widget (12 slots × main bar + bonus bars)
+- [ ] Drag spells from spell book to action bar
+- [ ] Click action bar slot to cast spell
+- [ ] Cooldown sweep animation on action bar icons
+- [ ] Spell book UI (tabs per spell school)
+- [ ] Talent tree UI (read from SMSG_TALENTS_INFO)
+
+### P3: Core Gameplay Systems
+- [ ] Taxi/flight paths (SMSG_SHOWTAXINODES, taxi map UI, auto-fly along path)
+- [ ] Loot window (SMSG_LOOT_RESPONSE → show loot UI → CMSG_AUTOSTORE_LOOT_ITEM)
+- [ ] Vendor/merchant window (SMSG_LIST_INVENTORY)
+- [ ] Quest dialog (SMSG_QUESTGIVER_QUEST_DETAILS, accept/decline/complete)
+- [ ] Bank (SMSG_SHOW_BANK)
+- [ ] Mail system (SMSG_MAIL_LIST_RESULT)
+- [ ] Trade window (SMSG_TRADE_STATUS)
+- [ ] Group/party UI (invite, accept, leave, ready check)
+- [ ] Raid UI (raid frames, marks, ready check)
+- [ ] Duel system (SMSG_DUEL_REQUESTED)
+- [ ] Pet/companion system (pet bar, pet actions)
+
+### P4: Bag & Inventory
+- [ ] Bag UI (16-slot backpack + 4 equipped bags)
+- [ ] Item icons from ItemDisplayInfo.dbc → BLP
+- [ ] Item tooltips (name, stats, flavor text from item cache)
+- [ ] Equip/unequip items (CMSG_AUTOEQUIP_ITEM)
+- [ ] Item quality colors (poor/common/uncommon/rare/epic/legendary)
+- [ ] Stack splitting, item deletion
+
+### P5: Chat System
+- [ ] Chat input box with channel switching (/s /p /g /w /y /1 /2)
+- [ ] Chat window with tabs (General, Combat Log, Trade, etc.)
+- [ ] Whisper support (CMSG_MESSAGECHAT type WHISPER)
+- [ ] Channel join/leave (CMSG_JOIN_CHANNEL, CMSG_LEAVE_CHANNEL)
+- [ ] Chat link clicking (items, spells, achievements)
+
+### P6: Minimap
+- [ ] Circular minimap rendering from terrain height data
+- [ ] Player arrow (direction indicator)
+- [ ] Other player/NPC dots
+- [ ] Zone name display
+- [ ] Minimap zoom
+- [ ] Tracking icons (herbs, mining, etc. from SMSG_UPDATE_OBJECT flags)
+
+### P7: Effects & Polish
 - [ ] M2 ribbon emitters (weapon trails)
 - [ ] M2 light emitters (lanterns, spell glow)
 - [ ] WMO interior lighting from Light.dbc
-- [ ] Spell visuals (SpellVisual → SpellVisualKit chain)
-
-### P6: Terrain Polish
+- [ ] Spell visuals (SpellVisual → SpellVisualKit → effect attachment chain)
 - [ ] Custom terrain shader (reduce 256 draw calls/tile)
 - [ ] Shadow flickering fix on WMOs
-- [ ] Distance-based UV scaling
 
-### P7: Full WoW UI Boot
+### P8: Full WoW UI Boot
 - [ ] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
 - [ ] Full addon loading from Interface/AddOns/
-- [ ] Font rendering with WoW .ttf fonts
+- [ ] Font rendering with WoW .ttf fonts (in progress — P7 agent)
 - [ ] Character creation 3D preview with customization sliders
 
-### P8: 3D Login Screen Backgrounds
-Render authentic WoW login backgrounds using M2/WMO models instead of video:
-- [ ] Classic: Dark Portal scene (WMO from World/wmo/Azeroth/DarkPortal/ + effects)
-- [ ] Burning Crusade: Outland portal scene
-- [ ] Wrath of the Lich King: Sindragosa/Icecrown scene (creature/frostwyrm M2)
-- [ ] Slow-orbit camera animation per expansion
-- [ ] Login music per expansion from MPQ
+### P9: 3D Login Screen Backgrounds
+- [ ] Classic: Dark Portal (WMO + effects)
+- [ ] Burning Crusade: Outland portal
+- [ ] Wrath of the Lich King: Sindragosa/Icecrown
+- [ ] Slow-orbit camera + login music
 
 ---
 
