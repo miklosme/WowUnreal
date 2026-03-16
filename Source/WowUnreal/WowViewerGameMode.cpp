@@ -185,8 +185,13 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
             FVector::ZeroVector, FRotator::ZeroRotator, SkyParams);
     }
 
-    // World manager (full streaming)
+    // World manager (full streaming) — BeginPlay defers terrain if bStreamingEnabled=false,
+    // so we enable it immediately after spawn for the full world scene.
     AWowWorldManager* WorldManager = SpawnWorldManager(World);
+    if (WorldManager)
+    {
+        WorldManager->EnableTerrainStreaming();
+    }
 
     // Spawn audio manager
     if (WorldManager && WorldManager->GetMpqManager())
