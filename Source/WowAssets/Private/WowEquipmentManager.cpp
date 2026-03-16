@@ -255,7 +255,24 @@ bool FWowEquipmentManager::ResolveEquipmentPaths(FMpqManager* Mpq, uint32 ItemDi
 
     FString ModelFile;
     FString TextureFile;
-    if (AttachPoint == EAttachmentPoint::LeftHand || AttachPoint == EAttachmentPoint::LeftShoulder)
+
+    // Shoulder equipment model selection follows WMVx convention:
+    // - LeftShoulder uses ModelNames[0] (the right-hand model) but gets attached to left bone
+    // - RightShoulder uses ModelNames[1] (the left-hand model) but gets attached to right bone
+    // This is because WoW shoulders are mirrored - the same 3D model is used for both sides
+    if (AttachPoint == EAttachmentPoint::LeftShoulder)
+    {
+        ModelFile = DisplayInfo->ModelNames[0]; // Right-hand model for left shoulder
+        TextureFile = DisplayInfo->ModelTextures[0];
+    }
+    else if (AttachPoint == EAttachmentPoint::RightShoulder)
+    {
+        ModelFile = DisplayInfo->ModelNames[1]; // Left-hand model for right shoulder
+        TextureFile = DisplayInfo->ModelTextures[1];
+        if (ModelFile.IsEmpty()) ModelFile = DisplayInfo->ModelNames[0]; // Fallback
+        if (TextureFile.IsEmpty()) TextureFile = DisplayInfo->ModelTextures[0];
+    }
+    else if (AttachPoint == EAttachmentPoint::LeftHand)
     {
         ModelFile = DisplayInfo->ModelNames[1];
         TextureFile = DisplayInfo->ModelTextures[1];

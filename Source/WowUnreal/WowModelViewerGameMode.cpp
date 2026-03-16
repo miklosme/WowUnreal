@@ -201,9 +201,27 @@ void AWowModelViewerGameMode::RespawnCharacter()
             {FWowEquipmentManager::EAttachmentPoint::Shield},
         };
 
+        // Find body equipment with texture overlays
+        struct FBodySlotSearch
+        {
+            uint32* SlotPtr;
+            const char* SlotName;
+            uint32 FoundId = 0;
+        };
+        TArray<FBodySlotSearch> BodySlots = {
+            {&Params.BodyEquipment.ChestDisplayId, "Chest"},
+            {&Params.BodyEquipment.PantsDisplayId, "Pants"},
+            {&Params.BodyEquipment.BootsDisplayId, "Boots"},
+            {&Params.BodyEquipment.GlovesDisplayId, "Gloves"},
+            {&Params.BodyEquipment.ShirtDisplayId, "Shirt"},
+            {&Params.BodyEquipment.TabardDisplayId, "Tabard"},
+            {&Params.BodyEquipment.BeltDisplayId, "Belt"},
+        };
+
         FString ResolvedPath;
         for (const FItemDisplayInfoDbcEntry& Entry : FDbcStore::Get().ItemDisplayInfo().GetAll())
         {
+            // Check 3D equipment first
             bool bAllFound = true;
             for (auto& S : Slots)
             {
@@ -219,6 +237,31 @@ void AWowModelViewerGameMode::RespawnCharacter()
                     }
                 }
             }
+
+            // Check body equipment (items with texture overlays)
+            for (auto& BS : BodySlots)
+            {
+                if (BS.FoundId == 0)
+                {
+                    // Check if this item has texture overlays
+                    bool bHasOverlays = false;
+                    for (int32 i = 0; i < 8; ++i)
+                    {
+                        if (!Entry.TextureOverlays[i].IsEmpty())
+                        {
+                            bHasOverlays = true;
+                            break;
+                        }
+                    }
+                    if (bHasOverlays)
+                    {
+                        BS.FoundId = Entry.ID;
+                        *BS.SlotPtr = Entry.ID;
+                        UE_LOG(LogModelViewer, Log, TEXT("Found %s equipment: DisplayID=%d"), ANSI_TO_TCHAR(BS.SlotName), Entry.ID);
+                    }
+                }
+            }
+
             if (bAllFound) break;
         }
 
@@ -250,7 +293,7 @@ void AWowModelViewerGameMode::RespawnCharacter()
             }
         }
 
-        UE_LOG(LogModelViewer, Log, TEXT("Starter gear equipped: %d slots"), Params.Equipment.Num());
+        UE_LOG(LogModelViewer, Log, TEXT("Starter gear equipped: %d 3D slots + body equipment"), Params.Equipment.Num());
     }
 
     const FRotator FacingCamera(0.0f, -90.0f, 0.0f);

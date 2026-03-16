@@ -1,4 +1,5 @@
 #include "WowCharacterTexture.h"
+#include "WowCharacterBuilder.h"
 #include "WowTextureFactory.h"
 #include "WowAssetCache.h"
 #include "Mpq/MpqManager.h"
@@ -642,4 +643,123 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
         CompositeW, CompositeH, LayersComposited);
 
     return Tex;
+}
+
+void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint32 CompositeW, uint32 CompositeH,
+    const FWowCharacterBuilder::FBodyEquipment& Equipment, FMpqManager* Mpq, FWowAssetCache* Cache)
+{
+    if (!Mpq || Composite.Num() == 0) return;
+
+    const FDbcStore& Dbc = FDbcStore::Get();
+
+    // Get region coordinates (use same logic as BuildCompositeTexture)
+    TMap<uint32, FRegionCoords> RegionCoords;
+    uint32 LayoutId = 1; // Default layout for all character textures in 3.3.5
+    TArray<const FCharComponentTextureSectionsDbcEntry*> Sections = Dbc.CharComponentTextureSections().GetByLayoutId(LayoutId);
+    if (Sections.Num() > 0)
+    {
+        for (const FCharComponentTextureSectionsDbcEntry* Section : Sections)
+        {
+            RegionCoords.Add(Section->SectionType, {Section->X, Section->Y, Section->Width, Section->Height});
+        }
+    }
+    else
+    {
+        RegionCoords = GetFallbackRegions();
+    }
+
+    // Texture overlay index → Region mapping:
+    // TextureOverlays[0] → ARM_UPPER (region 0)
+    // TextureOverlays[1] → ARM_LOWER (region 1)
+    // TextureOverlays[2] → HAND (region 2)
+    // TextureOverlays[3] → TORSO_UPPER (region 3)
+    // TextureOverlays[4] → TORSO_LOWER (region 4)
+    // TextureOverlays[5] → LEG_UPPER (region 5)
+    // TextureOverlays[6] → LEG_LOWER (region 6)
+    // TextureOverlays[7] → FOOT (region 7)
+
+    auto ApplyItemOverlays = [&](uint32 DisplayId, const TArray<uint32>& RegionIndices) {
+        if (DisplayId == 0) return;
+
+        const FItemDisplayInfoDbcEntry* Item = Dbc.ItemDisplayInfo().GetById(DisplayId);
+        if (!Item) return;
+
+        for (int32 OverlayIdx = 0; OverlayIdx < 8; ++OverlayIdx)
+        {
+            if (Item->TextureOverlays[OverlayIdx].IsEmpty()) continue;
+
+            // Check if this overlay index maps to a region this item should affect
+            bool bShouldApply = false;
+            for (uint32 RegionIdx : RegionIndices)
+            {
+                if (RegionIdx == static_cast<uint32>(OverlayIdx))
+                {
+                    bShouldApply = true;
+                    break;
+                }
+            }
+            if (!bShouldApply) continue;
+
+            const FRegionCoords* Region = RegionCoords.Find(OverlayIdx);
+            if (!Region) continue;
+
+            // Build full texture path: "Item\TextureComponents\" + overlay path
+            FString TexturePath = TEXT("Item\\TextureComponents\\") + Item->TextureOverlays[OverlayIdx];
+            if (!TexturePath.EndsWith(TEXT(".blp"), ESearchCase::IgnoreCase))
+            {
+                TexturePath += TEXT(".blp");
+            }
+
+            uint32 OverlayW, OverlayH;
+            TArray<uint8> OverlayPixels = LoadBlpAsRGBA(Mpq, TexturePath, OverlayW, OverlayH);
+            if (OverlayPixels.Num() > 0)
+            {
+                PasteRegionWithAlpha(Composite, OverlayPixels, CompositeW, CompositeH,
+                    OverlayW, OverlayH, Region->X, Region->Y, Region->W, Region->H);
+
+                UE_LOG(LogWowCharTex, Log, TEXT("Applied equipment overlay[%d] for DisplayId %d: %s"),
+                    OverlayIdx, DisplayId, *TexturePath);
+            }
+        }
+    };
+
+    // CHEST/SHIRT: overlays [0]=ARM_UPPER, [1]=ARM_LOWER, [3]=TORSO_UPPER, [4]=TORSO_LOWER
+    TArray<uint32> ChestRegions = {0, 1, 3, 4};
+    ApplyItemOverlays(Equipment.ChestDisplayId, ChestRegions);
+    ApplyItemOverlays(Equipment.ShirtDisplayId, ChestRegions);
+
+    // Check if chest is a robe (affects leg regions too)
+    if (Equipment.ChestDisplayId > 0)
+    {
+        const FItemDisplayInfoDbcEntry* ChestItem = Dbc.ItemDisplayInfo().GetById(Equipment.ChestDisplayId);
+        if (ChestItem && ChestItem->GeosetGroups[2] > 0) // Robe indicator
+        {
+            TArray<uint32> RobeRegions = {0, 1, 3, 4, 5, 6}; // Include LEG_UPPER, LEG_LOWER
+            ApplyItemOverlays(Equipment.ChestDisplayId, RobeRegions);
+        }
+    }
+
+    // PANTS: overlays [5]=LEG_UPPER, [6]=LEG_LOWER
+    TArray<uint32> PantsRegions = {5, 6};
+    ApplyItemOverlays(Equipment.PantsDisplayId, PantsRegions);
+
+    // GLOVES: overlays [2]=HAND, [1]=ARM_LOWER
+    TArray<uint32> GlovesRegions = {1, 2};
+    ApplyItemOverlays(Equipment.GlovesDisplayId, GlovesRegions);
+
+    // BOOTS: overlays [6]=LEG_LOWER, [7]=FOOT
+    TArray<uint32> BootsRegions = {6, 7};
+    ApplyItemOverlays(Equipment.BootsDisplayId, BootsRegions);
+
+    // BRACERS: overlays [1]=ARM_LOWER
+    TArray<uint32> BracersRegions = {1};
+    ApplyItemOverlays(Equipment.BracersDisplayId, BracersRegions);
+
+    // BELT: overlays [4]=TORSO_LOWER, [5]=LEG_UPPER
+    TArray<uint32> BeltRegions = {4, 5};
+    ApplyItemOverlays(Equipment.BeltDisplayId, BeltRegions);
+
+    // TABARD: overlays [3]=TORSO_UPPER, [4]=TORSO_LOWER
+    TArray<uint32> TabardRegions = {3, 4};
+    ApplyItemOverlays(Equipment.TabardDisplayId, TabardRegions);
 }

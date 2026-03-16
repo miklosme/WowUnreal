@@ -361,6 +361,95 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeDefaultGeosets(const FWowChara
     return Result;
 }
 
+TMap<uint16, uint16> FWowCharacterBuilder::ComputeGeosetWithEquipment(
+    const FWowCharacterTexture::FCustomization& Customization,
+    const FBodyEquipment& BodyEquipment)
+{
+    // Start with default geosets based on customization
+    TMap<uint16, uint16> Result = ComputeDefaultGeosets(Customization);
+
+    const FDbcStore& Dbc = FDbcStore::Get();
+
+    // Apply equipment geoset changes
+    auto ApplyEquipmentGeoset = [&](uint32 DisplayId, auto GeosetModifier) {
+        if (DisplayId == 0) return;
+
+        const FItemDisplayInfoDbcEntry* Item = Dbc.ItemDisplayInfo().GetById(DisplayId);
+        if (!Item) return;
+
+        GeosetModifier(Item, Result);
+    };
+
+    // CHEST/SHIRT: group 8 (wristbands) = geosetGroup[0]
+    ApplyEquipmentGeoset(BodyEquipment.ChestDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(8, static_cast<uint16>(Item->GeosetGroups[0]));
+        }
+    });
+
+    ApplyEquipmentGeoset(BodyEquipment.ShirtDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(8, static_cast<uint16>(Item->GeosetGroups[0]));
+        }
+    });
+
+    // CHEST with robe flag: group 13 (trousers) = geosetGroup[2]
+    ApplyEquipmentGeoset(BodyEquipment.ChestDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        // Check if this is a robe (common flag check in WoW)
+        // In ItemDisplayInfo, robes typically have GeosetGroups[2] set for leg coverage
+        if (Item->GeosetGroups[2] > 0)
+        {
+            Geosets.Add(13, static_cast<uint16>(Item->GeosetGroups[2])); // trousers
+        }
+    });
+
+    // PANTS: group 9 (kneepads) = geosetGroup[1], group 13 (trousers) = geosetGroup[2]
+    ApplyEquipmentGeoset(BodyEquipment.PantsDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[1] > 0)
+        {
+            Geosets.Add(9, static_cast<uint16>(Item->GeosetGroups[1])); // kneepads
+        }
+        if (Item->GeosetGroups[2] > 0)
+        {
+            Geosets.Add(13, static_cast<uint16>(Item->GeosetGroups[2])); // trousers
+        }
+    });
+
+    // GLOVES: group 4 (gloves) = geosetGroup[0]
+    ApplyEquipmentGeoset(BodyEquipment.GlovesDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(4, static_cast<uint16>(Item->GeosetGroups[0]));
+        }
+    });
+
+    // BOOTS: group 5 (boots) = geosetGroup[0]
+    ApplyEquipmentGeoset(BodyEquipment.BootsDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(5, static_cast<uint16>(Item->GeosetGroups[0]));
+        }
+    });
+
+    // TABARD: group 12 (tabard) = 1 (always show when equipped)
+    if (BodyEquipment.TabardDisplayId > 0)
+    {
+        Result.Add(12, 1);
+    }
+
+    // CAPE: group 15 (cape) = geosetGroup[0]
+    ApplyEquipmentGeoset(BodyEquipment.CapeDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(15, static_cast<uint16>(Item->GeosetGroups[0]));
+        }
+    });
+
+    return Result;
+}
+
 void FWowCharacterBuilder::ApplyGeosetVisibility(USkeletalMeshComponent* MeshComp,
     const TArray<FGeosetSectionInfo>& GeosetInfo,
     const TMap<uint16, uint16>& VisibleGeosets)
@@ -459,8 +548,47 @@ AActor* FWowCharacterBuilder::SpawnCharacterWithEquipment(UWorld* World, FMpqMan
     // Build composite texture with full customization
     UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Params.Customization);
 
-    // Spawn base character with geoset visibility
-    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, CompositeTex, &Params.Customization);
+    // Apply equipment texture overlays if body equipment is specified
+    UTexture2D* FinalTex = CompositeTex;
+    if (CompositeTex && (Params.BodyEquipment.ChestDisplayId > 0 || Params.BodyEquipment.PantsDisplayId > 0 ||
+        Params.BodyEquipment.BootsDisplayId > 0 || Params.BodyEquipment.GlovesDisplayId > 0 ||
+        Params.BodyEquipment.BracersDisplayId > 0 || Params.BodyEquipment.ShirtDisplayId > 0 ||
+        Params.BodyEquipment.TabardDisplayId > 0 || Params.BodyEquipment.BeltDisplayId > 0))
+    {
+        // Get the composite texture data
+        FTexture2DMipMap& Mip = CompositeTex->GetPlatformData()->Mips[0];
+        void* TextureData = Mip.BulkData.Lock(LOCK_READ_WRITE);
+        if (TextureData)
+        {
+            uint32 TexWidth = CompositeTex->GetSizeX();
+            uint32 TexHeight = CompositeTex->GetSizeY();
+            uint32 TextureSize = TexWidth * TexHeight * 4; // RGBA
+
+            // Copy texture data to modifiable buffer
+            TArray<uint8> CompositeBuffer;
+            CompositeBuffer.SetNumUninitialized(TextureSize);
+            FMemory::Memcpy(CompositeBuffer.GetData(), TextureData, TextureSize);
+
+            // Apply equipment overlays
+            FWowCharacterTexture::ApplyEquipmentOverlays(CompositeBuffer, TexWidth, TexHeight,
+                Params.BodyEquipment, Mpq, Cache);
+
+            // Copy modified data back to texture
+            FMemory::Memcpy(TextureData, CompositeBuffer.GetData(), TextureSize);
+            Mip.BulkData.Unlock();
+            CompositeTex->UpdateResource();
+
+            UE_LOG(LogWowCharacter, Log, TEXT("Applied equipment texture overlays to character"));
+        }
+        else
+        {
+            Mip.BulkData.Unlock();
+        }
+        FinalTex = CompositeTex;
+    }
+
+    // Spawn base character with geoset visibility and equipment
+    AActor* Actor = SpawnM2Actor(World, Mpq, Cache, ModelPath, Location, Rotation, 1.0f, FinalTex, &Params.Customization, &Params.BodyEquipment);
     if (!Actor) return nullptr;
 
     // Attach equipment
@@ -544,7 +672,8 @@ AActor* FWowCharacterBuilder::SpawnCreatureByDisplayId(UWorld* World, FMpqManage
 
 AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
     const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale,
-    UTexture2D* OverrideTexture, const FWowCharacterTexture::FCustomization* Customization)
+    UTexture2D* OverrideTexture, const FWowCharacterTexture::FCustomization* Customization,
+    const FBodyEquipment* BodyEquipment)
 {
     if (!World || !Mpq) return nullptr;
 
@@ -625,7 +754,14 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
         TMap<uint16, uint16> VisibleGeosets;
         if (Customization)
         {
-            VisibleGeosets = ComputeDefaultGeosets(*Customization);
+            if (BodyEquipment)
+            {
+                VisibleGeosets = ComputeGeosetWithEquipment(*Customization, *BodyEquipment);
+            }
+            else
+            {
+                VisibleGeosets = ComputeDefaultGeosets(*Customization);
+            }
         }
 
         // Build BODY mesh (excludes hair sections that need different texture)
