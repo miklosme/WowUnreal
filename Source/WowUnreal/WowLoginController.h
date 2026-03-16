@@ -14,6 +14,7 @@ class SWowLoginWidget;
 class SWowRealmSelectWidget;
 class SWowCharacterSelectWidget;
 class SWowCharacterCreateWidget;
+class SWowLoadingScreen;
 
 UCLASS()
 class WOWUNREAL_API AWowLoginController : public AActor
@@ -23,6 +24,7 @@ public:
     AWowLoginController();
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void Tick(float DeltaTime) override;
 
     void StartLoginFlow();
 
@@ -56,6 +58,15 @@ private:
     /** Initialize and start cinematic playback */
     void InitializeCinematics();
 
+    /** Show the loading screen and start terrain loading around spawn */
+    void ShowLoadingScreen();
+
+    /** Called each tick while loading — checks progress and transitions to game */
+    void UpdateLoadingProgress();
+
+    /** Finalize world entry: teleport pawn, hide loading screen, enable input */
+    void FinalizeWorldEntry();
+
     void ShowLoginScreen();
     void ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Realms);
     void ShowCharacterSelectScreen(const TArray<FWowCharacterInfo>& Characters);
@@ -67,7 +78,9 @@ private:
     TSharedPtr<SWowRealmSelectWidget> RealmSelectWidget;
     TSharedPtr<SWowCharacterSelectWidget> CharSelectWidget;
     TSharedPtr<SWowCharacterCreateWidget> CharCreateWidget;
+    TSharedPtr<SWowLoadingScreen> LoadingScreenWidget;
     TSharedPtr<SWidget> CurrentWidget;
+    TSharedPtr<SWidget> LoadingWidget; // Separate from CurrentWidget so it overlays
 
     /** Cinematic manager for login screen backgrounds (owned, cleaned up in EndPlay) */
     FWowCinematicManager* CinematicManager = nullptr;
@@ -75,4 +88,10 @@ private:
     /** Character preview for 3D model display in character select */
     UPROPERTY()
     TObjectPtr<AWowCharacterPreview> CharacterPreview;
+
+    /** Loading state */
+    bool bWaitingForInitialLoad = false;
+    FVector PendingSpawnPosition = FVector::ZeroVector;
+    float PendingSpawnOrientation = 0.0f;
+    bool bHasPendingSpawn = false;
 };

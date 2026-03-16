@@ -8,6 +8,9 @@
 #include "WowCharacterPreview.h"
 #include "WowCredentialStore.h"
 #include "WowGameplayController.h"
+#include "WowPlayerCharacter.h"
+#include "WowLoadingScreen.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "WowWorldManager.h"
 #include "WowAudioManager.h"
 #include "WowUIManager.h"
@@ -19,6 +22,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowLogin, Log, All);
 
 AWowLoginController::AWowLoginController()
 {
+    PrimaryActorTick.bCanEverTick = true;
 }
 
 void AWowLoginController::BeginPlay()
@@ -75,21 +79,39 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
         ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
         break;
     case EWowSessionState::WorldEnteringWorld:
-        // Bind entity events BEFORE the server sends LOGIN_VERIFY_WORLD
-        // so we don't miss the spawn position
+        // Bind entity events and set defer flag BEFORE the server sends LOGIN_VERIFY_WORLD
+        // so we capture the spawn position without teleporting the pawn
         {
             AWowGameplayController* GPC = Cast<AWowGameplayController>(
                 UGameplayStatics::GetPlayerController(this, 0));
-            if (GPC && !GPC->ConnectionManager)
+            if (GPC)
             {
-                GPC->ConnectionManager = ConnectionManager;
-                GPC->BindEntityEvents();
-                UE_LOG(LogWowLogin, Log, TEXT("Pre-bound ConnectionManager to GameplayController (before world entry)"));
+                if (!GPC->ConnectionManager)
+                {
+                    GPC->ConnectionManager = ConnectionManager;
+                    GPC->BindEntityEvents();
+                    UE_LOG(LogWowLogin, Log, TEXT("Pre-bound ConnectionManager to GameplayController (before world entry)"));
+                }
+                // Defer teleport until terrain loads
+                GPC->bDeferSpawnTeleport = true;
+
+                // Hide pawn while loading
+                if (APawn* Pawn = GPC->GetPawn())
+                {
+                    Pawn->SetActorHiddenInGame(true);
+                    Pawn->SetActorEnableCollision(false);
+                    Pawn->SetActorLocation(FVector::ZeroVector);
+                    if (ACharacter* Char = Cast<ACharacter>(Pawn))
+                    {
+                        Char->GetCharacterMovement()->GravityScale = 0.0f;
+                        Char->GetCharacterMovement()->Velocity = FVector::ZeroVector;
+                    }
+                }
             }
         }
         break;
     case EWowSessionState::WorldInGame:
-        UE_LOG(LogWowLogin, Log, TEXT("Entered world — removing login UI and initializing world"));
+        UE_LOG(LogWowLogin, Log, TEXT("Entered world — showing loading screen"));
         if (CinematicManager)
         {
             CinematicManager->StopCinematic();
@@ -97,12 +119,8 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
             CinematicManager = nullptr;
         }
         ClearCurrentScreen();
+        ShowLoadingScreen();
         InitializeWorldSystems();
-        if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
-        {
-            PC->bShowMouseCursor = false;
-            PC->SetInputMode(FInputModeGameOnly());
-        }
         break;
     default:
         break;
@@ -286,6 +304,111 @@ void AWowLoginController::InitializeCinematics()
         CinematicManager->PlayCinematic(CurrentExp);
         UE_LOG(LogWowLogin, Log, TEXT("Playing login cinematic for expansion %d"), static_cast<int32>(CurrentExp));
     }
+}
+
+void AWowLoginController::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bWaitingForInitialLoad)
+    {
+        UpdateLoadingProgress();
+    }
+}
+
+void AWowLoginController::ShowLoadingScreen()
+{
+    // Create and show the loading screen
+    LoadingScreenWidget = SNew(SWowLoadingScreen);
+    LoadingWidget = LoadingScreenWidget;
+
+    if (GEngine && GEngine->GameViewport)
+    {
+        GEngine->GameViewport->AddViewportWidgetContent(LoadingWidget.ToSharedRef(), 200);
+    }
+
+    bWaitingForInitialLoad = true;
+    LoadingScreenWidget->SetProgress(0.0f, TEXT("Connecting to world server..."));
+}
+
+void AWowLoginController::UpdateLoadingProgress()
+{
+    if (!WorldManager) return;
+
+    AWowGameplayController* GPC = Cast<AWowGameplayController>(
+        UGameplayStatics::GetPlayerController(this, 0));
+
+    // Wait for spawn position from server
+    if (GPC && GPC->bHasDeferredSpawn && !bHasPendingSpawn)
+    {
+        bHasPendingSpawn = true;
+        PendingSpawnPosition = GPC->DeferredSpawnPos;
+        PendingSpawnOrientation = GPC->DeferredSpawnOrientation;
+
+        // Now we know where to spawn — start loading tiles there
+        WorldManager->LoadTilesAroundPosition(PendingSpawnPosition, 2);
+
+        LoadingScreenWidget->SetProgress(0.1f, TEXT("Loading terrain..."));
+        UE_LOG(LogWowLogin, Log, TEXT("Loading terrain around spawn position"));
+    }
+
+    // Update progress
+    if (bHasPendingSpawn)
+    {
+        int32 Queued = WorldManager->GetInitialTilesQueued();
+        int32 Loaded = WorldManager->GetInitialTilesLoaded();
+        float Progress = (Queued > 0) ? FMath::Clamp((float)Loaded / (float)Queued, 0.0f, 1.0f) : 0.0f;
+
+        FString StatusText = FString::Printf(TEXT("Loading terrain... (%d/%d tiles)"), Loaded, Queued);
+        if (LoadingScreenWidget.IsValid())
+        {
+            LoadingScreenWidget->SetProgress(0.1f + Progress * 0.9f, StatusText);
+        }
+
+        if (WorldManager->IsInitialLoadComplete())
+        {
+            UE_LOG(LogWowLogin, Log, TEXT("Initial terrain loaded — entering world"));
+            FinalizeWorldEntry();
+        }
+    }
+}
+
+void AWowLoginController::FinalizeWorldEntry()
+{
+    bWaitingForInitialLoad = false;
+    bHasPendingSpawn = false;
+
+    // Remove loading screen
+    if (LoadingWidget.IsValid() && GEngine && GEngine->GameViewport)
+    {
+        GEngine->GameViewport->RemoveViewportWidgetContent(LoadingWidget.ToSharedRef());
+        LoadingWidget.Reset();
+        LoadingScreenWidget.Reset();
+    }
+
+    // Teleport pawn to spawn position and reveal
+    AWowGameplayController* GPC = Cast<AWowGameplayController>(
+        UGameplayStatics::GetPlayerController(this, 0));
+    if (GPC)
+    {
+        GPC->ApplyDeferredSpawn();
+        GPC->bDeferSpawnTeleport = false;
+
+        if (APawn* Pawn = GPC->GetPawn())
+        {
+            Pawn->SetActorHiddenInGame(false);
+            Pawn->SetActorEnableCollision(true);
+            if (ACharacter* Char = Cast<ACharacter>(Pawn))
+            {
+                Char->GetCharacterMovement()->GravityScale = 1.0f;
+            }
+        }
+
+        GPC->bShowMouseCursor = false;
+        GPC->SetInputMode(FInputModeGameOnly());
+    }
+
+    UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));
 }
 
 void AWowLoginController::HandleExpansionChanged(uint8 ExpansionIndex)

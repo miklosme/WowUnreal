@@ -504,6 +504,50 @@ void AWowWorldManager::BeginPlay()
     }
 }
 
+int32 AWowWorldManager::LoadTilesAroundPosition(const FVector& UEPosition, int32 Radius)
+{
+    FIntPoint CenterTile = FWowCoordinate::WorldToTile(UEPosition);
+    int32 Queued = 0;
+
+    UE_LOG(LogWowWorld, Log, TEXT("Loading initial tiles around UE pos (%.0f, %.0f, %.0f) = tile (%d, %d), radius %d"),
+        UEPosition.X, UEPosition.Y, UEPosition.Z, CenterTile.X, CenterTile.Y, Radius);
+
+    InitialTilesQueued = 0;
+    InitialTilesLoaded = 0;
+    InitialTileKeys.Empty();
+
+    for (int32 DX = -Radius; DX <= Radius; ++DX)
+    {
+        for (int32 DY = -Radius; DY <= Radius; ++DY)
+        {
+            int32 TX = CenterTile.X + DX;
+            int32 TY = CenterTile.Y + DY;
+            if (TX >= 0 && TX < 64 && TY >= 0 && TY < 64)
+            {
+                if (WdtData && !WdtData->TileExists[TX][TY]) continue;
+                int64 Key = TileKey(TX, TY);
+                if (!IsTileLoaded(TX, TY) && !IsTilePending(TX, TY))
+                {
+                    LoadTileAsync(TX, TY);
+                    ++Queued;
+                }
+                InitialTileKeys.Add(Key);
+            }
+        }
+    }
+
+    InitialTilesQueued = InitialTileKeys.Num();
+    // Count any already-loaded tiles
+    for (int64 Key : InitialTileKeys)
+    {
+        if (LoadedTiles.Contains(Key)) ++InitialTilesLoaded;
+    }
+
+    UE_LOG(LogWowWorld, Log, TEXT("Initial load: %d tiles queued, %d already loaded, %d total tracked"),
+        Queued, InitialTilesLoaded, InitialTilesQueued);
+    return Queued;
+}
+
 void AWowWorldManager::EnableTerrainStreaming()
 {
     if (bStreamingEnabled) return; // Already enabled
@@ -771,7 +815,16 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
     {
         Tile->BuildFromAdtData(*AdtData, TX, TY, MpqManager.Get(), AssetCache.Get(), &SpawnedWmoIds);
         if (TerrainRVT) Tile->ApplyRuntimeVirtualTexture(TerrainRVT);
-        LoadedTiles.Add(TileKey(TX, TY), Tile);
+        int64 Key = TileKey(TX, TY);
+        LoadedTiles.Add(Key, Tile);
+
+        // Track initial load progress
+        if (InitialTileKeys.Contains(Key))
+        {
+            ++InitialTilesLoaded;
+            UE_LOG(LogWowWorld, Log, TEXT("Initial tile %d,%d loaded (%d/%d)"),
+                TX, TY, InitialTilesLoaded, InitialTilesQueued);
+        }
     }
 }
 

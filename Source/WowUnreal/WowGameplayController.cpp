@@ -72,15 +72,34 @@ void AWowGameplayController::BindEntityEvents()
 
 void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation)
 {
-	// Override spawn position: Northshire Abbey at safe altitude for testing
-	if (FString(FCommandLine::Get()).Contains(TEXT("startpos")))
-	{
-		X = -8949.0f; Y = -132.0f; Z = 99.0f; // 15m above terrain (84 + 15)
-		UE_LOG(LogWowGameplay, Warning, TEXT("Overriding spawn to Northshire Abbey (aerial): (%.1f, %.1f, %.1f)"), X, Y, Z);
-	}
-
 	FVector SpawnPos = FWowCoordinate::WowToUE(X, Y, Z);
 
+	UE_LOG(LogWowGameplay, Log, TEXT("LoginVerifyWorld: map=%d wow=(%.1f,%.1f,%.1f) orient=%.2f ue=(%.0f,%.0f,%.0f)"),
+		MapId, X, Y, Z, Orientation, SpawnPos.X, SpawnPos.Y, SpawnPos.Z);
+
+	if (bDeferSpawnTeleport)
+	{
+		// Store for later — LoginController will call ApplyDeferredSpawn() after terrain loads
+		DeferredSpawnPos = SpawnPos;
+		DeferredSpawnOrientation = Orientation;
+		bHasDeferredSpawn = true;
+		UE_LOG(LogWowGameplay, Log, TEXT("Spawn deferred — waiting for terrain to load"));
+		return;
+	}
+
+	// Immediate teleport (legacy path)
+	ApplyDeferredSpawn_Internal(SpawnPos, Orientation);
+}
+
+void AWowGameplayController::ApplyDeferredSpawn()
+{
+	if (!bHasDeferredSpawn) return;
+	bHasDeferredSpawn = false;
+	ApplyDeferredSpawn_Internal(DeferredSpawnPos, DeferredSpawnOrientation);
+}
+
+void AWowGameplayController::ApplyDeferredSpawn_Internal(const FVector& SpawnPos, float Orientation)
+{
 	APawn* P = GetPawn();
 	if (P)
 	{
@@ -91,8 +110,7 @@ void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, 
 		else
 		{
 			P->SetActorLocation(SpawnPos);
-			// When -startpos is active, look down at terrain; otherwise use server orientation
-			float Pitch = FString(FCommandLine::Get()).Contains(TEXT("startpos")) ? -15.0f : 0.0f;
+			float Pitch = 0.0f;
 			P->SetActorRotation(FRotator(Pitch, FMath::RadiansToDegrees(Orientation), 0.0f));
 			if (APlayerController* PC = Cast<APlayerController>(P->GetController()))
 			{
@@ -100,8 +118,8 @@ void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, 
 			}
 		}
 
-		UE_LOG(LogWowGameplay, Log, TEXT("Teleported to spawn: map=%d wow=(%.1f,%.1f,%.1f) orient=%.2f ue=(%.0f,%.0f,%.0f)"),
-			MapId, X, Y, Z, Orientation, SpawnPos.X, SpawnPos.Y, SpawnPos.Z);
+		UE_LOG(LogWowGameplay, Log, TEXT("Teleported to spawn: ue=(%.0f,%.0f,%.0f)"),
+			SpawnPos.X, SpawnPos.Y, SpawnPos.Z);
 	}
 
 	bHasServerPosition = true;
@@ -126,8 +144,9 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		}
 
 		// Server position correction: if server position diverges too much, teleport back
-		// Skip correction when using -startpos (fly camera free-roam mode)
-		if (bHasServerPosition && Entity.Movement.Position != FVector::ZeroVector
+		// Skip while spawn is deferred (loading screen) or using -startpos
+		if (bHasServerPosition && !bDeferSpawnTeleport
+			&& Entity.Movement.Position != FVector::ZeroVector
 			&& !FString(FCommandLine::Get()).Contains(TEXT("startpos")))
 		{
 			FVector ServerUEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);

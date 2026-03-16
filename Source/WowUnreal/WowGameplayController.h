@@ -51,6 +51,19 @@ private:
     void OnEntityUpdated(const FWowEntity& Entity);
     bool bHasServerPosition = false;
 
+public:
+    /** Deferred spawn: store the position but don't teleport yet */
+    bool bDeferSpawnTeleport = false;
+    FVector DeferredSpawnPos = FVector::ZeroVector;
+    float DeferredSpawnOrientation = 0.0f;
+    bool bHasDeferredSpawn = false;
+
+    /** Apply the deferred spawn position now (called by LoginController after terrain loads) */
+    void ApplyDeferredSpawn();
+
+private:
+    void ApplyDeferredSpawn_Internal(const FVector& SpawnPos, float Orientation);
+
     // Server position correction
     FVector LastServerPosition = FVector::ZeroVector;
     float ServerCorrectionThreshold = 500.0f; // 5 WoW yards — teleport if diverged

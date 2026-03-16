@@ -37,6 +37,18 @@ public:
     /** Load WDT/WDL and enable terrain streaming. Call after deferred startup (e.g. login scene). */
     void EnableTerrainStreaming();
 
+    /** Queue initial tiles around a UE world position. Returns how many were queued. */
+    int32 LoadTilesAroundPosition(const FVector& UEPosition, int32 Radius = 2);
+
+    /** Number of tiles that have been queued for the initial load */
+    int32 GetInitialTilesQueued() const { return InitialTilesQueued; }
+
+    /** Number of initial tiles that have been finalized (ready to render) */
+    int32 GetInitialTilesLoaded() const { return InitialTilesLoaded; }
+
+    /** Whether all initially-queued tiles have finished loading */
+    bool IsInitialLoadComplete() const { return InitialTilesQueued > 0 && InitialTilesLoaded >= InitialTilesQueued; }
+
     /** Get the terrain RVT for mesh components to write to */
     URuntimeVirtualTexture* GetTerrainRVT() const { return TerrainRVT; }
 
@@ -126,6 +138,11 @@ private:
     TObjectPtr<URuntimeVirtualTextureComponent> RVTVolumeComponent;
 
     FIntPoint LastCameraTile = FIntPoint(-9999, -9999);
+
+    /** Initial load tracking */
+    int32 InitialTilesQueued = 0;
+    int32 InitialTilesLoaded = 0;
+    TSet<int64> InitialTileKeys;
 
     /** Track spawned WMO unique IDs to avoid duplicates across tiles */
     TSet<uint32> SpawnedWmoIds;
