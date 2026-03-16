@@ -437,37 +437,40 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 				GetMesh()->SetMaterial(MatIdx, MainMesh->GetMaterial(MatIdx));
 			}
 
-			// Copy animation controller if available
+			// Copy animation controller from temp actor
 			if (TempAnimController && TempAnimController->IsInitialized())
 			{
-				// Create a new animation controller for this player character
 				UWowAnimationController* PlayerAnimController = NewObject<UWowAnimationController>(this, TEXT("PlayerAnimationController"));
 
-				// Get the animations that were cached for the temp actor
-				// We can access them through the temp controller's AnimationCache
+				// Copy all animations from temp controller
 				TArray<UAnimSequence*> Animations;
-
-				// Get all the animations from the temp controller's cache
-				const TMap<int32, TObjectPtr<UAnimSequence>>& TempAnimCache = TempAnimController->GetAnimationCache();
-				for (const auto& AnimPair : TempAnimCache)
+				for (const TObjectPtr<UAnimSequence>& Anim : TempAnimController->GetAllAnimations())
 				{
-					if (AnimPair.Value)
+					Animations.Add(Anim.Get());
+				}
+
+				PlayerAnimController->Initialize(GetMesh(), Animations);
+
+				// Copy the animation ID mapping
+				TMap<int32, int32> IdMap;
+				const TMap<int32, TObjectPtr<UAnimSequence>>& TempCache = TempAnimController->GetAnimationCache();
+				for (const auto& CachePair : TempCache)
+				{
+					// Find the index of this anim in AllAnimations
+					for (int32 Idx = 0; Idx < Animations.Num(); ++Idx)
 					{
-						Animations.Add(AnimPair.Value);
+						if (Animations[Idx] == CachePair.Value.Get())
+						{
+							IdMap.Add(CachePair.Key, Idx);
+							break;
+						}
 					}
 				}
+				PlayerAnimController->SetAnimationIdMap(IdMap);
 
-				if (Animations.Num() > 0)
-				{
-					// Initialize the animation controller with our mesh and the animations
-					PlayerAnimController->Initialize(GetMesh(), Animations);
-					SetupAnimationController(PlayerAnimController);
-					UE_LOG(LogWowPlayerChar, Log, TEXT("Setup animation controller with %d animations"), Animations.Num());
-				}
-				else
-				{
-					UE_LOG(LogWowPlayerChar, Warning, TEXT("Temp animation controller had no animations"));
-				}
+				SetupAnimationController(PlayerAnimController);
+				UE_LOG(LogWowPlayerChar, Log, TEXT("Player animation controller: %d animations, %d ID mappings"),
+					Animations.Num(), IdMap.Num());
 			}
 			else
 			{

@@ -1295,12 +1295,30 @@ void AWowGameplayController::UpdateEntityAnimations()
 		const FWowEntity* Entity = ConnectionManager->PacketHandler.EntityManager.Find(Guid);
 		if (!Entity) continue;
 
-		// Update animation based on entity movement info
-		// For now, we'll use basic combat/casting state detection
-		bool bEntityInCombat = false; // TODO: Detect combat state from entity fields
-		bool bEntityCasting = false;  // TODO: Detect casting state from entity fields
+		// Check if entity is moving via spline (NPC pathing) or position change
+		bool bIsOnSpline = Entity->Movement.bHasActiveSpline;
 
-		AnimController->UpdateAnimationState(Entity->Movement, bEntityInCombat, bEntityCasting);
+		// If on spline, force walk/run animation by setting a synthetic movement flag
+		FWowMovementInfo AnimMovement = Entity->Movement;
+		if (bIsOnSpline)
+		{
+			AnimMovement.MoveFlags |= WowMovementFlags::FORWARD;
+		}
+
+		// Also detect movement by checking if the actor is actually moving
+		if (!bIsOnSpline && !(AnimMovement.MoveFlags & (WowMovementFlags::FORWARD | WowMovementFlags::BACKWARD)))
+		{
+			FVector Velocity = Actor->GetVelocity();
+			if (Velocity.SizeSquared() > 100.0f) // Moving faster than 10 cm/s
+			{
+				AnimMovement.MoveFlags |= WowMovementFlags::FORWARD;
+			}
+		}
+
+		bool bEntityInCombat = false;
+		bool bEntityCasting = false;
+
+		AnimController->UpdateAnimationState(AnimMovement, bEntityInCombat, bEntityCasting);
 	}
 }
 
