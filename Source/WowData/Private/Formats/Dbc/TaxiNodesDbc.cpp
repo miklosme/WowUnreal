@@ -7,7 +7,7 @@ bool FTaxiNodesDbc::Load(const FDbcParser& Parser)
     Entries.Empty();
     IdIndex.Empty();
 
-    if (!Parser.IsValidHeader())
+    if (!Parser.IsValid())
     {
         UE_LOG(LogTaxiNodesDbc, Warning, TEXT("Invalid DBC header"));
         return false;
@@ -20,8 +20,8 @@ bool FTaxiNodesDbc::Load(const FDbcParser& Parser)
     {
         FTaxiNodesDbcEntry Entry;
 
-        Entry.ID = Parser.GetUInt32(i, 0);
-        Entry.MapID = Parser.GetUInt32(i, 1);
+        Entry.ID = Parser.GetUInt(i, 0);
+        Entry.MapID = Parser.GetUInt(i, 1);
         Entry.X = Parser.GetFloat(i, 2);
         Entry.Y = Parser.GetFloat(i, 3);
         Entry.Z = Parser.GetFloat(i, 4);
