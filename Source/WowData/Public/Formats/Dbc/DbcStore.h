@@ -29,6 +29,7 @@
 #include "Formats/Dbc/CharHairGeosetsDbc.h"
 #include "Formats/Dbc/CharacterFacialHairStylesDbc.h"
 #include "Formats/Dbc/CharStartOutfitDbc.h"
+#include "Formats/Dbc/TaxiNodesDbc.h"
 
 class FMpqManager;
 
@@ -68,6 +69,7 @@ public:
     FCharHairGeosetsDbc& CharHairGeosets() { return CharHairGeosetsDbc; }
     FCharacterFacialHairStylesDbc& CharacterFacialHairStyles() { return CharacterFacialHairStylesDbc; }
     FCharStartOutfitDbc& CharStartOutfit() { return CharStartOutfitDbc; }
+    FTaxiNodesDbc& TaxiNodes() { return TaxiNodesDbc; }
 
     const FMapDbc& Maps() const { return MapDbc; }
     const FAreaTableDbc& AreaTable() const { return AreaTableDbc; }
@@ -98,6 +100,7 @@ public:
     const FCharHairGeosetsDbc& CharHairGeosets() const { return CharHairGeosetsDbc; }
     const FCharacterFacialHairStylesDbc& CharacterFacialHairStyles() const { return CharacterFacialHairStylesDbc; }
     const FCharStartOutfitDbc& CharStartOutfit() const { return CharStartOutfitDbc; }
+    const FTaxiNodesDbc& TaxiNodes() const { return TaxiNodesDbc; }
 
     bool IsLoaded() const { return bLoaded; }
 
@@ -131,5 +134,6 @@ private:
     FCharHairGeosetsDbc CharHairGeosetsDbc;
     FCharacterFacialHairStylesDbc CharacterFacialHairStylesDbc;
     FCharStartOutfitDbc CharStartOutfitDbc;
+    FTaxiNodesDbc TaxiNodesDbc;
     bool bLoaded = false;
 };

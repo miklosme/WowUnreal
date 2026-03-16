@@ -151,6 +151,62 @@ namespace PlayerField
     inline constexpr uint16 NEXT_LEVEL_XP = BASE + 0x01E7;
     inline constexpr uint16 COINAGE       = BASE + 0x03FE;
 
+    // Equipment slots - visible items
+    inline constexpr uint16 VISIBLE_ITEM_BASE = BASE + 0x0006; // Each slot = 2 GUIDs (item + enchant display)
+
+    // Equipment slot indices for VISIBLE_ITEM_BASE
+    inline constexpr uint8 EQUIPMENT_SLOT_HEAD = 0;
+    inline constexpr uint8 EQUIPMENT_SLOT_NECK = 1;
+    inline constexpr uint8 EQUIPMENT_SLOT_SHOULDERS = 2;
+    inline constexpr uint8 EQUIPMENT_SLOT_SHIRT = 3;
+    inline constexpr uint8 EQUIPMENT_SLOT_CHEST = 4;
+    inline constexpr uint8 EQUIPMENT_SLOT_WAIST = 5;
+    inline constexpr uint8 EQUIPMENT_SLOT_LEGS = 6;
+    inline constexpr uint8 EQUIPMENT_SLOT_FEET = 7;
+    inline constexpr uint8 EQUIPMENT_SLOT_WRISTS = 8;
+    inline constexpr uint8 EQUIPMENT_SLOT_HANDS = 9;
+    inline constexpr uint8 EQUIPMENT_SLOT_FINGER1 = 10;
+    inline constexpr uint8 EQUIPMENT_SLOT_FINGER2 = 11;
+    inline constexpr uint8 EQUIPMENT_SLOT_TRINKET1 = 12;
+    inline constexpr uint8 EQUIPMENT_SLOT_TRINKET2 = 13;
+    inline constexpr uint8 EQUIPMENT_SLOT_BACK = 14;
+    inline constexpr uint8 EQUIPMENT_SLOT_MAINHAND = 15;
+    inline constexpr uint8 EQUIPMENT_SLOT_OFFHAND = 16;
+    inline constexpr uint8 EQUIPMENT_SLOT_RANGED = 17;
+    inline constexpr uint8 EQUIPMENT_SLOT_TABARD = 18;
+
+    // Inventory slots - item GUIDs
+    inline constexpr uint16 INV_SLOT_HEAD = BASE + 0x010A; // 2 uint32s
+    inline constexpr uint16 INV_SLOT_NECK = BASE + 0x010C;
+    inline constexpr uint16 INV_SLOT_SHOULDERS = BASE + 0x010E;
+    inline constexpr uint16 INV_SLOT_SHIRT = BASE + 0x0110;
+    inline constexpr uint16 INV_SLOT_CHEST = BASE + 0x0112;
+    inline constexpr uint16 INV_SLOT_WAIST = BASE + 0x0114;
+    inline constexpr uint16 INV_SLOT_LEGS = BASE + 0x0116;
+    inline constexpr uint16 INV_SLOT_FEET = BASE + 0x0118;
+    inline constexpr uint16 INV_SLOT_WRISTS = BASE + 0x011A;
+    inline constexpr uint16 INV_SLOT_HANDS = BASE + 0x011C;
+    inline constexpr uint16 INV_SLOT_FINGER1 = BASE + 0x011E;
+    inline constexpr uint16 INV_SLOT_FINGER2 = BASE + 0x0120;
+    inline constexpr uint16 INV_SLOT_TRINKET1 = BASE + 0x0122;
+    inline constexpr uint16 INV_SLOT_TRINKET2 = BASE + 0x0124;
+    inline constexpr uint16 INV_SLOT_BACK = BASE + 0x0126;
+    inline constexpr uint16 INV_SLOT_MAINHAND = BASE + 0x0128;
+    inline constexpr uint16 INV_SLOT_OFFHAND = BASE + 0x012A;
+    inline constexpr uint16 INV_SLOT_RANGED = BASE + 0x012C;
+    inline constexpr uint16 INV_SLOT_TABARD = BASE + 0x012E;
+
+    // Bag slots (bag GUIDs)
+    inline constexpr uint16 PACK_SLOT_1 = BASE + 0x0130; // Bag 1
+    inline constexpr uint16 PACK_SLOT_2 = BASE + 0x0132; // Bag 2
+    inline constexpr uint16 PACK_SLOT_3 = BASE + 0x0134; // Bag 3
+    inline constexpr uint16 PACK_SLOT_4 = BASE + 0x0136; // Bag 4
+    inline constexpr uint16 PACK_SLOT_LAST = PACK_SLOT_4;
+
+    // Backpack slots (item GUIDs in slot 0-15 of backpack)
+    inline constexpr uint16 PACK_SLOT_START = BASE + 0x0138; // 32 uint32s (16 GUIDs)
+    inline constexpr uint16 PACK_SLOT_END = PACK_SLOT_START + 31;
+
     inline constexpr uint16 END = BASE + 0x0474;
 }
 

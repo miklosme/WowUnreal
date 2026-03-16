@@ -1488,6 +1488,114 @@ void FWowPacketHandler::HandlePartyCommandResult(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("PARTY_COMMAND_RESULT: command=%d member='%s' result=%d"),
            Command, *Member, Result);
+
+    OnPartyCommandResult.Broadcast(static_cast<uint8>(Command), Member, static_cast<uint8>(Result));
+}
+
+// ── SMSG_GROUP_INVITE ───────────────────────────────────────────────────────
+// FString inviterName
+
+void FWowPacketHandler::HandleGroupInvite(FPacketReader& R)
+{
+    FString InviterName = R.ReadCString();
+    UE_LOG(LogWowPacket, Log, TEXT("GROUP_INVITE from '%s'"), *InviterName);
+
+    OnGroupInviteReceived.Broadcast(InviterName);
+}
+
+// ── SMSG_SHOWTAXINODES ──────────────────────────────────────────────────────
+// uint32 windowFlags, uint64 npcGuid, uint32 currentNodeId, variable-length knownNodes bitmask
+
+void FWowPacketHandler::HandleShowTaxiNodes(FPacketReader& R)
+{
+    if (!R.CanRead(16)) return; // windowFlags + npcGuid + currentNodeId
+
+    uint32 WindowFlags = R.ReadU32();
+    uint64 NpcGuid = R.ReadU64();
+    uint32 CurrentNodeId = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("SHOWTAXINODES: npc=%llu current=%d flags=0x%X"),
+           NpcGuid, CurrentNodeId, WindowFlags);
+
+    // Clear and update taxi data
+    TaxiData.Clear();
+    TaxiData.NpcGuid = NpcGuid;
+    TaxiData.CurrentNodeId = CurrentNodeId;
+    TaxiData.bTaxiWindowOpen = true;
+
+    // Load taxi nodes from DBC if not already loaded
+    if (TaxiData.AllNodes.IsEmpty())
+    {
+        if (FDbcStore::Get().IsLoaded())
+        {
+            const auto& TaxiNodesDbc = FDbcStore::Get().TaxiNodes();
+            for (const auto& DbcNode : TaxiNodesDbc.GetAll())
+            {
+                FWowTaxiNode Node(DbcNode.ID, DbcNode.MapID, DbcNode.X, DbcNode.Y, DbcNode.Z, DbcNode.Name);
+                TaxiData.AllNodes.Add(Node);
+            }
+            UE_LOG(LogWowPacket, Log, TEXT("Loaded %d taxi nodes from DBC"), TaxiData.AllNodes.Num());
+        }
+    }
+
+    // Read known nodes bitmask (variable length)
+    // Each byte contains 8 node flags, calculate how many bytes we need
+    const int32 MaxNodeId = TaxiData.AllNodes.IsEmpty() ? 256 :
+        TaxiData.AllNodes.Max([](const FWowTaxiNode& A, const FWowTaxiNode& B) { return A.Id < B.Id; }).Id;
+    const int32 BitmaskBytes = (MaxNodeId + 7) / 8;
+
+    TaxiData.KnownNodes.SetNum(MaxNodeId + 1);
+    TaxiData.KnownNodes.Init(false, MaxNodeId + 1);
+
+    for (int32 ByteIndex = 0; ByteIndex < BitmaskBytes && R.CanRead(1); ++ByteIndex)
+    {
+        uint8 Byte = R.ReadU8();
+        for (int32 BitIndex = 0; BitIndex < 8; ++BitIndex)
+        {
+            const int32 NodeId = ByteIndex * 8 + BitIndex;
+            if (NodeId < TaxiData.KnownNodes.Num() && (Byte & (1 << BitIndex)))
+            {
+                TaxiData.KnownNodes[NodeId] = true;
+            }
+        }
+    }
+
+    int32 KnownCount = 0;
+    for (bool bKnown : TaxiData.KnownNodes)
+    {
+        if (bKnown) KnownCount++;
+    }
+    UE_LOG(LogWowPacket, Log, TEXT("Player knows %d taxi nodes"), KnownCount);
+
+    OnTaxiNodesShown.Broadcast(NpcGuid, CurrentNodeId);
+}
+
+// ── SMSG_ACTIVATETAXIREPLY ──────────────────────────────────────────────────
+// uint32 result (0=OK, 1=unspecified error, etc.)
+
+void FWowPacketHandler::HandleActivateTaxiReply(FPacketReader& R)
+{
+    if (!R.CanRead(4)) return;
+
+    uint32 Result = R.ReadU32();
+    UE_LOG(LogWowPacket, Log, TEXT("ACTIVATETAXIREPLY: result=%d"), Result);
+
+    OnTaxiActivateReply.Broadcast(static_cast<uint8>(Result));
+
+    // Close taxi window
+    TaxiData.bTaxiWindowOpen = false;
+}
+
+// ── SMSG_NEW_TAXI_PATH ──────────────────────────────────────────────────────
+// No payload, just refresh taxi status
+
+void FWowPacketHandler::HandleNewTaxiPath(FPacketReader& R)
+{
+    UE_LOG(LogWowPacket, Log, TEXT("NEW_TAXI_PATH: refreshing taxi data"));
+
+    // This packet indicates that the player's taxi path has been updated
+    // The client should refresh its taxi information
+    TaxiData.bTaxiWindowOpen = false;
 }
 
 // ── SMSG_WHO ────────────────────────────────────────────────────────────────

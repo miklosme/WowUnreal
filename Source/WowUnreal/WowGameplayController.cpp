@@ -370,6 +370,12 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			}
 		}
 	}
+
+	// Update party frame with entity data for group members
+	if (PartyFrameWidget.IsValid() && Entity.IsUnit())
+	{
+		PartyFrameWidget->UpdateMemberFromEntity(Entity);
+	}
 }
 
 void AWowGameplayController::Tick(float DeltaTime)
@@ -1324,6 +1330,189 @@ void AWowGameplayController::CreateMinimapWidget()
 	}
 
 	UE_LOG(LogWowGameplay, Log, TEXT("Created minimap widget"));
+}
+
+void AWowGameplayController::CreatePartyFrame()
+{
+	if (!ConnectionManager || PartyFrameWidget.IsValid())
+	{
+		return;
+	}
+
+	// Create the party frame widget
+	PartyFrameWidget = SNew(SWowPartyFrame)
+		.ConnectionManager(ConnectionManager);
+
+	// Add to viewport
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->AddViewportWidgetContent(
+			PartyFrameWidget.ToSharedRef(),
+			50 // Z-order
+		);
+
+		// Position at top left
+		PartyFrameWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(0.0f, 0.1f)));
+		PartyFrameWidget->SetRenderTransformPivot(FVector2D(0.0f, 0.0f));
+	}
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Created party frame widget"));
+}
+
+void AWowGameplayController::OnGroupUpdated()
+{
+	if (!ConnectionManager)
+	{
+		return;
+	}
+
+	// Create party frame if needed
+	if (!PartyFrameWidget.IsValid())
+	{
+		CreatePartyFrame();
+	}
+
+	// Update party frame with new group data
+	if (PartyFrameWidget.IsValid())
+	{
+		PartyFrameWidget->UpdatePartyInfo(ConnectionManager->PacketHandler.GroupInfo);
+	}
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Group updated"));
+}
+
+void AWowGameplayController::OnGroupInviteReceived(const FString& InviterName)
+{
+	UE_LOG(LogWowGameplay, Log, TEXT("Group invite received from %s"), *InviterName);
+
+	// Close any existing invite dialog
+	if (PartyInviteWidget.IsValid())
+	{
+		if (GEngine && GEngine->GameViewport)
+		{
+			GEngine->GameViewport->RemoveViewportWidgetContent(PartyInviteWidget.ToSharedRef());
+		}
+		PartyInviteWidget.Reset();
+	}
+
+	// Create and show new invite dialog
+	PartyInviteWidget = SNew(SWowPartyInvite)
+		.ConnectionManager(ConnectionManager)
+		.InviterName(InviterName);
+
+	if (GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->AddViewportWidgetContent(
+			PartyInviteWidget.ToSharedRef(),
+			100 // High Z-order to appear on top
+		);
+
+		// Position in center of screen
+		PartyInviteWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(0.5f, 0.5f)));
+		PartyInviteWidget->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+	}
+}
+
+void AWowGameplayController::OnPartyCommandResult(uint8 Command, const FString& PlayerName, uint8 Result)
+{
+	// Log the result and potentially show a message
+	const TCHAR* CommandName = TEXT("Unknown");
+	switch (Command)
+	{
+	case 0: CommandName = TEXT("Invite"); break;
+	case 1: CommandName = TEXT("Leave"); break;
+	case 2: CommandName = TEXT("Remove"); break;
+	default: break;
+	}
+
+	const TCHAR* ResultName = TEXT("Unknown");
+	switch (Result)
+	{
+	case 0: ResultName = TEXT("Success"); break;
+	case 1: ResultName = TEXT("Cannot find player"); break;
+	case 2: ResultName = TEXT("Player not in your group"); break;
+	case 3: ResultName = TEXT("Player already in group"); break;
+	default: break;
+	}
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Party command result: %s for %s - %s"),
+		CommandName, *PlayerName, ResultName);
+
+	// Add message to chat window
+	if (ChatWindow.IsValid())
+	{
+		FString Message = FString::Printf(TEXT("%s %s: %s"), CommandName, *PlayerName, ResultName);
+		ChatWindow->AddMessage(Message, FLinearColor::Yellow, TEXT("System"));
+	}
+}
+
+void AWowGameplayController::OnTaxiNodesShown(uint64 NpcGuid, uint32 CurrentNodeId)
+{
+	UE_LOG(LogWowGameplay, Log, TEXT("Taxi nodes shown by NPC %llu, current node: %d"),
+		NpcGuid, CurrentNodeId);
+
+	// Create taxi map widget if needed
+	if (!TaxiMapWidget.IsValid())
+	{
+		TaxiMapWidget = SNew(SWowTaxiMap)
+			.ConnectionManager(ConnectionManager);
+
+		if (GEngine && GEngine->GameViewport)
+		{
+			GEngine->GameViewport->AddViewportWidgetContent(
+				TaxiMapWidget.ToSharedRef(),
+				200 // Very high Z-order for full screen overlay
+			);
+		}
+	}
+
+	// Show the taxi map with current data
+	if (TaxiMapWidget.IsValid())
+	{
+		TaxiMapWidget->ShowTaxiMap(ConnectionManager->PacketHandler.TaxiData);
+	}
+}
+
+void AWowGameplayController::OnTaxiActivateReply(uint8 Result)
+{
+	const TCHAR* ResultName = TEXT("Unknown");
+	switch (Result)
+	{
+	case 0: ResultName = TEXT("Success"); break;
+	case 1: ResultName = TEXT("Unspecified error"); break;
+	case 2: ResultName = TEXT("No such path"); break;
+	case 3: ResultName = TEXT("Not enough money"); break;
+	case 4: ResultName = TEXT("Too far away"); break;
+	case 5: ResultName = TEXT("No vendor nearby"); break;
+	default: break;
+	}
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Taxi activate result: %s"), ResultName);
+
+	if (Result != 0)
+	{
+		// Show error message
+		if (ChatWindow.IsValid())
+		{
+			FString Message = FString::Printf(TEXT("Cannot use taxi: %s"), ResultName);
+			ChatWindow->AddMessage(Message, FLinearColor::Red, TEXT("System"));
+		}
+	}
+	else
+	{
+		// Success - player should start flying
+		// Close taxi map
+		if (TaxiMapWidget.IsValid())
+		{
+			TaxiMapWidget->CloseTaxiMap();
+		}
+
+		// Add flight message
+		if (ChatWindow.IsValid())
+		{
+			ChatWindow->AddMessage(TEXT("You are now on a flight path"), FLinearColor::Green, TEXT("System"));
+		}
+	}
 }
 
 void AWowGameplayController::OnToggleMap()

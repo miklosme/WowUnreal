@@ -8,6 +8,10 @@
 #include "LuaApi/LuaApiRegistry.h"
 #include "Mpq/MpqManager.h"
 #include "Components/CanvasPanel.h"
+#include "WowEntity.h"
+#include "WowEntityManager.h"
+#include "Widgets/SOverlay.h"
+#include "Framework/Application/SlateApplication.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowUIManager, Log, All);
 
@@ -24,6 +28,7 @@ void UWowUIManager::Initialize(FSubsystemCollectionBase& Collection)
 	FrameManager = MakeUnique<FWowFrameManager>();
 	EventSystem = MakeUnique<FWowEventSystem>();
 	FontManager = MakeUnique<FWowFontManager>();
+	InventoryManager = MakeShareable(new FWowInventoryManager());
 
 	// Initialize the Lua VM
 	if (!LuaVM->Initialize())
@@ -74,14 +79,6 @@ void UWowUIManager::Deinitialize()
 	Super::Deinitialize();
 }
 
-void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
-{
-	if (FrameManager && Canvas)
-	{
-		FrameManager->Initialize(Canvas);
-		UE_LOG(LogWowUIManager, Log, TEXT("Root canvas set for FrameManager"));
-	}
-}
 
 void UWowUIManager::LoadUI(FMpqManager* Mpq)
 {
@@ -199,4 +196,74 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq)
 
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI loaded successfully (%d frames total)"),
 		FrameManager ? FrameManager->GetFrameCount() : 0);
+}
+
+void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
+{
+	// First, initialize the frame manager with the canvas if provided
+	if (FrameManager && Canvas)
+	{
+		FrameManager->Initialize(Canvas);
+		UE_LOG(LogWowUIManager, Log, TEXT("Root canvas set for FrameManager"));
+	}
+
+	// Create the UI overlay for Slate widgets
+	if (FSlateApplication::IsInitialized())
+	{
+		UIOverlay = SNew(SOverlay);
+
+		// Create bag window
+		BagWindow = SNew(SWowBagWindow, InventoryManager);
+		UIOverlay->AddSlot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Center)
+		[
+			BagWindow.ToSharedRef()
+		];
+
+		// Create character panel
+		CharacterPanel = SNew(SWowCharacterPanel, InventoryManager);
+		UIOverlay->AddSlot()
+		.HAlign(HAlign_Left)
+		.VAlign(VAlign_Center)
+		[
+			CharacterPanel.ToSharedRef()
+		];
+
+		// Add the overlay to the viewport
+		if (GEngine && GEngine->GameViewport)
+		{
+			GEngine->GameViewport->AddViewportWidgetContent(UIOverlay.ToSharedRef());
+		}
+
+		UE_LOG(LogWowUIManager, Log, TEXT("Created bag and character panel UI"));
+	}
+}
+
+void UWowUIManager::ToggleBagWindow()
+{
+	if (BagWindow.IsValid())
+	{
+		BagWindow->ToggleVisibility();
+	}
+}
+
+void UWowUIManager::ToggleCharacterPanel()
+{
+	if (CharacterPanel.IsValid())
+	{
+		CharacterPanel->ToggleVisibility();
+	}
+}
+
+void UWowUIManager::UpdateInventory()
+{
+	if (!InventoryManager.IsValid())
+		return;
+
+	// For demo purposes, create a dummy player entity and entity manager
+	FWowPlayerEntity DummyPlayer;
+	FWowEntityManager DummyEntityManager;
+
+	InventoryManager->UpdateFromPlayerEntity(DummyPlayer, DummyEntityManager);
 }

@@ -421,6 +421,19 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\TaxiNodes.dbc"), Parser))
+    {
+        TaxiNodesDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, TaxiNodesDbc.Num()); ++i)
+        {
+            const FTaxiNodesDbcEntry& E = TaxiNodesDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  TaxiNode[%d]: ID=%d MapID=%d Pos=(%.1f,%.1f,%.1f) Name='%s'"),
+                i, E.ID, E.MapID, E.X, E.Y, E.Z, *E.Name);
+        }
+    }
+
     bLoaded = Loaded > 0;
     UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/29 DBC tables"), Loaded);
     return bLoaded;

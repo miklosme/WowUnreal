@@ -145,9 +145,19 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_NAME_QUERY_RESPONSE     = 0x0051;
     inline constexpr uint16 SMSG_CREATURE_QUERY_RESPONSE = 0x0061;
     inline constexpr uint16 CMSG_GROUP_INVITE            = 0x006E;
+    inline constexpr uint16 SMSG_GROUP_INVITE            = 0x006F;
     inline constexpr uint16 CMSG_GROUP_ACCEPT            = 0x0072;
+    inline constexpr uint16 CMSG_GROUP_DECLINE           = 0x0073;
+    inline constexpr uint16 CMSG_GROUP_UNINVITE          = 0x0075;
+    inline constexpr uint16 CMSG_GROUP_DISBAND           = 0x007B;
     inline constexpr uint16 CMSG_NAME_QUERY              = 0x0050;
     inline constexpr uint16 CMSG_CREATURE_QUERY          = 0x0060;
+
+    // ── Taxi / Flight Path System ───────────────────────────────────────────
+    inline constexpr uint16 SMSG_SHOWTAXINODES          = 0x01A9;
+    inline constexpr uint16 SMSG_ACTIVATETAXIREPLY      = 0x01AA;
+    inline constexpr uint16 CMSG_ACTIVATETAXI           = 0x01AD;
+    inline constexpr uint16 SMSG_NEW_TAXI_PATH          = 0x01AE;
 
     // ── Death / Corpse / Resurrection ────────────────────────────────────────
     inline constexpr uint16 CMSG_REPOP_REQUEST          = 0x015A;

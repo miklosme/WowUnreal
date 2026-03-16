@@ -271,6 +271,24 @@ struct WOWNETWORK_API FWowPlayerEntity : public FWowUnitEntity
     uint32 GetXp() const { return GetField(PlayerField::XP); }
     uint32 GetNextLevelXp() const { return GetField(PlayerField::NEXT_LEVEL_XP); }
     uint32 GetCoinage() const { return GetField(PlayerField::COINAGE); }
+
+    // Equipment and inventory accessors
+    uint64 GetEquipmentItemGuid(uint8 SlotIndex) const
+    {
+        return (SlotIndex < 19) ? GetField64(PlayerField::INV_SLOT_HEAD + SlotIndex * 2) : 0;
+    }
+
+    uint64 GetBackpackItemGuid(uint8 SlotIndex) const
+    {
+        return (SlotIndex < 16) ? GetField64(PlayerField::PACK_SLOT_START + SlotIndex * 2) : 0;
+    }
+
+    uint64 GetBagGuid(uint8 BagIndex) const
+    {
+        if (BagIndex >= 1 && BagIndex <= 4)
+            return GetField64(PlayerField::PACK_SLOT_1 + (BagIndex - 1) * 2);
+        return 0;
+    }
 };
 
 struct WOWNETWORK_API FWowGameObjectEntity : public FWowEntity
@@ -365,4 +383,93 @@ struct FWowGuildMember
     FString RankName;
     FString PublicNote;
     FString OfficerNote;
+};
+
+// Group/Party member information
+struct FWowGroupMember
+{
+    uint64 Guid = 0;
+    FString Name;
+    uint8 Group = 0;        // Subgroup index (0-7)
+    uint8 Flags = 0;        // Member flags
+    uint8 Roles = 0;        // Tank/Healer/DPS roles
+    uint8 Status = 0;       // Online status
+    uint8 Level = 0;        // Member level
+    uint8 Class = 0;        // Member class
+};
+
+// Group/Party information
+struct FWowGroupInfo
+{
+    uint8 MemberCount = 0;
+    uint8 GroupType = 0;    // 0=party, 1=raid
+    uint64 LeaderGuid = 0;
+    TArray<FWowGroupMember> Members;
+
+    void Clear()
+    {
+        MemberCount = 0;
+        GroupType = 0;
+        LeaderGuid = 0;
+        Members.Empty();
+    }
+
+    bool IsEmpty() const
+    {
+        return MemberCount == 0 || Members.IsEmpty();
+    }
+
+    const FWowGroupMember* FindMember(uint64 Guid) const
+    {
+        return Members.FindByPredicate([Guid](const FWowGroupMember& Member)
+        {
+            return Member.Guid == Guid;
+        });
+    }
+};
+
+// Taxi node information
+struct FWowTaxiNode
+{
+    uint32 Id = 0;
+    uint32 MapId = 0;
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    FString Name;
+
+    FWowTaxiNode() = default;
+    FWowTaxiNode(uint32 InId, uint32 InMapId, float InX, float InY, float InZ, const FString& InName)
+        : Id(InId), MapId(InMapId), X(InX), Y(InY), Z(InZ), Name(InName) {}
+};
+
+// Taxi system information
+struct FWowTaxiData
+{
+    uint64 NpcGuid = 0;
+    uint32 CurrentNodeId = 0;
+    TArray<bool> KnownNodes;        // Known taxi nodes (bitmask converted to array)
+    TArray<FWowTaxiNode> AllNodes;  // All taxi nodes from DBC
+    bool bTaxiWindowOpen = false;
+
+    void Clear()
+    {
+        NpcGuid = 0;
+        CurrentNodeId = 0;
+        KnownNodes.Empty();
+        bTaxiWindowOpen = false;
+    }
+
+    bool IsNodeKnown(uint32 NodeId) const
+    {
+        return NodeId < static_cast<uint32>(KnownNodes.Num()) && KnownNodes[NodeId];
+    }
+
+    const FWowTaxiNode* FindNode(uint32 NodeId) const
+    {
+        return AllNodes.FindByPredicate([NodeId](const FWowTaxiNode& Node)
+        {
+            return Node.Id == NodeId;
+        });
+    }
 };

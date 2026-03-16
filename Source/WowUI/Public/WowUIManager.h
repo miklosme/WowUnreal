@@ -5,6 +5,9 @@
 #include "WowFrameManager.h"
 #include "WowEventSystem.h"
 #include "WowFontManager.h"
+#include "WowInventoryManager.h"
+#include "SWowBagWindow.h"
+#include "SWowCharacterPanel.h"
 #include "WowUIManager.generated.h"
 
 struct FWowLuaContext;
@@ -38,15 +41,29 @@ public:
 	FWowFrameManager* GetFrameManager() const { return FrameManager.Get(); }
 	FWowEventSystem* GetEventSystem() const { return EventSystem.Get(); }
 	FWowFontManager* GetFontManager() const { return FontManager.Get(); }
+	TSharedPtr<FWowInventoryManager> GetInventoryManager() const { return InventoryManager; }
 
 	bool IsUILoaded() const { return bUILoaded; }
+
+	/** UI Window Management */
+	void ToggleBagWindow();
+	void ToggleCharacterPanel();
+
+	/** Update inventory from player entity */
+	void UpdateInventory();
 
 private:
 	TUniquePtr<FWowLuaVM> LuaVM;
 	TUniquePtr<FWowFrameManager> FrameManager;
 	TUniquePtr<FWowEventSystem> EventSystem;
 	TUniquePtr<FWowFontManager> FontManager;
+	TSharedPtr<FWowInventoryManager> InventoryManager;
 
 	FWowLuaContext* UIContext = nullptr;
 	bool bUILoaded = false;
+
+	// UI Windows
+	TSharedPtr<SWowBagWindow> BagWindow;
+	TSharedPtr<SWowCharacterPanel> CharacterPanel;
+	TSharedPtr<class SOverlay> UIOverlay;
 };
