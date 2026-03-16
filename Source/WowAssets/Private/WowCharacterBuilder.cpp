@@ -449,14 +449,30 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeGeosetWithEquipment(
     });
 
     // ROBE: Hide leg geosets when a robe is equipped
-    if (BodyEquipment.bIsRobeEquipped)
+    bool bShouldHideLegs = BodyEquipment.bIsRobeEquipped;
+
+    // Additional check: some chest pieces might have robe-like behavior based on geosets
+    // If GeosetGroups[2] > 1, it indicates leg coverage similar to robes
+    if (!bShouldHideLegs && BodyEquipment.ChestDisplayId > 0)
+    {
+        const FItemDisplayInfoDbcEntry* ChestItem = Dbc.ItemDisplayInfo().GetById(BodyEquipment.ChestDisplayId);
+        if (ChestItem && ChestItem->GeosetGroups[2] > 1)
+        {
+            bShouldHideLegs = true;
+            UE_LOG(LogWowCharacter, Log, TEXT("Chest DisplayID %d has robe-like leg coverage (GeosetGroups[2]=%d)"),
+                BodyEquipment.ChestDisplayId, ChestItem->GeosetGroups[2]);
+        }
+    }
+
+    if (bShouldHideLegs)
     {
         // Robes hide legs and feet by setting geoset groups to variant 0 (hidden)
         Result.Add(5, 0);   // LegUpper - hide
         Result.Add(6, 0);   // LegLower - hide
         Result.Add(7, 0);   // Foot - hide
 
-        UE_LOG(LogWowCharacter, Log, TEXT("Robe equipped: hiding leg geosets (groups 5, 6, 7)"));
+        UE_LOG(LogWowCharacter, Log, TEXT("Hiding leg geosets (groups 5, 6, 7) for DisplayID %d (robe=%s)"),
+            BodyEquipment.ChestDisplayId, BodyEquipment.bIsRobeEquipped ? TEXT("true") : TEXT("detected"));
     }
 
     return Result;
@@ -505,11 +521,29 @@ void FWowCharacterBuilder::ApplyGeosetVisibility(USkeletalMeshComponent* MeshCom
         else
         {
             HiddenCount++;
+            // Log geoset hiding for debugging robe issues
+            if (Info.GeosetGroup >= 5 && Info.GeosetGroup <= 7)
+            {
+                UE_LOG(LogWowCharacter, Log, TEXT("  Hiding geoset: Group=%d Variant=%d Section=%d (robe leg hide)"),
+                    Info.GeosetGroup, Info.GeosetVariant, Info.SectionIndex);
+            }
         }
     }
 
     UE_LOG(LogWowCharacter, Log, TEXT("Applied geoset visibility: %d visible, %d hidden (of %d sections)"),
         VisibleCount, HiddenCount, GeosetInfo.Num());
+
+    // Debug: Log all geoset groups found for verification
+    if (GeosetInfo.Num() > 0)
+    {
+        TSet<uint16> UniqueGroups;
+        for (const FGeosetSectionInfo& Info : GeosetInfo)
+        {
+            UniqueGroups.Add(Info.GeosetGroup);
+        }
+        UE_LOG(LogWowCharacter, Verbose, TEXT("Character geoset groups present: %s"),
+            *FString::JoinBy(UniqueGroups.Array(), TEXT(", "), [](uint16 Group) { return FString::FromInt(Group); }));
+    }
 }
 
 FString FWowCharacterBuilder::GetCharacterModelPath(ERace Race, EGender Gender)
