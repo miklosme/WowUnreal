@@ -76,7 +76,29 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
         ConnectionManager->RequestCharacterList();
         break;
     case EWowSessionState::WorldHaveCharList:
-        ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
+        // If -createchar flag, auto-create a Human Mage for testing
+        if (FParse::Param(FCommandLine::Get(), TEXT("createchar")) && !bCharCreateSent)
+        {
+            bCharCreateSent = true;
+            FString CharName;
+            if (!FParse::Value(FCommandLine::Get(), TEXT("-charname="), CharName))
+            {
+                // WoW names must be letters only — generate a random valid name
+                static const TCHAR* Prefixes[] = { TEXT("Thorn"), TEXT("Ash"), TEXT("Elm"), TEXT("Oak"), TEXT("Frost"), TEXT("Storm"), TEXT("Dawn"), TEXT("Dusk") };
+                static const TCHAR* Suffixes[] = { TEXT("wind"), TEXT("blade"), TEXT("fire"), TEXT("song"), TEXT("heart"), TEXT("vale"), TEXT("keep"), TEXT("ward") };
+                int32 P = FMath::RandRange(0, UE_ARRAY_COUNT(Prefixes) - 1);
+                int32 S = FMath::RandRange(0, UE_ARRAY_COUNT(Suffixes) - 1);
+                CharName = FString(Prefixes[P]) + Suffixes[S];
+            }
+            UE_LOG(LogWowLogin, Log, TEXT("Auto-creating character: %s (Human Mage)"), *CharName);
+            // Human=1, Mage=8, Male=0
+            ConnectionManager->CreateCharacter(CharName, 1, 8, 0, 0, 0, 0, 0, 0);
+            SetStatusText(FString::Printf(TEXT("Creating character %s..."), *CharName));
+        }
+        else
+        {
+            ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
+        }
         break;
     case EWowSessionState::WorldEnteringWorld:
         // Bind entity events and set defer flag BEFORE the server sends LOGIN_VERIFY_WORLD
@@ -141,11 +163,32 @@ void AWowLoginController::OnCharacterList(const TArray<FWowCharacterInfo>& Chara
     UE_LOG(LogWowLogin, Log, TEXT("Received %d characters"), Characters.Num());
 
     // Auto-enter world with first character when -autologin is active
-    if (FParse::Param(FCommandLine::Get(), TEXT("autologin")) && Characters.Num() > 0)
+    // Skip if -createchar is set — we'll enter after creation completes
+    if (FParse::Param(FCommandLine::Get(), TEXT("autologin")) && Characters.Num() > 0
+        && !FParse::Param(FCommandLine::Get(), TEXT("createchar")))
     {
         UE_LOG(LogWowLogin, Log, TEXT("Autologin: entering world with '%s' (GUID %lld)"),
             *Characters[0].Name, Characters[0].Guid);
         HandleCharacterSelected(Characters[0].Guid);
+        return;
+    }
+
+    // If we just created a character and want to auto-enter
+    if (bAutoEnterAfterCreate && Characters.Num() > 0)
+    {
+        bAutoEnterAfterCreate = false;
+        // Enter with the last character (the one just created)
+        const FWowCharacterInfo& NewChar = Characters.Last();
+        UE_LOG(LogWowLogin, Log, TEXT("Auto-entering world with newly created '%s' (GUID %lld)"),
+            *NewChar.Name, NewChar.Guid);
+        HandleCharacterSelected(NewChar.Guid);
+        return;
+    }
+
+    // If we're on the create screen (post-creation refresh), go back to select
+    if (CharCreateWidget.IsValid())
+    {
+        ShowCharacterSelectScreen(Characters);
     }
 }
 
@@ -160,6 +203,14 @@ void AWowLoginController::OnCharCreateResult(uint8 ResultCode)
     if (ResultCode == 0x2F)
     {
         UE_LOG(LogWowLogin, Log, TEXT("Character created successfully"));
+        SetStatusText(TEXT("Character created!"));
+        // ConnectionManager auto-refreshes char list → OnCharacterList will navigate back
+
+        // If -createchar was used, auto-login with the newly created character
+        if (FParse::Param(FCommandLine::Get(), TEXT("createchar")))
+        {
+            bAutoEnterAfterCreate = true;
+        }
     }
     else
     {
@@ -169,6 +220,20 @@ void AWowLoginController::OnCharCreateResult(uint8 ResultCode)
         case 0x30: ErrMsg = TEXT("Name already in use"); break;
         case 0x31: ErrMsg = TEXT("Server disabled"); break;
         case 0x32: ErrMsg = TEXT("Creation failed"); break;
+        case 0x33: ErrMsg = TEXT("Disabled"); break;
+        case 0x34: ErrMsg = TEXT("Can't create on PvP realm"); break;
+        case 0x50: ErrMsg = TEXT("Invalid name"); break;
+        case 0x51: ErrMsg = TEXT("Name too short"); break;
+        case 0x52: ErrMsg = TEXT("Name too long"); break;
+        case 0x53: ErrMsg = TEXT("Name contains invalid characters"); break;
+        case 0x54: ErrMsg = TEXT("Name has mixed languages"); break;
+        case 0x55: ErrMsg = TEXT("Name is profane"); break;
+        case 0x56: ErrMsg = TEXT("Name is reserved"); break;
+        case 0x57: ErrMsg = TEXT("Invalid apostrophe"); break;
+        case 0x58: ErrMsg = TEXT("Multiple apostrophes"); break;
+        case 0x59: ErrMsg = TEXT("Three consecutive letters"); break;
+        case 0x5A: ErrMsg = TEXT("Invalid space"); break;
+        case 0x5D: ErrMsg = TEXT("Name contains numbers or special chars"); break;
         default: ErrMsg = FString::Printf(TEXT("Creation failed (0x%02X)"), ResultCode); break;
         }
         SetStatusText(FString::Printf(TEXT("Error: %s"), *ErrMsg));

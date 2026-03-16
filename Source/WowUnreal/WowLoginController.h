@@ -94,4 +94,8 @@ private:
     FVector PendingSpawnPosition = FVector::ZeroVector;
     float PendingSpawnOrientation = 0.0f;
     bool bHasPendingSpawn = false;
+
+    /** Character creation state */
+    bool bCharCreateSent = false;
+    bool bAutoEnterAfterCreate = false;
 };

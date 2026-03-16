@@ -46,6 +46,18 @@ bool FMpqManager::Initialize(const FString& InDataPath)
                 OpenedCount++;
                 UE_LOG(LogMpq, Log, TEXT("Opened MPQ: %s"), *Name);
             }
+            else
+            {
+                UE_LOG(LogMpq, Warning, TEXT("Failed to open MPQ: %s"), *Name);
+            }
+        }
+        else
+        {
+            // Only log missing non-locale archives
+            if (!Name.Contains(TEXT("enUS")))
+            {
+                UE_LOG(LogMpq, Warning, TEXT("MPQ not found: %s (full: %s)"), *Name, *FullPath);
+            }
         }
     }
     bInitialized = OpenedCount > 0;

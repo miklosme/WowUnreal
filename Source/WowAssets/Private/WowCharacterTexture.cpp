@@ -703,8 +703,19 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
             const FRegionCoords* Region = RegionCoords.Find(OverlayIdx);
             if (!Region) continue;
 
-            // Build full texture path: "Item\TextureComponents\" + overlay path
-            FString TexturePath = TEXT("Item\\TextureComponents\\") + Item->TextureOverlays[OverlayIdx];
+            // Build full texture path with region-specific subdirectory
+            static const TCHAR* RegionSubdirs[] = {
+                TEXT("ArmUpperTexture"),  // [0]
+                TEXT("ArmLowerTexture"),  // [1]
+                TEXT("HandTexture"),      // [2]
+                TEXT("TorsoUpperTexture"),// [3]
+                TEXT("TorsoLowerTexture"),// [4]
+                TEXT("LegUpperTexture"),  // [5]
+                TEXT("LegLowerTexture"),  // [6]
+                TEXT("FootTexture"),      // [7]
+            };
+            FString TexturePath = FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s"),
+                RegionSubdirs[OverlayIdx], *Item->TextureOverlays[OverlayIdx]);
             if (!TexturePath.EndsWith(TEXT(".blp"), ESearchCase::IgnoreCase))
             {
                 TexturePath += TEXT(".blp");
@@ -712,6 +723,18 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
 
             uint32 OverlayW, OverlayH;
             TArray<uint8> OverlayPixels = LoadBlpAsRGBA(Mpq, TexturePath, OverlayW, OverlayH);
+            if (OverlayPixels.Num() == 0)
+            {
+                // Try without subdirectory as fallback
+                FString AltPath = FString::Printf(TEXT("Item\\TextureComponents\\%s.blp"),
+                    *Item->TextureOverlays[OverlayIdx]);
+                OverlayPixels = LoadBlpAsRGBA(Mpq, AltPath, OverlayW, OverlayH);
+                if (OverlayPixels.Num() == 0)
+                {
+                    UE_LOG(LogWowCharTex, Warning, TEXT("Failed to load equipment overlay: %s (also tried %s)"),
+                        *TexturePath, *AltPath);
+                }
+            }
             if (OverlayPixels.Num() > 0)
             {
                 PasteRegionWithAlpha(Composite, OverlayPixels, CompositeW, CompositeH,
