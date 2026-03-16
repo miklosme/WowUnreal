@@ -378,3 +378,9 @@ void AWowPlayerCharacter::ApplyLoginSpawn(const FVector& SpawnPos, float Orienta
 		}
 	}
 }
+
+void AWowPlayerCharacter::SetupAnimationController(UWowAnimationController* AnimController)
+{
+	this->AnimationController = AnimController;
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Animation controller setup for local player character"));
+}

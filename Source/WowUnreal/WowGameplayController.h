@@ -81,6 +81,10 @@ private:
     void SpawnEntityModel(const FWowEntity& Entity);
     void CacheWorldResources();
 
+    // Animation state management
+    void UpdateEntityAnimations();
+    void UpdatePlayerAnimations();
+
     UPROPERTY()
     TMap<uint64, TObjectPtr<AActor>> SpawnedEntityActors;
 
