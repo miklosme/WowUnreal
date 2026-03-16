@@ -35,6 +35,7 @@ public:
     uint32 GetWeaponDisplayId() const;
     uint32 GetCreatureDisplayId() const;
     bool GetShowStarterGear() const { return bShowStarterGear; }
+    bool GetWeaponsDrawn() const { return bWeaponsDrawn; }
 
     void SetStatusText(const FString& Text);
 
@@ -76,7 +77,8 @@ private:
     TSharedPtr<SEditableTextBox> WeaponField;
 
     // Equipment
-    bool bShowStarterGear = false;
+    bool bShowStarterGear = true;
+    bool bWeaponsDrawn = true;
 
     // Creature
     TSharedPtr<SEditableTextBox> CreatureField;

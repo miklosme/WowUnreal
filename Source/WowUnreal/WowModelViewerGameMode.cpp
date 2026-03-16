@@ -172,13 +172,15 @@ void AWowModelViewerGameMode::RespawnCharacter()
     Params.Customization.HairColor = ViewerWidget->GetHairColor();
     Params.Customization.FacialHairStyle = ViewerWidget->GetFacialHairStyle();
 
-    // Equipment
+    // Equipment — manual weapon ID
+    bool bDrawn = ViewerWidget->GetWeaponsDrawn();
     uint32 WeaponId = ViewerWidget->GetWeaponDisplayId();
     if (WeaponId > 0)
     {
         FWowCharacterBuilder::FEquipmentSlot Slot;
         Slot.ItemDisplayId = WeaponId;
-        Slot.AttachPoint = FWowEquipmentManager::EAttachmentPoint::RightHand;
+        Slot.AttachPoint = bDrawn ? FWowEquipmentManager::EAttachmentPoint::RightHand
+                                  : FWowEquipmentManager::EAttachmentPoint::Back;
         Params.Equipment.Add(Slot);
     }
 
@@ -231,7 +233,16 @@ void AWowModelViewerGameMode::RespawnCharacter()
 
         for (const auto& S : Slots)
         {
-            AddEquip(S.FoundId, S.Point);
+            auto Point = S.Point;
+            // Swap weapon attachment points based on draw/sheathe toggle
+            if (!bDrawn)
+            {
+                if (Point == FWowEquipmentManager::EAttachmentPoint::RightHand)
+                    Point = FWowEquipmentManager::EAttachmentPoint::Back; // Sheathed on back
+                else if (Point == FWowEquipmentManager::EAttachmentPoint::LeftHand)
+                    Point = FWowEquipmentManager::EAttachmentPoint::Shield; // Shield on back
+            }
+            AddEquip(S.FoundId, Point);
             // Shoulders: add both sides
             if (S.Point == FWowEquipmentManager::EAttachmentPoint::LeftShoulder && S.FoundId > 0)
             {

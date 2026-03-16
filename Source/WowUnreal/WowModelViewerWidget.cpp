@@ -236,6 +236,26 @@ void SWowModelViewerWidget::Construct(const FArguments& InArgs)
                     ]
                 ]
 
+                + SScrollBox::Slot().Padding(0, 5)
+                [
+                    SNew(SButton)
+                    .OnClicked_Lambda([this]() -> FReply {
+                        bWeaponsDrawn = !bWeaponsDrawn;
+                        NotifyChanged();
+                        return FReply::Handled();
+                    })
+                    [
+                        SNew(SBox).Padding(FMargin(10, 3))
+                        [
+                            SNew(STextBlock)
+                            .Text_Lambda([this]() {
+                                return FText::FromString(bWeaponsDrawn ? TEXT("Sheathe Weapons") : TEXT("Draw Weapons"));
+                            })
+                            .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+                        ]
+                    ]
+                ]
+
                 // --- Creature Section ---
                 + SScrollBox::Slot().Padding(0, 10, 0, 5)
                 [
