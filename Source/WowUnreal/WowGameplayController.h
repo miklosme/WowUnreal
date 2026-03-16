@@ -1,6 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "Components/WidgetComponent.h"
 #include "WowGameplayController.generated.h"
 
 class UWowConnectionManager;
@@ -68,8 +69,14 @@ private:
     void SpawnEntityModel(const FWowEntity& Entity);
     void CacheWorldResources();
 
+    // Entity movement interpolation
+    void UpdateEntitySplineMovement(float DeltaTime);
+
     UPROPERTY()
     TMap<uint64, TObjectPtr<AActor>> SpawnedEntityActors;
+
+    UPROPERTY()
+    TMap<uint64, TObjectPtr<UWidgetComponent>> EntityNameplates;
 
     FMpqManager* CachedMpq = nullptr;
     FWowAssetCache* CachedAssetCache = nullptr;
