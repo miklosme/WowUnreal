@@ -126,17 +126,27 @@ public:
      * Check if the controller has been initialized.
      */
     UFUNCTION(BlueprintCallable, BlueprintPure)
-    bool IsInitialized() const { return MeshComponent != nullptr && AnimationCache.Num() > 0; }
+    bool IsInitialized() const { return MeshComponent != nullptr && AllAnimations.Num() > 0; }
 
     /**
      * Get the animation cache for copying to another controller.
      */
     const TMap<int32, TObjectPtr<UAnimSequence>>& GetAnimationCache() const { return AnimationCache; }
 
+    /** Get all animations (ordered by M2 track index) */
+    const TArray<TObjectPtr<UAnimSequence>>& GetAllAnimations() const { return AllAnimations; }
+
+    /** Set the animation ID mapping (M2 animID → track index) */
+    void SetAnimationIdMap(const TMap<int32, int32>& InMap);
+
 protected:
     /** Target skeletal mesh component */
     UPROPERTY()
     TObjectPtr<USkeletalMeshComponent> MeshComponent;
+
+    /** All animations ordered by M2 track index */
+    UPROPERTY()
+    TArray<TObjectPtr<UAnimSequence>> AllAnimations;
 
     /** Cache of animations by M2 animation ID */
     UPROPERTY()

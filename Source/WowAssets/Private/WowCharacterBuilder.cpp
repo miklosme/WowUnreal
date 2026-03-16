@@ -923,11 +923,28 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                     UWowAnimationController* AnimController = NewObject<UWowAnimationController>(Actor, TEXT("WowAnimationController"));
                     AnimController->Initialize(SkelMesh, Animations);
 
-                    // Store the controller by tagging the actor so we can find it later
-                    // The gameplay controller will retrieve this when updating entity animations
-                    Actor->Tags.Add(FName(TEXT("HasWowAnimController")));
+                    // Build animation ID map: M2 AnimationId → output animation index
+                    // CreateAnimations skips empty tracks, so we need to count which tracks
+                    // actually produced output animations
+                    TMap<int32, int32> AnimIdMap;
+                    int32 OutputIdx = 0;
+                    for (const FM2AnimationData& Track : M2Data->AnimationTracks)
+                    {
+                        if (Track.Duration == 0 || Track.BoneTracks.Num() == 0)
+                        {
+                            continue; // This track was skipped by CreateAnimations
+                        }
+                        if (OutputIdx < Animations.Num() && !AnimIdMap.Contains(Track.AnimationId))
+                        {
+                            AnimIdMap.Add(Track.AnimationId, OutputIdx);
+                        }
+                        ++OutputIdx;
+                    }
+                    AnimController->SetAnimationIdMap(AnimIdMap);
 
-                    UE_LOG(LogWowCharacter, Log, TEXT("Created animation controller with %d animations"), Animations.Num());
+                    Actor->Tags.Add(FName(TEXT("HasWowAnimController")));
+                    UE_LOG(LogWowCharacter, Log, TEXT("Created animation controller with %d animations, %d ID mappings"),
+                        Animations.Num(), AnimIdMap.Num());
                 }
             }
             else

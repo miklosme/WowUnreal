@@ -23,35 +23,21 @@ void UWowAnimationController::Initialize(USkeletalMeshComponent* InMeshComponent
         return;
     }
 
-    // Cache animations by their M2 animation ID
-    // Animation names follow pattern: "ModelName_Anim{AnimId}_{SubAnimId}"
+    // Store all animations by track index
+    AllAnimations.Empty();
     for (UAnimSequence* Anim : Animations)
     {
-        if (!Anim) continue;
-
-        FString AnimName = Anim->GetName();
-
-        // Parse animation ID from name pattern
-        int32 AnimPos = AnimName.Find(TEXT("_Anim"));
-        if (AnimPos != INDEX_NONE)
-        {
-            FString IdPart = AnimName.Mid(AnimPos + 5); // Skip "_Anim"
-            int32 UnderscorePos = IdPart.Find(TEXT("_"));
-            if (UnderscorePos != INDEX_NONE)
-            {
-                FString AnimIdStr = IdPart.Left(UnderscorePos);
-                int32 AnimId = FCString::Atoi(*AnimIdStr);
-
-                if (AnimId >= 0)
-                {
-                    AnimationCache.Add(AnimId, Anim);
-                    UE_LOG(LogWowAnim, Log, TEXT("Cached animation ID %d: %s"), AnimId, *AnimName);
-                }
-            }
-        }
+        AllAnimations.Add(Anim);
     }
 
-    UE_LOG(LogWowAnim, Log, TEXT("WowAnimationController initialized with %d animations"), AnimationCache.Num());
+    UE_LOG(LogWowAnim, Log, TEXT("WowAnimationController initialized with %d animations"), AllAnimations.Num());
+
+    // Play idle (first animation) immediately
+    if (AllAnimations.Num() > 0 && AllAnimations[0] && MeshComponent)
+    {
+        MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+        MeshComponent->PlayAnimation(AllAnimations[0], true);
+    }
 
     // Start with idle animation
     SetAnimationState(EWowAnimState::Idle);
@@ -138,27 +124,7 @@ void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter
     }
 }
 
-bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping)
-{
-    if (!IsInitialized())
-    {
-        return false;
-    }
-
-    TObjectPtr<UAnimSequence>* AnimPtr = AnimationCache.Find(static_cast<int32>(AnimId));
-    if (!AnimPtr || !*AnimPtr)
-    {
-        UE_LOG(LogWowAnim, Warning, TEXT("Animation ID %d not found in cache"), static_cast<int32>(AnimId));
-        return false;
-    }
-
-    UAnimSequence* Anim = *AnimPtr;
-    MeshComponent->PlayAnimation(Anim, bLooping);
-    CurrentAnimation = Anim;
-
-    UE_LOG(LogWowAnim, Log, TEXT("Playing animation ID %d: %s"), static_cast<int32>(AnimId), *Anim->GetName());
-    return true;
-}
+// NOTE: PlayAnimationById defined at end of file (needs AnimationCache + AllAnimations)
 
 EWowAnimState UWowAnimationController::DetermineAnimationState(const FWowMovementInfo& MovementInfo, bool bIsInCombat, bool bIsCasting) const
 {
@@ -353,4 +319,57 @@ bool UWowAnimationController::IsMoving(const FWowMovementInfo& MovementInfo) con
 bool UWowAnimationController::IsWalking(const FWowMovementInfo& MovementInfo) const
 {
     return (MovementInfo.MoveFlags & WowMovementFlags::WALK_MODE) != 0;
+}
+void UWowAnimationController::SetAnimationIdMap(const TMap<int32, int32>& InMap)
+{
+    // Build AnimationCache from the map: M2 AnimId -> UAnimSequence
+    AnimationCache.Empty();
+    for (const auto& Pair : InMap)
+    {
+        int32 AnimId = Pair.Key;
+        int32 TrackIndex = Pair.Value;
+        if (AllAnimations.IsValidIndex(TrackIndex) && AllAnimations[TrackIndex])
+        {
+            AnimationCache.Add(AnimId, AllAnimations[TrackIndex]);
+        }
+    }
+    UE_LOG(LogWowAnim, Log, TEXT("SetAnimationIdMap: mapped %d animation IDs"), AnimationCache.Num());
+
+    // Play idle if available
+    if (AnimationCache.Contains(0) && MeshComponent)
+    {
+        MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+        MeshComponent->PlayAnimation(AnimationCache[0], true);
+        CurrentAnimation = AnimationCache[0];
+    }
+}
+
+bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping)
+{
+    if (!MeshComponent) return false;
+
+    int32 Id = static_cast<int32>(AnimId);
+
+    // Try AnimationCache first (mapped by M2 animation ID)
+    if (TObjectPtr<UAnimSequence>* Found = AnimationCache.Find(Id))
+    {
+        if (*Found)
+        {
+            MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+            MeshComponent->PlayAnimation(*Found, bLooping);
+            CurrentAnimation = *Found;
+            return true;
+        }
+    }
+
+    // Fallback: if AnimId 0 (idle) and we have any animations, play the first one
+    if (Id == 0 && AllAnimations.Num() > 0 && AllAnimations[0])
+    {
+        MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+        MeshComponent->PlayAnimation(AllAnimations[0], bLooping);
+        CurrentAnimation = AllAnimations[0];
+        return true;
+    }
+
+    return false;
 }
