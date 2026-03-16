@@ -547,11 +547,13 @@ void AWowLoginController::FinalizeWorldEntry()
                 Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y, Pawn->GetActorLocation().Z);
         }
 
-        // WoW shows cursor at all times — game gets all input, cursor stays visible
+        // WoW shows cursor — use GameAndUI but set widgets to not consume input
         GPC->bShowMouseCursor = true;
         GPC->bEnableClickEvents = true;
         GPC->bEnableMouseOverEvents = true;
-        GPC->SetInputMode(FInputModeGameOnly());
+        FInputModeGameAndUI InputMode;
+        InputMode.SetHideCursorDuringCapture(false);
+        GPC->SetInputMode(InputMode);
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));

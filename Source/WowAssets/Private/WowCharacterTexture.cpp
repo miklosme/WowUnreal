@@ -697,6 +697,37 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
             *RaceGenderSuffix, Equipment.RaceId, Equipment.Gender);
     }
 
+    // Map name suffix to region index and subdirectory
+    auto DetectRegionFromName = [](const FString& Name, int32& OutRegion) -> const TCHAR* {
+        static const struct { const TCHAR* Suffix; int32 Region; const TCHAR* Subdir; } SuffixMap[] = {
+            { TEXT("_AU"), 0, TEXT("ArmUpperTexture") },
+            { TEXT("_AL"), 1, TEXT("ArmLowerTexture") },
+            { TEXT("_HA"), 2, TEXT("HandTexture") },
+            { TEXT("_TU"), 3, TEXT("TorsoUpperTexture") },
+            { TEXT("_TL"), 4, TEXT("TorsoLowerTexture") },
+            { TEXT("_LU"), 5, TEXT("LegUpperTexture") },
+            { TEXT("_LL"), 6, TEXT("LegLowerTexture") },
+            { TEXT("_FO"), 7, TEXT("FootTexture") },
+            // Also check full suffixes
+            { TEXT("_Sleeve_AU"), 0, TEXT("ArmUpperTexture") },
+            { TEXT("_Sleeve_AL"), 1, TEXT("ArmLowerTexture") },
+            { TEXT("_Chest_TU"), 3, TEXT("TorsoUpperTexture") },
+            { TEXT("_Chest_TL"), 4, TEXT("TorsoLowerTexture") },
+            { TEXT("_Pant_LU"), 5, TEXT("LegUpperTexture") },
+            { TEXT("_Pant_LL"), 6, TEXT("LegLowerTexture") },
+        };
+        for (const auto& S : SuffixMap)
+        {
+            if (Name.EndsWith(S.Suffix))
+            {
+                OutRegion = S.Region;
+                return S.Subdir;
+            }
+        }
+        OutRegion = -1;
+        return nullptr;
+    };
+
     auto ApplyItemOverlays = [&](uint32 DisplayId, const TArray<uint32>& RegionIndices) {
         if (DisplayId == 0) return;
 
@@ -707,10 +738,18 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
         {
             if (Item->TextureOverlays[OverlayIdx].IsEmpty()) continue;
 
+            FString Name = Item->TextureOverlays[OverlayIdx];
+
+            // Detect the region from the texture name suffix
+            int32 DetectedRegion = -1;
+            const TCHAR* Subdir = DetectRegionFromName(Name, DetectedRegion);
+            if (!Subdir || DetectedRegion < 0) continue;
+
+            // Check if this region is in the list of regions we should apply
             bool bShouldApply = false;
             for (uint32 RegionIdx : RegionIndices)
             {
-                if (RegionIdx == static_cast<uint32>(OverlayIdx))
+                if (static_cast<int32>(RegionIdx) == DetectedRegion)
                 {
                     bShouldApply = true;
                     break;
@@ -718,24 +757,15 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
             }
             if (!bShouldApply) continue;
 
-            const FRegionCoords* Region = RegionCoords.Find(OverlayIdx);
+            const FRegionCoords* Region = RegionCoords.Find(DetectedRegion);
             if (!Region) continue;
 
-            static const TCHAR* RegionSubdirs[] = {
-                TEXT("ArmUpperTexture"),  TEXT("ArmLowerTexture"),  TEXT("HandTexture"),
-                TEXT("TorsoUpperTexture"),TEXT("TorsoLowerTexture"),
-                TEXT("LegUpperTexture"),  TEXT("LegLowerTexture"),  TEXT("FootTexture"),
-            };
-
-            FString Name = Item->TextureOverlays[OverlayIdx];
-
-            // Try paths with race+gender suffix first (e.g. "_hum" for Human Male),
-            // then single char suffix, then "U" universal, then bare name
+            // Try paths: with gender suffix, then bare name
             TArray<FString> Paths = {
-                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%s.blp"), RegionSubdirs[OverlayIdx], *Name, *RaceGenderSuffix),
-                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%c.blp"), RegionSubdirs[OverlayIdx], *Name, (Equipment.Gender == 1) ? TEXT('F') : TEXT('M')),
-                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_U.blp"), RegionSubdirs[OverlayIdx], *Name),
-                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s.blp"), RegionSubdirs[OverlayIdx], *Name),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%s.blp"), Subdir, *Name, *RaceGenderSuffix),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%c.blp"), Subdir, *Name, (Equipment.Gender == 1) ? TEXT('F') : TEXT('M')),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_U.blp"), Subdir, *Name),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s.blp"), Subdir, *Name),
             };
 
             uint32 OverlayW, OverlayH;
