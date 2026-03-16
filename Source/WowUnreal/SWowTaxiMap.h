@@ -4,7 +4,7 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Layout/SCanvas.h"
+#include "Widgets/SCanvas.h"
 #include "WowEntity.h"
 
 class UWowConnectionManager;

@@ -5,6 +5,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Framework/Application/SlateApplication.h"
+#include "InputCoreTypes.h"
 
 void SWowItemSlot::Construct(const FArguments& InArgs, TSharedPtr<FWowInventoryManager> InInventoryManager)
 {

@@ -1,8 +1,7 @@
 #include "SWowPartyInvite.h"
 #include "WowConnectionManager.h"
 #include "WowOpcodes.h"
-#include "Widgets/Layout/SVerticalBox.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBorder.h"
@@ -76,7 +75,7 @@ FReply SWowPartyInvite::OnAcceptClicked()
     {
         // Send CMSG_GROUP_ACCEPT with no payload
         TArray<uint8> Data;
-        ConnectionManager->SendPacket(WowOpcode::CMSG_GROUP_ACCEPT, Data);
+        ConnectionManager->SendRawPacket(WowOpcode::CMSG_GROUP_ACCEPT, Data);
     }
 
     CloseDialog();
@@ -91,7 +90,7 @@ FReply SWowPartyInvite::OnDeclineClicked()
     {
         // Send CMSG_GROUP_DECLINE with no payload
         TArray<uint8> Data;
-        ConnectionManager->SendPacket(WowOpcode::CMSG_GROUP_DECLINE, Data);
+        ConnectionManager->SendRawPacket(WowOpcode::CMSG_GROUP_DECLINE, Data);
     }
 
     CloseDialog();

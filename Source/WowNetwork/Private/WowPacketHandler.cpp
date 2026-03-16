@@ -3,6 +3,7 @@
 #include "WowUpdateFields.h"
 #include "WowWardenHandler.h"
 #include "Compression.h"
+#include "Formats/Dbc/DbcStore.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowPacket, Log, All);
 
@@ -1497,7 +1498,7 @@ void FWowPacketHandler::HandleGroupList(FPacketReader& R)
         Member.Status = Online;
 
         // Try to get level and class from entity data
-        if (auto* Entity = EntityManager.GetEntity(MemberGuid))
+        if (auto* Entity = EntityManager.Find(MemberGuid))
         {
             if (Entity->IsUnit())
             {
@@ -1582,8 +1583,15 @@ void FWowPacketHandler::HandleShowTaxiNodes(FPacketReader& R)
 
     // Read known nodes bitmask (variable length)
     // Each byte contains 8 node flags, calculate how many bytes we need
-    const int32 MaxNodeId = TaxiData.AllNodes.IsEmpty() ? 256 :
-        TaxiData.AllNodes.Max([](const FWowTaxiNode& A, const FWowTaxiNode& B) { return A.Id < B.Id; }).Id;
+    int32 MaxNodeId = 256;
+    if (!TaxiData.AllNodes.IsEmpty())
+    {
+        MaxNodeId = 0;
+        for (const auto& Node : TaxiData.AllNodes)
+        {
+            MaxNodeId = FMath::Max(MaxNodeId, (int32)Node.Id);
+        }
+    }
     const int32 BitmaskBytes = (MaxNodeId + 7) / 8;
 
     TaxiData.KnownNodes.SetNum(MaxNodeId + 1);

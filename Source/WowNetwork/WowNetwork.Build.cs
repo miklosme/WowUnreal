@@ -4,7 +4,7 @@ public class WowNetwork : ModuleRules
     public WowNetwork(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "Sockets", "Networking" });
+        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "Sockets", "Networking", "WowData" });
         AddEngineThirdPartyPrivateStaticDependencies(Target, "OpenSSL");
     }
 }

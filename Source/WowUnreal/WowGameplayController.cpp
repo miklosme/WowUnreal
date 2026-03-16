@@ -13,6 +13,9 @@
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
 #include "SWowChatWindow.h"
+#include "SWowPartyFrame.h"
+#include "SWowPartyInvite.h"
+#include "SWowTaxiMap.h"
 #include "WowDeathManager.h"
 #include "WowCursorManager.h"
 #include "WowTooltipManager.h"
@@ -1498,7 +1501,7 @@ void AWowGameplayController::OnPartyCommandResult(uint8 Command, const FString& 
 	if (ChatWindow.IsValid())
 	{
 		FString Message = FString::Printf(TEXT("%s %s: %s"), CommandName, *PlayerName, ResultName);
-		ChatWindow->AddMessage(Message, FLinearColor::Yellow, TEXT("System"));
+		ChatWindow->AddCombatMessage(Message, FLinearColor::Yellow);
 	}
 }
 
@@ -1551,7 +1554,7 @@ void AWowGameplayController::OnTaxiActivateReply(uint8 Result)
 		if (ChatWindow.IsValid())
 		{
 			FString Message = FString::Printf(TEXT("Cannot use taxi: %s"), ResultName);
-			ChatWindow->AddMessage(Message, FLinearColor::Red, TEXT("System"));
+			ChatWindow->AddCombatMessage(Message, FLinearColor::Red);
 		}
 	}
 	else
@@ -1566,7 +1569,7 @@ void AWowGameplayController::OnTaxiActivateReply(uint8 Result)
 		// Add flight message
 		if (ChatWindow.IsValid())
 		{
-			ChatWindow->AddMessage(TEXT("You are now on a flight path"), FLinearColor::Green, TEXT("System"));
+			ChatWindow->AddCombatMessage(TEXT("You are now on a flight path"), FLinearColor::Green);
 		}
 	}
 }

@@ -5,7 +5,7 @@ public class WowUI : ModuleRules
     public WowUI(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "UMG", "Slate", "SlateCore", "WowData", "WowAssets", "WowNetwork", "XmlParser" });
+        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "UMG", "Slate", "SlateCore", "WowData", "WowAssets", "WowNetwork", "XmlParser", "InputCore" });
         string LuaPath = Path.Combine(ModuleDirectory, "..", "ThirdParty", "lua");
         if (Directory.Exists(LuaPath))
         {

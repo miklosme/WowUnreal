@@ -1,8 +1,7 @@
 #include "SWowPartyFrame.h"
 #include "WowConnectionManager.h"
 #include "WowPacketHandler.h"
-#include "Widgets/Layout/SVerticalBox.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Notifications/SProgressBar.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBorder.h"
@@ -45,7 +44,7 @@ void SWowPartyFrame::UpdatePartyInfo(const FWowGroupInfo& GroupInfo)
     for (const FWowGroupMember& Member : GroupInfo.Members)
     {
         // Skip local player - we don't show ourselves in party frames
-        if (ConnectionManager.IsValid() && ConnectionManager->GetPacketHandler().EntityManager.GetPlayerGuid() == Member.Guid)
+        if (ConnectionManager.IsValid() && ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid == Member.Guid)
         {
             continue;
         }
@@ -75,7 +74,7 @@ void SWowPartyFrame::UpdatePartyInfo(const FWowGroupInfo& GroupInfo)
     // Try to update with existing entity data
     if (ConnectionManager.IsValid())
     {
-        for (const auto& EntityPair : ConnectionManager->GetPacketHandler().EntityManager.GetEntities())
+        for (const auto& EntityPair : ConnectionManager->PacketHandler.EntityManager.GetAll())
         {
             UpdateMemberFromEntity(*EntityPair.Value);
         }

@@ -1,12 +1,11 @@
 #include "SWowTaxiMap.h"
 #include "WowConnectionManager.h"
 #include "WowOpcodes.h"
-#include "Widgets/Layout/SVerticalBox.h"
-#include "Widgets/Layout/SHorizontalBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBorder.h"
-#include "Widgets/Layout/SCanvas.h"
+#include "Widgets/SCanvas.h"
 #include "Widgets/Images/SImage.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Input/Events.h"
@@ -161,7 +160,7 @@ FReply SWowTaxiMap::OnNodeClicked(uint32 NodeId)
     FMemory::Memcpy(Data.GetData() + 8, &SourceNode, 4);
     FMemory::Memcpy(Data.GetData() + 12, &DestNode32, 4);
 
-    ConnectionManager->SendPacket(WowOpcode::CMSG_ACTIVATETAXI, Data);
+    ConnectionManager->SendRawPacket(WowOpcode::CMSG_ACTIVATETAXI, Data);
 
     // Close the map - server will handle the flight
     CloseTaxiMap();

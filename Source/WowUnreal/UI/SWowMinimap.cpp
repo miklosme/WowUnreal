@@ -152,14 +152,14 @@ void SWowMinimap::PaintMinimapBackground(const FGeometry& AllottedGeometry, FSla
     const float AngleStep = 2.0f * PI / NumSegments;
 
     // Center vertex
-    Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), Center, FVector2D::ZeroVector, BackgroundColor));
+    Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), FVector2f(Center), FVector2f::ZeroVector, BackgroundColor.ToFColor(true)));
 
     // Circle vertices
     for (int32 i = 0; i <= NumSegments; ++i)
     {
         float Angle = i * AngleStep;
         FVector2D Pos = Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius;
-        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), Pos, FVector2D::ZeroVector, BackgroundColor));
+        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), FVector2f(Pos), FVector2f::ZeroVector, BackgroundColor.ToFColor(true)));
     }
 
     // Triangle indices for filled circle
@@ -290,7 +290,7 @@ void SWowMinimap::PaintPlayerArrow(const FGeometry& AllottedGeometry, FSlateWind
             ArrowVerts[i].X * SinYaw + ArrowVerts[i].Y * CosYaw
         );
         FVector2D WorldPos = Center + Rotated;
-        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), WorldPos, FVector2D::ZeroVector, ArrowColor));
+        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), FVector2f(WorldPos), FVector2f::ZeroVector, ArrowColor.ToFColor(true)));
     }
 
     // Triangle indices
@@ -332,8 +332,8 @@ void SWowMinimap::PaintCircularBorder(const FGeometry& AllottedGeometry, FSlateW
         FVector2D OuterPos = Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius;
         FVector2D InnerPos = Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * (Radius - BorderThickness);
 
-        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), OuterPos, FVector2D::ZeroVector, BorderColor));
-        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), InnerPos, FVector2D::ZeroVector, BorderColor));
+        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), FVector2f(OuterPos), FVector2f::ZeroVector, BorderColor.ToFColor(true)));
+        Vertices.Add(FSlateVertex::Make(FSlateRenderTransform(), FVector2f(InnerPos), FVector2f::ZeroVector, BorderColor.ToFColor(true)));
     }
 
     // Create quad strips for border
