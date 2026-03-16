@@ -190,7 +190,7 @@ FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, int3
 	FString FontName = FPaths::GetBaseFilename(FilePath);
 
 	// Set up the font info - UE5 will handle loading
-	FontInfo.FontName = FName(*FontName);
+	FontInfo.TypefaceFontName = FName(*FontName);
 	FontInfo.Size = Size;
 
 	// If the system font doesn't work, UE5 will fallback to default fonts

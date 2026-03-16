@@ -7,6 +7,9 @@
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnLoginVerifyWorld, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnChatMessage, const FString& /*Message*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellFailure, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint8 /*FailureReason*/);
+DECLARE_MULTICAST_DELEGATE_FourParams(FOnAttackerStateUpdate, uint64 /*AttackerGuid*/, uint64 /*TargetGuid*/, uint32 /*HitInfo*/, uint32 /*Damage*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLootOpened, uint64 /*LootGuid*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnOpcodeReceived, uint16 /*Opcode*/);
@@ -134,6 +137,9 @@ public:
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
     FOnSpellStart OnSpellStart;
+    FOnSpellGo OnSpellGo;
+    FOnSpellFailure OnSpellFailure;
+    FOnAttackerStateUpdate OnAttackerStateUpdate;
     FOnLootOpened OnLootOpened;
     FOnQuestAccepted OnQuestAccepted;
     FOnQuestComplete OnQuestComplete;
@@ -176,6 +182,8 @@ private:
     void HandleTimeSyncReq(FPacketReader& R);
     void HandleSpellStart(FPacketReader& R);
     void HandleSpellGo(FPacketReader& R);
+    void HandleSpellFailure(FPacketReader& R);
+    void HandleAttackerStateUpdate(FPacketReader& R);
     void HandleAuraUpdate(FPacketReader& R);
     void HandlePowerUpdate(FPacketReader& R);
     void HandleMonsterMove(FPacketReader& R);
