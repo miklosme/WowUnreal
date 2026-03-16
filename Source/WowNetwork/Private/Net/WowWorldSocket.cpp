@@ -565,6 +565,19 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
             Info.Equipment.Add(Equipment);
         }
 
+        // Log equipment with display IDs
+        {
+            int32 EquippedCount = 0;
+            for (const auto& Eq : Info.Equipment)
+            {
+                if (Eq.DisplayId > 0) ++EquippedCount;
+            }
+            if (EquippedCount > 0)
+            {
+                UE_LOG(LogWowWorld, Log, TEXT("  Equipment: %d items equipped"), EquippedCount);
+            }
+        }
+
         Characters.Add(Info);
         UE_LOG(LogWowWorld, Log, TEXT("Character[%d]: '%s' Level %d Race %d Class %d GUID %llu (offset %d→%d, %d bytes)"),
                i, *Info.Name, Info.Level, Info.Race, Info.Class, Info.Guid,

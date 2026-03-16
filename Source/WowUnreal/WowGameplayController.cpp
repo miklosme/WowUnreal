@@ -1230,9 +1230,9 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 		UE_LOG(LogWowGameplay, Log, TEXT("Local player race/gender from entity: Race=%d Gender=%d"), RaceId, Gender);
 	}
 
-	// If no valid race/gender from entity, try to get from cached character list
+	// Always look up cached character info (for equipment data + customization fallback)
 	const FWowCharacterInfo* CachedCharInfo = nullptr;
-	if (RaceId == 0 && ConnectionManager)
+	if (ConnectionManager)
 	{
 		const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
 		const TArray<FWowCharacterInfo>& CachedChars = ConnectionManager->GetCachedCharacters();
@@ -1241,10 +1241,14 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 		{
 			if (static_cast<uint64>(CharInfo.Guid) == LocalGuid)
 			{
-				RaceId = CharInfo.Race;
-				Gender = CharInfo.Gender;
-				CachedCharInfo = &CharInfo; // Store reference for equipment data
-				UE_LOG(LogWowGameplay, Log, TEXT("Local player race/gender from cached character: Race=%d Gender=%d"), RaceId, Gender);
+				CachedCharInfo = &CharInfo;
+				if (RaceId == 0)
+				{
+					RaceId = CharInfo.Race;
+					Gender = CharInfo.Gender;
+				}
+				UE_LOG(LogWowGameplay, Log, TEXT("Found cached character: Race=%d Gender=%d Equipment=%d slots"),
+					CharInfo.Race, CharInfo.Gender, CharInfo.Equipment.Num());
 				break;
 			}
 		}
