@@ -86,6 +86,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_AUTOEQUIP_ITEM          = 0x010A;
     inline constexpr uint16 CMSG_SWAP_INV_ITEM           = 0x010C;
     inline constexpr uint16 CMSG_SWAP_ITEM               = 0x010D;
+    inline constexpr uint16 CMSG_AUTOSTORE_LOOT_ITEM     = 0x0108;
     inline constexpr uint16 CMSG_DESTROYITEM             = 0x0111;
     inline constexpr uint16 SMSG_INVENTORY_CHANGE_FAILURE = 0x0112;
     inline constexpr uint16 CMSG_LOOT                    = 0x015D;
@@ -93,7 +94,11 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_LOOT_RESPONSE           = 0x0160;
     inline constexpr uint16 SMSG_LOOT_RELEASE_RESPONSE   = 0x0161;
     inline constexpr uint16 SMSG_ITEM_PUSH_RESULT        = 0x0166;
+
+    // Vendor opcodes
+    inline constexpr uint16 SMSG_LIST_INVENTORY          = 0x019F;
     inline constexpr uint16 SMSG_SELL_ITEM               = 0x01A1;
+    inline constexpr uint16 CMSG_BUY_ITEM                = 0x01A2;
     inline constexpr uint16 SMSG_BUY_ITEM                = 0x01A2;
 
     // Quest system opcodes

@@ -48,6 +48,18 @@ public:
     /** Stop melee attack */
     UFUNCTION(BlueprintCallable) void SendAttackStop();
 
+    /** Send loot item command */
+    UFUNCTION(BlueprintCallable) void SendLootItem(int32 LootSlot);
+
+    /** Send buy item from vendor command */
+    UFUNCTION(BlueprintCallable) void SendBuyItem(int64 VendorGuid, int32 ItemId, int32 Count = 1);
+
+    /** Send quest accept command */
+    UFUNCTION(BlueprintCallable) void SendQuestAccept(int64 QuestGiverGuid, int32 QuestId);
+
+    /** Send quest complete/choose reward command */
+    UFUNCTION(BlueprintCallable) void SendQuestChooseReward(int64 QuestGiverGuid, int32 QuestId, int32 RewardChoice = 0);
+
     /** Get current target GUID */
     UFUNCTION(BlueprintCallable) int64 GetTargetGuid() const { return TargetGuid; }
 

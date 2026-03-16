@@ -28,6 +28,9 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_LOOT_RELEASE_RESPONSE,    &FWowPacketHandler::HandleLootReleaseResponse);
     Handlers.Add(WowOpcode::SMSG_ITEM_PUSH_RESULT,         &FWowPacketHandler::HandleItemPushResult);
 
+    // Vendor system handlers
+    Handlers.Add(WowOpcode::SMSG_LIST_INVENTORY,           &FWowPacketHandler::HandleListInventory);
+
     // Quest system handlers
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_STATUS,        &FWowPacketHandler::HandleQuestgiverStatus);
     Handlers.Add(WowOpcode::SMSG_QUESTGIVER_QUEST_DETAILS, &FWowPacketHandler::HandleQuestgiverQuestDetails);
@@ -957,25 +960,25 @@ void FWowPacketHandler::HandleLootResponse(FPacketReader& R)
 
     for (int32 i = 0; i < ItemCount; ++i)
     {
-        if (!R.CanRead(14)) break; // index + item_id + count + display_id + quality (minimum)
+        if (!R.CanRead(22)) break; // index + item_id + count + display_id + random_suffix + random_property + slot_type
 
         FWowLootItem Item;
         Item.Index = R.ReadU8();
         Item.ItemId = R.ReadU32();
         Item.Count = R.ReadU32();
         Item.DisplayId = R.ReadU32();
-        Item.Quality = R.ReadU8();
+        Item.RandomSuffix = R.ReadU32();
+        Item.RandomProperty = R.ReadU32();
+        Item.SlotType = R.ReadU8();
         Item.bLooted = false;
 
-        // Skip additional loot item data (there may be more fields depending on server implementation)
-        // For now, we have the essential fields
         Items.Add(Item);
     }
 
     UE_LOG(LogWowPacket, Log, TEXT("LOOT_RESPONSE: guid=%llu type=%d gold=%u items=%d"),
            LootGuid, LootType, Gold, ItemCount);
 
-    OnLootOpened.Broadcast(LootGuid, Items);
+    OnLootOpened.Broadcast(LootGuid, LootType, Gold, Items);
 }
 
 // ── SMSG_LOOT_RELEASE_RESPONSE ──────────────────────────────────────────────
@@ -991,6 +994,8 @@ void FWowPacketHandler::HandleLootReleaseResponse(FPacketReader& R)
     uint8 Unknown = R.ReadU8();
 
     UE_LOG(LogWowPacket, Log, TEXT("LOOT_RELEASE_RESPONSE: guid=%llu (loot window closed)"), LootGuid);
+
+    OnLootClosed.Broadcast();
 }
 
 // ── SMSG_ITEM_PUSH_RESULT ──────────────────────────────────────────────────
@@ -1022,6 +1027,43 @@ void FWowPacketHandler::HandleItemPushResult(FPacketReader& R)
     const TCHAR* CreatedMsg = (Created == 1) ? TEXT("new") : TEXT("existing");
     UE_LOG(LogWowPacket, Log, TEXT("ITEM_PUSH_RESULT: target=%llu %s item=%u count=%u bag=%d slot=%u"),
            TargetGuid, CreatedMsg, ItemId, Count, BagSlot, ItemSlot);
+}
+
+// ── SMSG_LIST_INVENTORY ──────────────────────────────────────────────────────
+// packed guid vendor_guid, uint8 item_count, for each item: uint32 slot + uint32 itemid + uint32 displayid + uint32 maxcount + uint32 price + uint32 maxdurability + uint32 buycount + uint32 extendedcost
+
+void FWowPacketHandler::HandleListInventory(FPacketReader& R)
+{
+    if (!R.CanRead(2)) return; // minimum: packed guid + item count
+
+    uint64 VendorGuid = R.ReadPackedGuid();
+
+    if (!R.CanRead(1)) return;
+    uint8 ItemCount = R.ReadU8();
+
+    TArray<FWowVendorItem> Items;
+    Items.Reserve(ItemCount);
+
+    for (int32 i = 0; i < ItemCount; ++i)
+    {
+        if (!R.CanRead(32)) break; // slot + itemid + displayid + maxcount + price + maxdurability + buycount + extendedcost
+
+        FWowVendorItem Item;
+        Item.Slot = R.ReadU32();
+        Item.ItemId = R.ReadU32();
+        Item.DisplayId = R.ReadU32();
+        Item.MaxCount = R.ReadU32();
+        Item.Price = R.ReadU32();
+        Item.MaxDurability = R.ReadU32();
+        Item.BuyCount = R.ReadU32();
+        Item.ExtendedCost = R.ReadU32();
+
+        Items.Add(Item);
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("LIST_INVENTORY: vendor=%llu items=%d"), VendorGuid, ItemCount);
+
+    OnVendorOpened.Broadcast(VendorGuid, Items);
 }
 
 // ── ──────────────────────────────────────────────────────────────────────────
@@ -1320,9 +1362,29 @@ void FWowPacketHandler::HandleQuestgiverQuestDetails(FPacketReader& R)
 
     FString Title = R.ReadCString();
     FString Details = R.ReadCString();
+    FString Objectives = R.ReadCString();
+
+    FWowQuestDetails QuestDetails;
+    QuestDetails.QuestGiverGuid = Guid;
+    QuestDetails.QuestId = QuestId;
+    QuestDetails.Title = Title;
+    QuestDetails.Details = Details;
+    QuestDetails.Objectives = Objectives;
+
+    // Parse reward items if available (simplified for now - exact structure depends on server)
+    if (R.CanRead(4))
+    {
+        QuestDetails.RewardMoney = R.ReadU32();
+    }
+    if (R.CanRead(4))
+    {
+        QuestDetails.RewardXP = R.ReadU32();
+    }
 
     UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_QUEST_DETAILS: guid=%llu quest=%u title=\"%s\""),
            Guid, QuestId, *Title);
+
+    OnQuestDialog.Broadcast(QuestDetails);
 }
 
 // ── SMSG_QUESTGIVER_OFFER_REWARD ─────────────────────────────────────────
@@ -1337,8 +1399,26 @@ void FWowPacketHandler::HandleQuestgiverOfferReward(FPacketReader& R)
 
     FString Title = R.ReadCString();
 
+    FWowQuestDetails QuestDetails;
+    QuestDetails.QuestGiverGuid = Guid;
+    QuestDetails.QuestId = QuestId;
+    QuestDetails.Title = Title;
+    QuestDetails.Details = TEXT("Quest complete!");
+
+    // Parse reward data if available
+    if (R.CanRead(4))
+    {
+        QuestDetails.RewardMoney = R.ReadU32();
+    }
+    if (R.CanRead(4))
+    {
+        QuestDetails.RewardXP = R.ReadU32();
+    }
+
     UE_LOG(LogWowPacket, Log, TEXT("QUESTGIVER_OFFER_REWARD: guid=%llu quest=%u title=\"%s\""),
            Guid, QuestId, *Title);
+
+    OnQuestRewardDialog.Broadcast(QuestDetails);
 }
 
 // ── SMSG_QUEST_UPDATE_ADD_KILL ───────────────────────────────────────────

@@ -5,6 +5,7 @@
 
 class UWowConnectionManager;
 class UWowUIManager;
+class UWowGameUI;
 class AWowWorldManager;
 class FMpqManager;
 class FWowAssetCache;
@@ -27,6 +28,10 @@ public:
     /** UI manager for event dispatch */
     UPROPERTY()
     TObjectPtr<UWowUIManager> UIManager;
+
+    /** Game UI manager for WoW-style windows */
+    UPROPERTY()
+    TObjectPtr<UWowGameUI> GameUI;
 
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();
