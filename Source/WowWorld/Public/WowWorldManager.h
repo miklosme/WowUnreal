@@ -34,6 +34,9 @@ public:
     FMpqManager* GetMpqManager() const { return MpqManager.Get(); }
     FWowAssetCache* GetAssetCache() const { return AssetCache.Get(); }
 
+    /** Load WDT/WDL and enable terrain streaming. Call after deferred startup (e.g. login scene). */
+    void EnableTerrainStreaming();
+
     /** Get the terrain RVT for mesh components to write to */
     URuntimeVirtualTexture* GetTerrainRVT() const { return TerrainRVT; }
 

@@ -139,11 +139,10 @@ void AWowLoginController::InitializeWorldSystems()
     UWorld* World = GetWorld();
     if (!World) return;
 
-    // 1. Enable terrain streaming on the WorldManager
+    // 1. Enable terrain streaming on the WorldManager (loads WDT/WDL)
     if (WorldManager)
     {
-        WorldManager->bStreamingEnabled = true;
-        UE_LOG(LogWowLogin, Log, TEXT("Enabled terrain streaming"));
+        WorldManager->EnableTerrainStreaming();
     }
 
     // 2. Bind ConnectionManager to the GameplayController

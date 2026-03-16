@@ -399,6 +399,15 @@ void AWowWorldManager::BeginPlay()
         return;
     }
 
+    // If streaming is disabled at startup (e.g. login scene), skip all terrain
+    // loading. The LoginController will enable streaming and call LoadInitialTerrain()
+    // when the player enters the world.
+    if (!bStreamingEnabled)
+    {
+        UE_LOG(LogWowWorld, Log, TEXT("Terrain loading deferred (bStreamingEnabled=false, login scene)"));
+        return;
+    }
+
     // Load WDT for the map
     FString WdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s.wdt"), *MapName, *MapName);
     TArray<uint8> WdtRaw;
@@ -493,6 +502,41 @@ void AWowWorldManager::BeginPlay()
         PC->SetControlRotation(FRotator(StartupCameraPitch, StartupCameraYaw, 0.0f));
         UE_LOG(LogWowWorld, Log, TEXT("Teleported player to: %s"), *TileCenter.ToString());
     }
+}
+
+void AWowWorldManager::EnableTerrainStreaming()
+{
+    if (bStreamingEnabled) return; // Already enabled
+    if (!MpqManager || !MpqManager->IsInitialized())
+    {
+        UE_LOG(LogWowWorld, Error, TEXT("Cannot enable terrain streaming — MPQ not initialized"));
+        return;
+    }
+
+    UE_LOG(LogWowWorld, Log, TEXT("Enabling deferred terrain streaming for map: %s"), *MapName);
+
+    // Load WDT
+    FString WdtPath = FString::Printf(TEXT("World\\Maps\\%s\\%s.wdt"), *MapName, *MapName);
+    TArray<uint8> WdtRaw;
+    if (MpqManager->ReadFile(WdtPath, WdtRaw))
+    {
+        WdtData = MakeUnique<FWdtData>(FWdtParser::Parse(WdtRaw));
+        UE_LOG(LogWowWorld, Log, TEXT("Loaded WDT for %s (BigAlpha=%d)"), *MapName, WdtData->bUseBigAlpha ? 1 : 0);
+    }
+
+    // Load WDL
+    FString WdlPath = FString::Printf(TEXT("World\\Maps\\%s\\%s.wdl"), *MapName, *MapName);
+    TArray<uint8> WdlRaw;
+    if (MpqManager->ReadFile(WdlPath, WdlRaw))
+    {
+        WdlData = MakeUnique<FWdlData>(FWdlParser::Parse(WdlRaw));
+        UE_LOG(LogWowWorld, Log, TEXT("Loaded WDL for %s"), *MapName);
+    }
+
+    SetupRuntimeVirtualTexture();
+
+    bStreamingEnabled = true;
+    UE_LOG(LogWowWorld, Log, TEXT("Terrain streaming enabled — tiles will load around camera position"));
 }
 
 void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
