@@ -257,13 +257,6 @@ private:
     void OnChatInputModeChanged(bool bGameAndUI);
     void OnEntityHealthChanged(const FWowEntity& Entity, int32 OldHealth, int32 NewHealth);
 
-    // Input handlers for spell casting (1-6 keys)
-    void OnSpellKey1() { CastSpell(133); } // Fireball
-    void OnSpellKey2() { CastSpell(116); } // Frostbolt
-    void OnSpellKey3() { CastSpell(2136); } // Fire Blast
-    void OnSpellKey4() { CastSpell(122); }  // Frost Nova
-    void OnSpellKey5() { CastSpell(1449); } // Arcane Explosion
-    void OnSpellKey6() { CastSpell(475); }  // Remove Curse
 
     void OnRightClick();
 

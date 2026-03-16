@@ -100,27 +100,19 @@ void AWowGameplayController::SetupInputComponent()
 	// Right click for auto-attack
 	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &AWowGameplayController::OnRightClick);
 
-	// Action bar keybinds
-	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &AWowGameplayController::OnActionSlot1);
-	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &AWowGameplayController::OnActionSlot2);
-	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &AWowGameplayController::OnActionSlot3);
-	InputComponent->BindKey(EKeys::Four, IE_Pressed, this, &AWowGameplayController::OnActionSlot4);
-	InputComponent->BindKey(EKeys::Five, IE_Pressed, this, &AWowGameplayController::OnActionSlot5);
-	InputComponent->BindKey(EKeys::Six, IE_Pressed, this, &AWowGameplayController::OnActionSlot6);
-	InputComponent->BindKey(EKeys::Seven, IE_Pressed, this, &AWowGameplayController::OnActionSlot7);
-	InputComponent->BindKey(EKeys::Eight, IE_Pressed, this, &AWowGameplayController::OnActionSlot8);
-	InputComponent->BindKey(EKeys::Nine, IE_Pressed, this, &AWowGameplayController::OnActionSlot9);
-	InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &AWowGameplayController::OnActionSlot0);
-	InputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &AWowGameplayController::OnActionSlotMinus);
-	InputComponent->BindKey(EKeys::Equals, IE_Pressed, this, &AWowGameplayController::OnActionSlotEquals);
-
-	// Spell casting keys (1-6) for combat branch functionality
-	InputComponent->BindKey(EKeys::One, IE_Released, this, &AWowGameplayController::OnSpellKey1);
-	InputComponent->BindKey(EKeys::Two, IE_Released, this, &AWowGameplayController::OnSpellKey2);
-	InputComponent->BindKey(EKeys::Three, IE_Released, this, &AWowGameplayController::OnSpellKey3);
-	InputComponent->BindKey(EKeys::Four, IE_Released, this, &AWowGameplayController::OnSpellKey4);
-	InputComponent->BindKey(EKeys::Five, IE_Released, this, &AWowGameplayController::OnSpellKey5);
-	InputComponent->BindKey(EKeys::Six, IE_Released, this, &AWowGameplayController::OnSpellKey6);
+	// Action bar keybinds - use IE_Released to avoid conflicts and match WoW behavior
+	InputComponent->BindKey(EKeys::One, IE_Released, this, &AWowGameplayController::OnActionSlot1);
+	InputComponent->BindKey(EKeys::Two, IE_Released, this, &AWowGameplayController::OnActionSlot2);
+	InputComponent->BindKey(EKeys::Three, IE_Released, this, &AWowGameplayController::OnActionSlot3);
+	InputComponent->BindKey(EKeys::Four, IE_Released, this, &AWowGameplayController::OnActionSlot4);
+	InputComponent->BindKey(EKeys::Five, IE_Released, this, &AWowGameplayController::OnActionSlot5);
+	InputComponent->BindKey(EKeys::Six, IE_Released, this, &AWowGameplayController::OnActionSlot6);
+	InputComponent->BindKey(EKeys::Seven, IE_Released, this, &AWowGameplayController::OnActionSlot7);
+	InputComponent->BindKey(EKeys::Eight, IE_Released, this, &AWowGameplayController::OnActionSlot8);
+	InputComponent->BindKey(EKeys::Nine, IE_Released, this, &AWowGameplayController::OnActionSlot9);
+	InputComponent->BindKey(EKeys::Zero, IE_Released, this, &AWowGameplayController::OnActionSlot0);
+	InputComponent->BindKey(EKeys::Hyphen, IE_Released, this, &AWowGameplayController::OnActionSlotMinus);
+	InputComponent->BindKey(EKeys::Equals, IE_Released, this, &AWowGameplayController::OnActionSlotEquals);
 
 	// Minimap toggle
 	InputComponent->BindKey(EKeys::M, IE_Pressed, this, &AWowGameplayController::OnToggleMap);

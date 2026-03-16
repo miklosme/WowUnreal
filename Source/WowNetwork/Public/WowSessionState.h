@@ -25,6 +25,15 @@ struct WOWNETWORK_API FWowRealmInfo
 };
 
 USTRUCT(BlueprintType)
+struct WOWNETWORK_API FWowCharacterEquipment
+{
+    GENERATED_BODY()
+    UPROPERTY(BlueprintReadOnly) int32 DisplayId = 0;
+    UPROPERTY(BlueprintReadOnly) uint8 InventoryType = 0;
+    UPROPERTY(BlueprintReadOnly) int32 EnchantAuraId = 0;
+};
+
+USTRUCT(BlueprintType)
 struct WOWNETWORK_API FWowCharacterInfo
 {
     GENERATED_BODY()
@@ -37,4 +46,7 @@ struct WOWNETWORK_API FWowCharacterInfo
     UPROPERTY(BlueprintReadOnly) int32 MapId = 0;
     UPROPERTY(BlueprintReadOnly) int32 ZoneId = 0;
     UPROPERTY(BlueprintReadOnly) FVector Position = FVector::ZeroVector;
+
+    // Equipment: 23 slots as sent by SMSG_CHAR_ENUM
+    UPROPERTY(BlueprintReadOnly) TArray<FWowCharacterEquipment> Equipment;
 };

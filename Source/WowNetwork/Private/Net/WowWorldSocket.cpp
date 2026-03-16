@@ -545,9 +545,25 @@ void FWowWorldSocket::HandleCharEnum(const TArray<uint8>& Data)
 
         // Equipment: 23 slots × (uint32 displayId + uint8 invType + uint32 enchant) = 23 × 9 = 207 bytes
         // In 3.3.5 SMSG_CHAR_ENUM each slot is: displayInfoID(4) + inventoryType(1) + auraId(4) = 9 bytes × 23 slots
-        int32 EquipmentBytes = 23 * 9;
-        if (Offset + EquipmentBytes > Data.Num()) break;
-        Offset += EquipmentBytes;
+        Info.Equipment.Reserve(23);
+        for (int32 SlotIdx = 0; SlotIdx < 23; ++SlotIdx)
+        {
+            if (Offset + 9 > Data.Num()) break;
+
+            FWowCharacterEquipment Equipment;
+            uint32 TempDisplayId = 0;
+            uint32 TempAuraId = 0;
+            FMemory::Memcpy(&TempDisplayId, &Data[Offset], 4); // uint32 displayId
+            Equipment.DisplayId = static_cast<int32>(TempDisplayId);
+            Offset += 4;
+            Equipment.InventoryType = Data[Offset]; // uint8 inventoryType
+            Offset += 1;
+            FMemory::Memcpy(&TempAuraId, &Data[Offset], 4); // uint32 enchant aura
+            Equipment.EnchantAuraId = static_cast<int32>(TempAuraId);
+            Offset += 4;
+
+            Info.Equipment.Add(Equipment);
+        }
 
         Characters.Add(Info);
         UE_LOG(LogWowWorld, Log, TEXT("Character[%d]: '%s' Level %d Race %d Class %d GUID %llu (offset %d→%d, %d bytes)"),
