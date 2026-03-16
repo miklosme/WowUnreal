@@ -809,7 +809,9 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             SkelMesh->SetSkeletalMesh(SkeletalMesh);
             SkelMesh->SetWorldScale3D(FVector(Scale));
             SkelMesh->SetCastShadow(true);
-            SkelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+            SkelMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+            SkelMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+            SkelMesh->SetCollisionObjectType(ECC_Pawn);
 
             if (UMaterial* BaseMat = GetCharacterMaterial())
             {
