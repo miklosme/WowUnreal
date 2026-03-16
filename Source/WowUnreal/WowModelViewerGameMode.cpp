@@ -182,6 +182,53 @@ void AWowModelViewerGameMode::RespawnCharacter()
         Params.Equipment.Add(Slot);
     }
 
+    // Starter gear: find first available equipment for each slot
+    if (ViewerWidget->GetShowStarterGear())
+    {
+        FString ResolvedPath;
+        uint32 FoundWeapon = 0, FoundHelmet = 0, FoundShoulder = 0;
+
+        for (const FItemDisplayInfoDbcEntry& Entry : FDbcStore::Get().ItemDisplayInfo().GetAll())
+        {
+            if (FoundWeapon == 0 &&
+                FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID,
+                    FWowEquipmentManager::EAttachmentPoint::RightHand, ResolvedPath))
+            {
+                FoundWeapon = Entry.ID;
+            }
+            if (FoundHelmet == 0 &&
+                FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID,
+                    FWowEquipmentManager::EAttachmentPoint::Helmet, ResolvedPath))
+            {
+                FoundHelmet = Entry.ID;
+            }
+            if (FoundShoulder == 0 &&
+                FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID,
+                    FWowEquipmentManager::EAttachmentPoint::LeftShoulder, ResolvedPath))
+            {
+                FoundShoulder = Entry.ID;
+            }
+            if (FoundWeapon && FoundHelmet && FoundShoulder) break;
+        }
+
+        auto AddEquip = [&Params](uint32 Id, FWowEquipmentManager::EAttachmentPoint Pt)
+        {
+            if (Id == 0) return;
+            FWowCharacterBuilder::FEquipmentSlot Slot;
+            Slot.ItemDisplayId = Id;
+            Slot.AttachPoint = Pt;
+            Params.Equipment.Add(Slot);
+        };
+
+        AddEquip(FoundWeapon, FWowEquipmentManager::EAttachmentPoint::RightHand);
+        AddEquip(FoundHelmet, FWowEquipmentManager::EAttachmentPoint::Helmet);
+        AddEquip(FoundShoulder, FWowEquipmentManager::EAttachmentPoint::LeftShoulder);
+        AddEquip(FoundShoulder, FWowEquipmentManager::EAttachmentPoint::RightShoulder);
+
+        UE_LOG(LogModelViewer, Log, TEXT("Starter gear: weapon=%d helmet=%d shoulder=%d"),
+            FoundWeapon, FoundHelmet, FoundShoulder);
+    }
+
     const FRotator FacingCamera(0.0f, -90.0f, 0.0f);
     CurrentModelActor = FWowCharacterBuilder::SpawnCharacterWithEquipment(
         GetWorld(), Mpq, Cache, Params, FVector::ZeroVector, FacingCamera);

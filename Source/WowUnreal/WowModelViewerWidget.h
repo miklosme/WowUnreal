@@ -34,6 +34,7 @@ public:
     uint32 GetFacialHairStyle() const { return FacialHairStyle; }
     uint32 GetWeaponDisplayId() const;
     uint32 GetCreatureDisplayId() const;
+    bool GetShowStarterGear() const { return bShowStarterGear; }
 
     void SetStatusText(const FString& Text);
 
@@ -73,6 +74,9 @@ private:
 
     // Equipment
     TSharedPtr<SEditableTextBox> WeaponField;
+
+    // Equipment
+    bool bShowStarterGear = false;
 
     // Creature
     TSharedPtr<SEditableTextBox> CreatureField;

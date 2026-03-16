@@ -216,6 +216,26 @@ void SWowModelViewerWidget::Construct(const FArguments& InArgs)
                     ]
                 ]
 
+                + SScrollBox::Slot().Padding(0, 5)
+                [
+                    SNew(SButton)
+                    .OnClicked_Lambda([this]() -> FReply {
+                        bShowStarterGear = !bShowStarterGear;
+                        NotifyChanged();
+                        return FReply::Handled();
+                    })
+                    [
+                        SNew(SBox).Padding(FMargin(10, 3))
+                        [
+                            SNew(STextBlock)
+                            .Text_Lambda([this]() {
+                                return FText::FromString(bShowStarterGear ? TEXT("Remove Starter Gear") : TEXT("Equip Starter Gear"));
+                            })
+                            .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
+                        ]
+                    ]
+                ]
+
                 // --- Creature Section ---
                 + SScrollBox::Slot().Padding(0, 10, 0, 5)
                 [
