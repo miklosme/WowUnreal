@@ -303,8 +303,12 @@ void AWowGameplayController::OnEntityCreated(const FWowEntity& Entity)
 {
 	if (!ConnectionManager) return;
 
-	// Skip local player — they already have a pawn
-	if (Entity.Guid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid) return;
+	// Handle local player differently - apply character model to existing pawn
+	if (Entity.Guid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid)
+	{
+		SetupLocalPlayerCharacterModel(Entity);
+		return;
+	}
 
 	// Only spawn models for units and players
 	if (!Entity.IsUnit() && !Entity.IsPlayer()) return;
@@ -388,4 +392,74 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		SpawnedActor->Tags.Add(FName(*FString::Printf(TEXT("%llu"), Entity.Guid)));
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
 	}
+}
+
+void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& Entity)
+{
+	CacheWorldResources();
+	if (!CachedMpq || !CachedAssetCache)
+	{
+		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot setup local player model - missing world resources"));
+		return;
+	}
+
+	AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn());
+	if (!PlayerChar)
+	{
+		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot setup local player model - no AWowPlayerCharacter pawn"));
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// Extract race/gender from entity BYTES_0 or cached character info
+	uint8 RaceId = 1;  // Default to Human
+	uint8 Gender = 0;  // Default to Male
+	uint8 SkinColor = 0;
+	uint8 Face = 0;
+	uint8 HairStyle = 0;
+	uint8 HairColor = 0;
+	uint8 FacialHair = 0;
+
+	if (Entity.IsUnit())
+	{
+		const FWowUnitEntity* UnitEntity = static_cast<const FWowUnitEntity*>(&Entity);
+		RaceId = UnitEntity->GetRaceId();
+		Gender = UnitEntity->GetGenderId();
+		UE_LOG(LogWowGameplay, Log, TEXT("Local player race/gender from entity: Race=%d Gender=%d"), RaceId, Gender);
+	}
+
+	// If no valid race/gender from entity, try to get from cached character list
+	if (RaceId == 0 && ConnectionManager)
+	{
+		const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+		const TArray<FWowCharacterInfo>& CachedChars = ConnectionManager->GetCachedCharacters();
+
+		for (const FWowCharacterInfo& CharInfo : CachedChars)
+		{
+			if (static_cast<uint64>(CharInfo.Guid) == LocalGuid)
+			{
+				RaceId = CharInfo.Race;
+				Gender = CharInfo.Gender;
+				UE_LOG(LogWowGameplay, Log, TEXT("Local player race/gender from cached character: Race=%d Gender=%d"), RaceId, Gender);
+				break;
+			}
+		}
+	}
+
+	// Fallback to default values if still not found
+	if (RaceId == 0)
+	{
+		RaceId = 1; // Human
+		Gender = 0; // Male
+		UE_LOG(LogWowGameplay, Warning, TEXT("Using fallback race/gender for local player: Human Male"));
+	}
+
+	// TODO: Extract customization data from player entity fields (PLAYER_BYTES, etc.)
+	// For now, use default customization values
+
+	// Set the character model on the player pawn
+	PlayerChar->SetCharacterModel(World, CachedMpq, CachedAssetCache,
+		RaceId, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair);
 }

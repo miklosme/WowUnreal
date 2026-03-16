@@ -84,6 +84,11 @@ public:
     /** Apply server spawn data */
     void ApplyLoginSpawn(const FVector& SpawnPos, float OrientationRadians);
 
+    /** Set the character's visual model based on race/gender/customization */
+    void SetCharacterModel(UWorld* World, class FMpqManager* Mpq, class FWowAssetCache* Cache,
+        uint8 Race, uint8 Gender, uint8 SkinColor = 0, uint8 Face = 0, uint8 HairStyle = 0,
+        uint8 HairColor = 0, uint8 FacialHair = 0);
+
 private:
     void OnMove(const FInputActionValue& Value);
     void OnLook(const FInputActionValue& Value);

@@ -11,6 +11,12 @@
 #include "InputModifiers.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "WowCharacterBuilder.h"
+#include "WowCharacterTexture.h"
+#include "WowAssetCache.h"
+#include "Mpq/MpqManager.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimSequence.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowPlayerChar, Log, All);
 
@@ -377,4 +383,137 @@ void AWowPlayerCharacter::ApplyLoginSpawn(const FVector& SpawnPos, float Orienta
 			UE_LOG(LogWowPlayerChar, Log, TEXT("Login spawn: gravity enabled, walking mode active"));
 		}
 	}
+}
+
+void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
+	uint8 Race, uint8 Gender, uint8 SkinColor, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair)
+{
+	if (!World || !Mpq || !Cache)
+	{
+		UE_LOG(LogWowPlayerChar, Warning, TEXT("SetCharacterModel: Missing required parameters"));
+		return;
+	}
+
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Setting character model: Race=%d Gender=%d Skin=%d Face=%d Hair=%d/%d FacialHair=%d"),
+		Race, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair);
+
+	// Remove any existing skeletal mesh components (except the default one)
+	TArray<USkeletalMeshComponent*> ExistingMeshes;
+	GetComponents<USkeletalMeshComponent>(ExistingMeshes);
+	for (USkeletalMeshComponent* Mesh : ExistingMeshes)
+	{
+		if (Mesh != GetMesh()) // Keep the default character mesh component
+		{
+			Mesh->DestroyComponent();
+		}
+	}
+
+	// Build character parameters
+	FWowCharacterBuilder::FCharacterParams Params;
+	Params.Race = static_cast<FWowCharacterBuilder::ERace>(Race);
+	Params.Gender = static_cast<FWowCharacterBuilder::EGender>(Gender);
+	Params.Customization.RaceId = Race;
+	Params.Customization.Gender = Gender;
+	Params.Customization.SkinColor = SkinColor;
+	Params.Customization.FaceVariation = Face;
+	Params.Customization.HairStyle = HairStyle;
+	Params.Customization.HairColor = HairColor;
+	Params.Customization.FacialHairStyle = FacialHair;
+
+	// Get character model path
+	FString ModelPath = FWowCharacterBuilder::GetCharacterModelPath(Params.Race, Params.Gender);
+	if (ModelPath.IsEmpty())
+	{
+		UE_LOG(LogWowPlayerChar, Warning, TEXT("No model path found for Race=%d Gender=%d"), Race, Gender);
+		return;
+	}
+
+	// Build composite texture
+	UTexture2D* CompositeTex = FWowCharacterTexture::BuildCompositeTexture(Mpq, Cache, Params.Customization);
+
+	// Build skeletal mesh and components using the same M2 actor logic from CharacterBuilder
+	// but attach to our existing character instead of creating a new actor
+
+	// TODO: This is a simplified approach - we need to integrate the full character building logic
+	// For now, let's at least set the mesh on the existing character mesh component
+
+	// Create a temporary actor to build the character, then extract its components
+	FVector TempLocation = GetActorLocation();
+	FRotator TempRotation = GetActorRotation();
+
+	AActor* TempCharacterActor = FWowCharacterBuilder::SpawnCharacterWithEquipment(
+		World, Mpq, Cache, Params, TempLocation, TempRotation);
+
+	if (!TempCharacterActor)
+	{
+		UE_LOG(LogWowPlayerChar, Warning, TEXT("Failed to spawn temporary character for model extraction"));
+		return;
+	}
+
+	// Extract skeletal mesh components from the temporary actor
+	TArray<USkeletalMeshComponent*> TempMeshes;
+	TempCharacterActor->GetComponents<USkeletalMeshComponent>(TempMeshes);
+
+	if (TempMeshes.Num() > 0)
+	{
+		// Copy the main skeletal mesh to our character's mesh component
+		USkeletalMeshComponent* MainMesh = TempMeshes[0];
+		if (MainMesh && MainMesh->GetSkeletalMeshAsset())
+		{
+			GetMesh()->SetSkeletalMesh(MainMesh->GetSkeletalMeshAsset());
+			GetMesh()->SetAnimationMode(MainMesh->GetAnimationMode());
+
+			// Copy materials
+			for (int32 MatIdx = 0; MatIdx < MainMesh->GetNumMaterials(); ++MatIdx)
+			{
+				GetMesh()->SetMaterial(MatIdx, MainMesh->GetMaterial(MatIdx));
+			}
+
+			// Copy animation if any
+			if (MainMesh->GetAnimationMode() == EAnimationMode::AnimationSingleNode && MainMesh->GetAnimInstance())
+			{
+				if (UAnimMontage* Montage = MainMesh->GetAnimInstance()->GetCurrentActiveMontage())
+				{
+					// For skeletal mesh components, we need to start the montage through the animation instance
+					if (UAnimInstance* AnimInst = GetMesh()->GetAnimInstance())
+					{
+						AnimInst->Montage_Play(Montage, 1.0f);
+					}
+				}
+			}
+
+			UE_LOG(LogWowPlayerChar, Log, TEXT("Applied main character mesh to player"));
+		}
+
+		// Handle additional meshes (like separate hair) - attach as child components
+		for (int32 i = 1; i < TempMeshes.Num(); ++i)
+		{
+			USkeletalMeshComponent* ExtraMesh = TempMeshes[i];
+			if (ExtraMesh && ExtraMesh->GetSkeletalMeshAsset())
+			{
+				// Create a new skeletal mesh component on our character
+				FString ComponentName = FString::Printf(TEXT("CharacterMesh_%d"), i);
+				USkeletalMeshComponent* NewMeshComp = NewObject<USkeletalMeshComponent>(this, *ComponentName);
+				NewMeshComp->SetupAttachment(GetMesh());
+				NewMeshComp->SetSkeletalMesh(ExtraMesh->GetSkeletalMeshAsset());
+				NewMeshComp->SetCastShadow(true);
+				NewMeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				NewMeshComp->SetLeaderPoseComponent(GetMesh()); // Follow main mesh animations
+
+				// Copy materials
+				for (int32 MatIdx = 0; MatIdx < ExtraMesh->GetNumMaterials(); ++MatIdx)
+				{
+					NewMeshComp->SetMaterial(MatIdx, ExtraMesh->GetMaterial(MatIdx));
+				}
+
+				NewMeshComp->RegisterComponent();
+				UE_LOG(LogWowPlayerChar, Log, TEXT("Added additional character mesh component: %s"), *ComponentName);
+			}
+		}
+	}
+
+	// Clean up the temporary actor
+	TempCharacterActor->Destroy();
+
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Character model set successfully"));
 }
