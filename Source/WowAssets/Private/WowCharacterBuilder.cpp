@@ -76,12 +76,12 @@ UMaterial* GetCharacterMaterial()
     }
 
 #if WITH_EDITOR
-    UE_LOG(LogWowCharacter, Log, TEXT("Creating character material (UV0-based, DefaultLit)"));
+    UE_LOG(LogWowCharacter, Log, TEXT("Creating character material (UV0-based, DefaultLit with PBR)"));
 
     UPackage* MatPackage = CreatePackage(TEXT("/Game/Materials/M_WowCharacter"));
     CachedMat = NewObject<UMaterial>(MatPackage, TEXT("M_WowCharacter"),
         RF_Public | RF_Standalone);
-    CachedMat->SetShadingModel(MSM_Unlit);
+    CachedMat->SetShadingModel(MSM_DefaultLit);
     CachedMat->BlendMode = BLEND_Opaque;
     CachedMat->TwoSided = false;
     CachedMat->bUsedWithSkeletalMesh = true;
@@ -105,8 +105,32 @@ UMaterial* GetCharacterMaterial()
     TextureSampler->MaterialExpressionEditorY = 0;
     Expressions.AddExpression(TextureSampler);
 
-    // Unlit: connect texture to EmissiveColor (shows raw texture with no lighting)
-    CachedMat->GetEditorOnlyData()->EmissiveColor.Connect(0, TextureSampler);
+    // DefaultLit: connect texture to BaseColor and add material properties
+    CachedMat->GetEditorOnlyData()->BaseColor.Connect(0, TextureSampler);
+
+    // Add Roughness constant (1.0 = fully rough, no specular highlights)
+    auto* RoughnessConstant = NewObject<UMaterialExpressionConstant>(CachedMat);
+    RoughnessConstant->R = 1.0f;
+    RoughnessConstant->MaterialExpressionEditorX = -200;
+    RoughnessConstant->MaterialExpressionEditorY = 100;
+    Expressions.AddExpression(RoughnessConstant);
+    CachedMat->GetEditorOnlyData()->Roughness.Connect(0, RoughnessConstant);
+
+    // Add Metallic constant
+    auto* MetallicConstant = NewObject<UMaterialExpressionConstant>(CachedMat);
+    MetallicConstant->R = 0.0f;
+    MetallicConstant->MaterialExpressionEditorX = -200;
+    MetallicConstant->MaterialExpressionEditorY = 200;
+    Expressions.AddExpression(MetallicConstant);
+    CachedMat->GetEditorOnlyData()->Metallic.Connect(0, MetallicConstant);
+
+    // Add Specular constant (0.0 = no specular, WoW-style diffuse only)
+    auto* SpecularConstant = NewObject<UMaterialExpressionConstant>(CachedMat);
+    SpecularConstant->R = 0.0f;
+    SpecularConstant->MaterialExpressionEditorX = -200;
+    SpecularConstant->MaterialExpressionEditorY = 300;
+    Expressions.AddExpression(SpecularConstant);
+    CachedMat->GetEditorOnlyData()->Specular.Connect(0, SpecularConstant);
 
     CachedMat->PreEditChange(nullptr);
     CachedMat->PostEditChange();
@@ -592,53 +616,35 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             SkelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
             SkelMesh->RegisterComponent();
 
-            // Build per-section textures: composite override for texture index 0 (skin),
-            // actual M2 textures for other indices (hair, equipment, etc.)
+            // For characters, ALL sections should use the composite skin texture.
+            // The M2's TexturePaths for type!=0 (replaceable) are empty strings.
+            // Type 0 textures (hardcoded paths like hair detail) exist but should not
+            // replace the composite — only equipment overrides should do that.
             UTexture2D* SkinTexture = OverrideTexture;
             if (!SkinTexture && M2Data->TexturePaths.Num() > 0 && !M2Data->TexturePaths[0].IsEmpty())
             {
                 SkinTexture = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[0]);
             }
 
-            // Pre-load all referenced textures
-            TMap<uint16, UTexture2D*> TextureByIndex;
-            TextureByIndex.Add(0, SkinTexture); // Index 0 = skin/composite
-            for (const FGeosetSectionInfo& Info : GeosetInfo)
+            // Log M2 texture paths for debugging
+            for (int32 ti = 0; ti < M2Data->TexturePaths.Num(); ++ti)
             {
-                if (Info.TextureIndex > 0 && !TextureByIndex.Contains(Info.TextureIndex))
-                {
-                    UTexture2D* Tex = nullptr;
-                    if (Info.TextureIndex < static_cast<uint16>(M2Data->TexturePaths.Num())
-                        && !M2Data->TexturePaths[Info.TextureIndex].IsEmpty())
-                    {
-                        Tex = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[Info.TextureIndex]);
-                    }
-                    TextureByIndex.Add(Info.TextureIndex, Tex ? Tex : SkinTexture);
-                }
+                UE_LOG(LogWowCharacter, Log, TEXT("  M2 Texture[%d]: %s"), ti,
+                    M2Data->TexturePaths[ti].IsEmpty() ? TEXT("(replaceable)") : *M2Data->TexturePaths[ti]);
             }
 
-            // Apply per-section materials with correct textures
+            // Apply material to all sections.
+            // For characters with composite texture, use it for ALL sections (skin, hair, etc.)
+            // For creatures, use the override texture or M2's first texture path.
             if (UMaterial* BaseMat = GetCharacterMaterial())
             {
                 const int32 NumMatSlots = SkeletalMesh->GetMaterials().Num();
                 for (int32 MatIdx = 0; MatIdx < NumMatSlots; ++MatIdx)
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SkelMesh);
-
-                    // Find the texture for this section
-                    UTexture2D* SectionTex = SkinTexture;
-                    if (GeosetInfo.IsValidIndex(MatIdx))
+                    if (SkinTexture)
                     {
-                        UTexture2D** Found = TextureByIndex.Find(GeosetInfo[MatIdx].TextureIndex);
-                        if (Found && *Found)
-                        {
-                            SectionTex = *Found;
-                        }
-                    }
-
-                    if (SectionTex)
-                    {
-                        MID->SetTextureParameterValue(TEXT("BaseTexture"), SectionTex);
+                        MID->SetTextureParameterValue(TEXT("BaseTexture"), SkinTexture);
                     }
                     SkelMesh->SetMaterial(MatIdx, MID);
                 }

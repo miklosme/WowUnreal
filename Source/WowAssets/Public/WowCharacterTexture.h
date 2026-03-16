@@ -22,6 +22,22 @@ public:
         Underwear = 4
     };
 
+    /** Character texture region types for layout positioning */
+    enum class ECharRegion : uint32
+    {
+        ARM_UPPER = 0,
+        ARM_LOWER = 1,
+        HAND = 2,
+        TORSO_UPPER = 3,
+        TORSO_LOWER = 4,
+        LEG_UPPER = 5,
+        LEG_LOWER = 6,
+        FOOT = 7,
+        ACCESSORY = 8,
+        FACE_UPPER = 9,
+        FACE_LOWER = 10
+    };
+
     struct FCustomization
     {
         uint32 RaceId = 1;

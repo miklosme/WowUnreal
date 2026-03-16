@@ -351,7 +351,33 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         ++Loaded;
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharComponentTextureLayouts.dbc"), Parser))
+    {
+        CharComponentTextureLayoutsDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, CharComponentTextureLayoutsDbc.Num()); ++i)
+        {
+            const FCharComponentTextureLayoutsDbcEntry& E = CharComponentTextureLayoutsDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  CharComponentTextureLayouts[%d]: ID=%d Size=%dx%d"),
+                i, E.ID, E.Width, E.Height);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharComponentTextureSections.dbc"), Parser))
+    {
+        CharComponentTextureSectionsDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, CharComponentTextureSectionsDbc.Num()); ++i)
+        {
+            const FCharComponentTextureSectionsDbcEntry& E = CharComponentTextureSectionsDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  CharComponentTextureSections[%d]: ID=%d LayoutID=%d Type=%d Rect=(%d,%d,%dx%d)"),
+                i, E.ID, E.CharComponentTextureLayoutID, E.SectionType, E.X, E.Y, E.Width, E.Height);
+        }
+    }
+
     bLoaded = Loaded > 0;
-    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/24 DBC tables"), Loaded);
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/26 DBC tables"), Loaded);
     return bLoaded;
 }

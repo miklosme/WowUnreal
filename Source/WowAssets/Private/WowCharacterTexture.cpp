@@ -324,6 +324,74 @@ static TArray<uint8> ScalePixels(const TArray<uint8>& Src, uint32 SrcW, uint32 S
     return Dst;
 }
 
+/** Paste region-sized texture onto composite at target coordinates with alpha blending */
+static void PasteRegionWithAlpha(TArray<uint8>& Composite, const TArray<uint8>& Region,
+    uint32 CompositeW, uint32 CompositeH, uint32 RegionW, uint32 RegionH,
+    uint32 TargetX, uint32 TargetY, uint32 TargetW, uint32 TargetH)
+{
+    if (Region.Num() == 0) return;
+
+    // Scale region to target dimensions if necessary
+    TArray<uint8> ScaledRegion = (RegionW == TargetW && RegionH == TargetH)
+        ? Region
+        : ScalePixels(Region, RegionW, RegionH, TargetW, TargetH);
+
+    // Alpha blend onto composite at target position
+    for (uint32 y = 0; y < TargetH && (TargetY + y) < CompositeH; y++)
+    {
+        for (uint32 x = 0; x < TargetW && (TargetX + x) < CompositeW; x++)
+        {
+            uint32 SrcIdx = (y * TargetW + x) * 4;
+            uint32 DstIdx = ((TargetY + y) * CompositeW + (TargetX + x)) * 4;
+
+            if (SrcIdx + 3 >= static_cast<uint32>(ScaledRegion.Num()) ||
+                DstIdx + 3 >= static_cast<uint32>(Composite.Num())) continue;
+
+            uint8 Alpha = ScaledRegion[SrcIdx + 3];
+            if (Alpha == 0) continue;
+
+            if (Alpha == 255)
+            {
+                Composite[DstIdx + 0] = ScaledRegion[SrcIdx + 0];
+                Composite[DstIdx + 1] = ScaledRegion[SrcIdx + 1];
+                Composite[DstIdx + 2] = ScaledRegion[SrcIdx + 2];
+                Composite[DstIdx + 3] = 255;
+            }
+            else
+            {
+                float A = Alpha / 255.0f;
+                float InvA = 1.0f - A;
+                Composite[DstIdx + 0] = FMath::Clamp<int32>(FMath::RoundToInt32(ScaledRegion[SrcIdx + 0] * A + Composite[DstIdx + 0] * InvA), 0, 255);
+                Composite[DstIdx + 1] = FMath::Clamp<int32>(FMath::RoundToInt32(ScaledRegion[SrcIdx + 1] * A + Composite[DstIdx + 1] * InvA), 0, 255);
+                Composite[DstIdx + 2] = FMath::Clamp<int32>(FMath::RoundToInt32(ScaledRegion[SrcIdx + 2] * A + Composite[DstIdx + 2] * InvA), 0, 255);
+                Composite[DstIdx + 3] = 255;
+            }
+        }
+    }
+}
+
+/** Get fallback region coordinates for layout 1 if DBC doesn't load */
+struct FRegionCoords
+{
+    uint32 X, Y, W, H;
+};
+
+static TMap<uint32, FRegionCoords> GetFallbackRegions()
+{
+    TMap<uint32, FRegionCoords> Regions;
+    Regions.Add(0, {0, 0, 128, 64});      // ARM_UPPER
+    Regions.Add(1, {0, 64, 128, 64});     // ARM_LOWER
+    Regions.Add(2, {0, 128, 128, 32});    // HAND
+    Regions.Add(3, {128, 0, 128, 64});    // TORSO_UPPER
+    Regions.Add(4, {128, 64, 128, 32});   // TORSO_LOWER
+    Regions.Add(5, {128, 96, 128, 64});   // LEG_UPPER
+    Regions.Add(6, {128, 160, 128, 64});  // LEG_LOWER
+    Regions.Add(7, {128, 224, 128, 32});  // FOOT
+    Regions.Add(9, {0, 160, 128, 32});    // FACE_UPPER
+    Regions.Add(10, {0, 192, 128, 64});   // FACE_LOWER
+    return Regions;
+}
+
 UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAssetCache* Cache,
     const FCustomization& Customization)
 {
@@ -338,7 +406,45 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
     UTexture2D* CachedTex = Cache ? Cache->FindTexture(CacheKey) : nullptr;
     if (CachedTex) return CachedTex;
 
-    // 1. Load base skin
+    // 1. Get layout dimensions from DBC or use fallback
+    uint32 LayoutId = 1; // Default layout for all character textures in 3.3.5
+    uint32 CompositeW = 256, CompositeH = 256; // Default fallback dimensions
+
+    const FDbcStore& DbcStore = FDbcStore::Get();
+    const FCharComponentTextureLayoutsDbcEntry* Layout = DbcStore.CharComponentTextureLayouts().GetById(LayoutId);
+    if (Layout)
+    {
+        CompositeW = Layout->Width;
+        CompositeH = Layout->Height;
+        UE_LOG(LogWowCharTex, Log, TEXT("Using DBC layout %d: %dx%d"), LayoutId, CompositeW, CompositeH);
+    }
+    else
+    {
+        UE_LOG(LogWowCharTex, Log, TEXT("Using fallback layout: %dx%d"), CompositeW, CompositeH);
+    }
+
+    // 2. Load region coordinates from DBC or use hardcoded fallbacks
+    TMap<uint32, FRegionCoords> RegionCoords;
+    TArray<const FCharComponentTextureSectionsDbcEntry*> Sections = DbcStore.CharComponentTextureSections().GetByLayoutId(LayoutId);
+    if (Sections.Num() > 0)
+    {
+        for (const FCharComponentTextureSectionsDbcEntry* Section : Sections)
+        {
+            RegionCoords.Add(Section->SectionType, {Section->X, Section->Y, Section->Width, Section->Height});
+        }
+        UE_LOG(LogWowCharTex, Log, TEXT("Loaded %d region coordinates from DBC"), Sections.Num());
+    }
+    else
+    {
+        RegionCoords = GetFallbackRegions();
+        UE_LOG(LogWowCharTex, Log, TEXT("Using fallback region coordinates"));
+    }
+
+    // 3. Create composite buffer filled with transparent black
+    TArray<uint8> Composite;
+    Composite.SetNumZeroed(CompositeW * CompositeH * 4);
+
+    // 4. Load and place skin texture (fills entire atlas as base layer)
     FString SkinPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
         ESectionType::Skin, INDEX_NONE, static_cast<int32>(Customization.SkinColor));
     if (SkinPath.IsEmpty())
@@ -349,8 +455,8 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
     }
 
     uint32 SkinW, SkinH;
-    TArray<uint8> Composite = LoadBlpAsRGBA(Mpq, SkinPath, SkinW, SkinH);
-    if (Composite.Num() == 0)
+    TArray<uint8> SkinPixels = LoadBlpAsRGBA(Mpq, SkinPath, SkinW, SkinH);
+    if (SkinPixels.Num() == 0)
     {
         UE_LOG(LogWowCharTex, Warning, TEXT("Failed to load/decompress skin: %s"), *SkinPath);
         // Fall back to returning BLP as-is via texture factory
@@ -368,9 +474,17 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
         return nullptr;
     }
 
-    int32 LayersComposited = 0;
+    // Skin texture fills the entire atlas (it IS full-body)
+    if (SkinW != CompositeW || SkinH != CompositeH)
+    {
+        SkinPixels = ScalePixels(SkinPixels, SkinW, SkinH, CompositeW, CompositeH);
+    }
+    FMemory::Memcpy(Composite.GetData(), SkinPixels.GetData(), FMath::Min(Composite.Num(), SkinPixels.Num()));
+    UE_LOG(LogWowCharTex, Log, TEXT("Placed skin as base layer: %s (%dx%d)"), *SkinPath, SkinW, SkinH);
 
-    // 2. Overlay face texture
+    int32 LayersComposited = 1; // Skin counts as layer 1
+
+    // 5. Load and place face texture at specific region (FACE_LOWER or FACE_UPPER)
     FString FacePath = GetSectionTexture(Customization.RaceId, Customization.Gender,
         ESectionType::Face, static_cast<int32>(Customization.FaceVariation),
         static_cast<int32>(Customization.SkinColor));
@@ -380,72 +494,126 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
         TArray<uint8> FacePixels = LoadBlpAsRGBA(Mpq, FacePath, FaceW, FaceH);
         if (FacePixels.Num() > 0)
         {
-            if (FaceW != SkinW || FaceH != SkinH)
-                FacePixels = ScalePixels(FacePixels, FaceW, FaceH, SkinW, SkinH);
-            AlphaBlendLayer(Composite, FacePixels, SkinW, SkinH);
-            LayersComposited++;
-            UE_LOG(LogWowCharTex, Log, TEXT("Composited face: %s (%dx%d)"), *FacePath, FaceW, FaceH);
+            // Determine target region based on texture name
+            uint32 TargetRegion = 10; // Default to FACE_LOWER
+            if (FacePath.Contains(TEXT("FaceUpper")))
+            {
+                TargetRegion = 9; // FACE_UPPER
+            }
+
+            const FRegionCoords* Region = RegionCoords.Find(TargetRegion);
+            if (Region)
+            {
+                PasteRegionWithAlpha(Composite, FacePixels, CompositeW, CompositeH,
+                    FaceW, FaceH, Region->X, Region->Y, Region->W, Region->H);
+                LayersComposited++;
+                UE_LOG(LogWowCharTex, Log, TEXT("Placed face at region %d: %s (%dx%d)"), TargetRegion, *FacePath, FaceW, FaceH);
+            }
+            else
+            {
+                UE_LOG(LogWowCharTex, Warning, TEXT("No region coordinates for face region %d"), TargetRegion);
+            }
         }
     }
 
-    // 3. Overlay hair texture for scalp/visible hair regions
+    // 6. Load and place hair scalp texture at FACE_UPPER region
     FString HairPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
         ESectionType::Hair, static_cast<int32>(Customization.HairStyle),
         static_cast<int32>(Customization.HairColor));
-    UE_LOG(LogWowCharTex, Log, TEXT("Hair texture lookup: Race=%d Gender=%d Style=%d Color=%d -> %s"),
-        Customization.RaceId, Customization.Gender, Customization.HairStyle, Customization.HairColor,
-        HairPath.IsEmpty() ? TEXT("EMPTY") : *HairPath);
     if (!HairPath.IsEmpty())
     {
         uint32 HairW, HairH;
         TArray<uint8> HairPixels = LoadBlpAsRGBA(Mpq, HairPath, HairW, HairH);
         if (HairPixels.Num() > 0)
         {
-            if (HairW != SkinW || HairH != SkinH)
-                HairPixels = ScalePixels(HairPixels, HairW, HairH, SkinW, SkinH);
-            AlphaBlendLayer(Composite, HairPixels, SkinW, SkinH);
-            LayersComposited++;
-            UE_LOG(LogWowCharTex, Log, TEXT("Composited hair texture: %s (%dx%d)"), *HairPath, HairW, HairH);
+            const FRegionCoords* Region = RegionCoords.Find(9); // FACE_UPPER
+            if (Region)
+            {
+                PasteRegionWithAlpha(Composite, HairPixels, CompositeW, CompositeH,
+                    HairW, HairH, Region->X, Region->Y, Region->W, Region->H);
+                LayersComposited++;
+                UE_LOG(LogWowCharTex, Log, TEXT("Placed hair scalp at FACE_UPPER: %s (%dx%d)"), *HairPath, HairW, HairH);
+            }
+            else
+            {
+                UE_LOG(LogWowCharTex, Warning, TEXT("No region coordinates for FACE_UPPER region"));
+            }
         }
     }
 
-    // 4. Overlay facial hair texture
-    FString FacialPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::FacialHair, static_cast<int32>(Customization.FacialHairStyle),
-        static_cast<int32>(Customization.HairColor));
-    if (!FacialPath.IsEmpty())
+    // 7. Load and place facial hair texture at FACE_LOWER region
+    FString FacialHairPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
+        ESectionType::FacialHair, static_cast<int32>(Customization.FacialHairStyle), INDEX_NONE);
+    if (!FacialHairPath.IsEmpty())
     {
-        uint32 FhW, FhH;
-        TArray<uint8> FhPixels = LoadBlpAsRGBA(Mpq, FacialPath, FhW, FhH);
-        if (FhPixels.Num() > 0)
+        uint32 FacialHairW, FacialHairH;
+        TArray<uint8> FacialHairPixels = LoadBlpAsRGBA(Mpq, FacialHairPath, FacialHairW, FacialHairH);
+        if (FacialHairPixels.Num() > 0)
         {
-            if (FhW != SkinW || FhH != SkinH)
-                FhPixels = ScalePixels(FhPixels, FhW, FhH, SkinW, SkinH);
-            AlphaBlendLayer(Composite, FhPixels, SkinW, SkinH);
-            LayersComposited++;
-            UE_LOG(LogWowCharTex, Log, TEXT("Composited facial hair: %s"), *FacialPath);
+            const FRegionCoords* Region = RegionCoords.Find(10); // FACE_LOWER
+            if (Region)
+            {
+                PasteRegionWithAlpha(Composite, FacialHairPixels, CompositeW, CompositeH,
+                    FacialHairW, FacialHairH, Region->X, Region->Y, Region->W, Region->H);
+                LayersComposited++;
+                UE_LOG(LogWowCharTex, Log, TEXT("Placed facial hair at FACE_LOWER: %s (%dx%d)"), *FacialHairPath, FacialHairW, FacialHairH);
+            }
+            else
+            {
+                UE_LOG(LogWowCharTex, Warning, TEXT("No region coordinates for FACE_LOWER region"));
+            }
         }
     }
 
-    // 5. Overlay underwear texture
-    FString UnderwearPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::Underwear, INDEX_NONE, static_cast<int32>(Customization.SkinColor));
-    if (!UnderwearPath.IsEmpty())
+    // 8. Load and place underwear textures at TORSO_UPPER and LEG_UPPER regions
+    // Need to find CharSections entry to get both Textures[0] and Textures[1]
+    const FCharSectionsDbc& CharSections = FDbcStore::Get().CharSections();
+    for (const FCharSectionsDbcEntry& Entry : CharSections.GetAll())
     {
-        uint32 UwW, UwH;
-        TArray<uint8> UwPixels = LoadBlpAsRGBA(Mpq, UnderwearPath, UwW, UwH);
-        if (UwPixels.Num() > 0)
+        if (Entry.RaceID == Customization.RaceId &&
+            Entry.SexID == Customization.Gender &&
+            Entry.Type == static_cast<uint32>(ESectionType::Underwear))
         {
-            if (UwW != SkinW || UwH != SkinH)
-                UwPixels = ScalePixels(UwPixels, UwW, UwH, SkinW, SkinH);
-            AlphaBlendLayer(Composite, UwPixels, SkinW, SkinH);
-            LayersComposited++;
-            UE_LOG(LogWowCharTex, Log, TEXT("Composited underwear: %s"), *UnderwearPath);
+            // In 3.3.5: Textures[0] is pelvis/shorts → LEG_UPPER, Textures[1] is chest/bra → TORSO_UPPER
+            if (!Entry.Textures[0].IsEmpty())
+            {
+                uint32 UnderwearW, UnderwearH;
+                TArray<uint8> UnderwearPixels = LoadBlpAsRGBA(Mpq, Entry.Textures[0], UnderwearW, UnderwearH);
+                if (UnderwearPixels.Num() > 0)
+                {
+                    const FRegionCoords* Region = RegionCoords.Find(5); // LEG_UPPER (pelvis/shorts)
+                    if (Region)
+                    {
+                        PasteRegionWithAlpha(Composite, UnderwearPixels, CompositeW, CompositeH,
+                            UnderwearW, UnderwearH, Region->X, Region->Y, Region->W, Region->H);
+                        LayersComposited++;
+                        UE_LOG(LogWowCharTex, Log, TEXT("Placed underwear[0] at LEG_UPPER: %s (%dx%d)"), *Entry.Textures[0], UnderwearW, UnderwearH);
+                    }
+                }
+            }
+
+            if (!Entry.Textures[1].IsEmpty())
+            {
+                uint32 UnderwearW, UnderwearH;
+                TArray<uint8> UnderwearPixels = LoadBlpAsRGBA(Mpq, Entry.Textures[1], UnderwearW, UnderwearH);
+                if (UnderwearPixels.Num() > 0)
+                {
+                    const FRegionCoords* Region = RegionCoords.Find(3); // TORSO_UPPER (chest/bra)
+                    if (Region)
+                    {
+                        PasteRegionWithAlpha(Composite, UnderwearPixels, CompositeW, CompositeH,
+                            UnderwearW, UnderwearH, Region->X, Region->Y, Region->W, Region->H);
+                        LayersComposited++;
+                        UE_LOG(LogWowCharTex, Log, TEXT("Placed underwear[1] at TORSO_UPPER: %s (%dx%d)"), *Entry.Textures[1], UnderwearW, UnderwearH);
+                    }
+                }
+            }
+            break; // Only need first matching underwear entry
         }
     }
 
-    // 6. Create UTexture2D from composited RGBA pixels
-    UTexture2D* Tex = UTexture2D::CreateTransient(SkinW, SkinH, PF_R8G8B8A8, *CacheKey);
+    // 9. Create UTexture2D from composited RGBA pixels
+    UTexture2D* Tex = UTexture2D::CreateTransient(CompositeW, CompositeH, PF_R8G8B8A8, *CacheKey);
     if (!Tex) return nullptr;
 
     Tex->Filter = TF_Bilinear;
@@ -462,8 +630,8 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
 
     if (Cache) Cache->CacheTexture(CacheKey, Tex);
 
-    UE_LOG(LogWowCharTex, Log, TEXT("Built composite character texture: %s (%dx%d, %d layers composited)"),
-        *SkinPath, SkinW, SkinH, LayersComposited);
+    UE_LOG(LogWowCharTex, Log, TEXT("Built composite character texture using WMV region-based approach: %dx%d, %d layers composited"),
+        CompositeW, CompositeH, LayersComposited);
 
     return Tex;
 }

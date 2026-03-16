@@ -484,6 +484,14 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
 	}
 
+	// Configure build settings to preserve our M2 per-vertex normals (smooth shading)
+	if (FSkeletalMeshLODInfo* LOD0Info = SkelMesh->GetLODInfo(0))
+	{
+		LOD0Info->BuildSettings.bRecomputeNormals = false;
+		LOD0Info->BuildSettings.bRecomputeTangents = true;
+		LOD0Info->BuildSettings.bUseMikkTSpace = false;
+	}
+
 	SkelMesh->CommitMeshDescription(0);
 
 	// Set bounds BEFORE Build() so the build pipeline has valid bounds data.

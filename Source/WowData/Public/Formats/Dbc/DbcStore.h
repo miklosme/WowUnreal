@@ -24,6 +24,8 @@
 #include "Formats/Dbc/TalentTabDbc.h"
 #include "Formats/Dbc/ZoneMusicDbc.h"
 #include "Formats/Dbc/SoundAmbienceDbc.h"
+#include "Formats/Dbc/CharComponentTextureLayoutsDbc.h"
+#include "Formats/Dbc/CharComponentTextureSectionsDbc.h"
 
 class FMpqManager;
 
@@ -58,6 +60,8 @@ public:
     FTalentTabDbc& TalentTabs() { return TalentTabDbc; }
     FZoneMusicDbc& ZoneMusic() { return ZoneMusicDbc; }
     FSoundAmbienceDbc& SoundAmbience() { return SoundAmbienceDbc; }
+    FCharComponentTextureLayoutsDbc& CharComponentTextureLayouts() { return CharComponentTextureLayoutsDbc; }
+    FCharComponentTextureSectionsDbc& CharComponentTextureSections() { return CharComponentTextureSectionsDbc; }
 
     const FMapDbc& Maps() const { return MapDbc; }
     const FAreaTableDbc& AreaTable() const { return AreaTableDbc; }
@@ -83,6 +87,8 @@ public:
     const FTalentTabDbc& TalentTabs() const { return TalentTabDbc; }
     const FZoneMusicDbc& ZoneMusic() const { return ZoneMusicDbc; }
     const FSoundAmbienceDbc& SoundAmbience() const { return SoundAmbienceDbc; }
+    const FCharComponentTextureLayoutsDbc& CharComponentTextureLayouts() const { return CharComponentTextureLayoutsDbc; }
+    const FCharComponentTextureSectionsDbc& CharComponentTextureSections() const { return CharComponentTextureSectionsDbc; }
 
     bool IsLoaded() const { return bLoaded; }
 
@@ -111,5 +117,7 @@ private:
     FTalentTabDbc TalentTabDbc;
     FZoneMusicDbc ZoneMusicDbc;
     FSoundAmbienceDbc SoundAmbienceDbc;
+    FCharComponentTextureLayoutsDbc CharComponentTextureLayoutsDbc;
+    FCharComponentTextureSectionsDbc CharComponentTextureSectionsDbc;
     bool bLoaded = false;
 };
