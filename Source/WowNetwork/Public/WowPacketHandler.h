@@ -25,6 +25,8 @@ DECLARE_MULTICAST_DELEGATE(FOnPlayerDeath);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnCorpseReclaimDelay, float /*DelayInSeconds*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnResurrectRequest, const FString& /*RequesterName*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnPlayerTeleport, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlayerNameReceived, uint64 /*Guid*/, const FString& /*Name*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnCreatureNameReceived, uint32 /*Entry*/, const FString& /*Name*/, const FString& /*Title*/);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -122,6 +124,16 @@ public:
     /** Warden anti-cheat handler */
     FWowWardenHandler WardenHandler;
 
+    /** Action bar data (144 slots, first 12 are main action bar) */
+    TArray<uint32> ActionButtons;
+
+    /** Player name cache */
+    TMap<uint64, FString> PlayerNameCache;
+
+    /** Creature name cache */
+    TMap<uint32, FString> CreatureNameCache;
+    TMap<uint32, FString> CreatureTitleCache;
+
     /** ── Social System ──────────────────────────────────────────────────── */
     /** Friends list */
     TArray<FWowFriendInfo> FriendsList;
@@ -153,6 +165,8 @@ public:
     FOnCorpseReclaimDelay OnCorpseReclaimDelay;
     FOnResurrectRequest OnResurrectRequest;
     FOnPlayerTeleport OnPlayerTeleport;
+    FOnPlayerNameReceived OnPlayerNameReceived;
+    FOnCreatureNameReceived OnCreatureNameReceived;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
@@ -213,6 +227,8 @@ private:
     void HandleGroupList(FPacketReader& R);
     void HandlePartyCommandResult(FPacketReader& R);
     void HandleWho(FPacketReader& R);
+    void HandleNameQueryResponse(FPacketReader& R);
+    void HandleCreatureQueryResponse(FPacketReader& R);
 
     // ── Warden / Teleport handlers ──────────────────────────────────────────
     void HandleWardenData(FPacketReader& R);

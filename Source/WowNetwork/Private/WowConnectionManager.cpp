@@ -409,6 +409,38 @@ void UWowConnectionManager::SendRawPacket(uint32 Opcode, const TArray<uint8>& Da
     WorldSocket->SendPacket(Opcode, Data);
 }
 
+void UWowConnectionManager::SendNameQuery(int64 Guid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    uint64 G = static_cast<uint64>(Guid);
+    FMemory::Memcpy(Data.GetData(), &G, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_NAME_QUERY, Data);
+    UE_LOG(LogWowNet, Verbose, TEXT("Sent name query for GUID %lld"), Guid);
+}
+
+void UWowConnectionManager::SendCreatureQuery(int32 Entry, int64 Guid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(12);
+
+    // Entry (uint32)
+    uint32 E = static_cast<uint32>(Entry);
+    Data.Append(reinterpret_cast<const uint8*>(&E), 4);
+
+    // GUID (uint64)
+    uint64 G = static_cast<uint64>(Guid);
+    Data.Append(reinterpret_cast<const uint8*>(&G), 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_CREATURE_QUERY, Data);
+    UE_LOG(LogWowNet, Verbose, TEXT("Sent creature query for Entry %d, GUID %lld"), Entry, Guid);
+}
+
 void UWowConnectionManager::Disconnect()
 {
     if (WorldSocket.IsValid())

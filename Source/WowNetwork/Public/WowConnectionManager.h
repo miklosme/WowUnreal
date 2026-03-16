@@ -65,6 +65,12 @@ public:
     /** Send a raw packet (for advanced use) */
     void SendRawPacket(uint32 Opcode, const TArray<uint8>& Data = {});
 
+    /** Send name query for a player */
+    UFUNCTION(BlueprintCallable) void SendNameQuery(int64 Guid);
+
+    /** Send creature query for an NPC */
+    UFUNCTION(BlueprintCallable) void SendCreatureQuery(int32 Entry, int64 Guid);
+
     /** Get the cached character list (valid after WorldHaveCharList state) */
     UFUNCTION(BlueprintCallable) TArray<FWowCharacterInfo> GetCachedCharacters() const { return CachedCharacters; }
 
