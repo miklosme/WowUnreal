@@ -830,10 +830,11 @@ void AWowWorldManager::FinalizeTileLoad(int32 TX, int32 TY, TSharedPtr<FAdtData>
 
 void AWowWorldManager::ProcessPendingLoads()
 {
-    // Finalize at most one tile per tick so the renderer is never starved.
-    // BuildFromAdtData builds 256 mesh chunks on the game thread and can
-    // take hundreds of milliseconds — doing more than one per tick causes
-    // multi-second hitches or a completely black screen on startup.
+    // During initial load (loading screen), finalize all ready tiles at once.
+    // After initial load, limit to 1 per tick to avoid frame hitches.
+    const bool bBulkLoad = (InitialTilesQueued > 0 && InitialTilesLoaded < InitialTilesQueued);
+    const int32 MaxPerTick = bBulkLoad ? 100 : 1;
+
     int32 Finalized = 0;
     for (int32 i = PendingLoads.Num() - 1; i >= 0; --i)
     {
@@ -844,7 +845,7 @@ void AWowWorldManager::ProcessPendingLoads()
             int64 Key = TileKey(Pending.TX, Pending.TY);
             PendingTileKeys.Remove(Key);
 
-            if (Result && Finalized < 1)
+            if (Result && Finalized < MaxPerTick)
             {
                 FinalizeTileLoad(Pending.TX, Pending.TY, Result);
                 ++Finalized;

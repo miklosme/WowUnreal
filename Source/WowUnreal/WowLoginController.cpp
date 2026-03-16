@@ -396,12 +396,43 @@ void AWowLoginController::FinalizeWorldEntry()
 
         if (APawn* Pawn = GPC->GetPawn())
         {
+            // Snap to ground: trace downward from high above to find terrain surface
+            FVector PawnPos = Pawn->GetActorLocation();
+            FVector TraceStart = FVector(PawnPos.X, PawnPos.Y, 500000.0f);  // From way above
+            FVector TraceEnd = FVector(PawnPos.X, PawnPos.Y, -500000.0f);   // To way below
+
+            FHitResult Hit;
+            FCollisionQueryParams QueryParams;
+            QueryParams.AddIgnoredActor(Pawn);
+            QueryParams.bTraceComplex = true; // Use complex collision (mesh geometry)
+
+            UWorld* World = GetWorld();
+            if (World && World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+            {
+                // Place pawn 100cm (1 WoW yard) above the ground
+                FVector GroundPos = Hit.ImpactPoint + FVector(0, 0, 100.0f);
+                Pawn->SetActorLocation(GroundPos, false, nullptr, ETeleportType::TeleportPhysics);
+                UE_LOG(LogWowLogin, Log, TEXT("Snapped to ground: server Z=%.0f → ground Z=%.0f (hit actor: %s)"),
+                    PawnPos.Z, GroundPos.Z, *Hit.GetActor()->GetName());
+            }
+            else
+            {
+                // No ground found — place 500cm above the server Z as fallback
+                FVector FallbackPos = FVector(PawnPos.X, PawnPos.Y, FMath::Max(PawnPos.Z + 500.0f, 5000.0f));
+                Pawn->SetActorLocation(FallbackPos, false, nullptr, ETeleportType::TeleportPhysics);
+                UE_LOG(LogWowLogin, Warning, TEXT("No ground found at (%.0f, %.0f) — using fallback Z=%.0f"),
+                    PawnPos.X, PawnPos.Y, FallbackPos.Z);
+            }
+
             Pawn->SetActorHiddenInGame(false);
             Pawn->SetActorEnableCollision(true);
             if (ACharacter* Char = Cast<ACharacter>(Pawn))
             {
                 Char->GetCharacterMovement()->GravityScale = 1.0f;
             }
+
+            UE_LOG(LogWowLogin, Log, TEXT("Player revealed at (%.0f, %.0f, %.0f)"),
+                Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y, Pawn->GetActorLocation().Z);
         }
 
         GPC->bShowMouseCursor = false;
