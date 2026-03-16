@@ -128,6 +128,11 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure)
     bool IsInitialized() const { return MeshComponent != nullptr && AnimationCache.Num() > 0; }
 
+    /**
+     * Get the animation cache for copying to another controller.
+     */
+    const TMap<int32, TObjectPtr<UAnimSequence>>& GetAnimationCache() const { return AnimationCache; }
+
 protected:
     /** Target skeletal mesh component */
     UPROPERTY()

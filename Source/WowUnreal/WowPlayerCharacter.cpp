@@ -14,6 +14,7 @@
 #include "WowCharacterBuilder.h"
 #include "WowCharacterTexture.h"
 #include "WowAssetCache.h"
+#include "WowAnimationController.h"
 #include "Mpq/MpqManager.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Animation/AnimSequence.h"
@@ -418,6 +419,9 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 	TArray<USkeletalMeshComponent*> TempMeshes;
 	TempCharacterActor->GetComponents<USkeletalMeshComponent>(TempMeshes);
 
+	// Get the animation controller from the temp actor first
+	UWowAnimationController* TempAnimController = FWowCharacterBuilder::GetAnimationController(TempCharacterActor);
+
 	if (TempMeshes.Num() > 0)
 	{
 		// Copy the main skeletal mesh to our character's mesh component
@@ -425,7 +429,7 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 		if (MainMesh && MainMesh->GetSkeletalMeshAsset())
 		{
 			GetMesh()->SetSkeletalMesh(MainMesh->GetSkeletalMeshAsset());
-			GetMesh()->SetAnimationMode(MainMesh->GetAnimationMode());
+			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 
 			// Copy materials
 			for (int32 MatIdx = 0; MatIdx < MainMesh->GetNumMaterials(); ++MatIdx)
@@ -433,16 +437,50 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 				GetMesh()->SetMaterial(MatIdx, MainMesh->GetMaterial(MatIdx));
 			}
 
-			// Copy animation: use SingleNode mode and play the same animation
-			GetMesh()->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-			if (UAnimSequence* PlayingAnim = Cast<UAnimSequence>(MainMesh->AnimationData.AnimToPlay.Get()))
+			// Copy animation controller if available
+			if (TempAnimController && TempAnimController->IsInitialized())
 			{
-				GetMesh()->PlayAnimation(PlayingAnim, true);
-				UE_LOG(LogWowPlayerChar, Log, TEXT("Playing animation from temp actor"));
+				// Create a new animation controller for this player character
+				UWowAnimationController* PlayerAnimController = NewObject<UWowAnimationController>(this, TEXT("PlayerAnimationController"));
+
+				// Get the animations that were cached for the temp actor
+				// We can access them through the temp controller's AnimationCache
+				TArray<UAnimSequence*> Animations;
+
+				// Get all the animations from the temp controller's cache
+				const TMap<int32, TObjectPtr<UAnimSequence>>& TempAnimCache = TempAnimController->GetAnimationCache();
+				for (const auto& AnimPair : TempAnimCache)
+				{
+					if (AnimPair.Value)
+					{
+						Animations.Add(AnimPair.Value);
+					}
+				}
+
+				if (Animations.Num() > 0)
+				{
+					// Initialize the animation controller with our mesh and the animations
+					PlayerAnimController->Initialize(GetMesh(), Animations);
+					SetupAnimationController(PlayerAnimController);
+					UE_LOG(LogWowPlayerChar, Log, TEXT("Setup animation controller with %d animations"), Animations.Num());
+				}
+				else
+				{
+					UE_LOG(LogWowPlayerChar, Warning, TEXT("Temp animation controller had no animations"));
+				}
 			}
 			else
 			{
-				UE_LOG(LogWowPlayerChar, Log, TEXT("No animation playing on temp actor mesh"));
+				// Fallback: use single animation mode with idle animation if available
+				if (UAnimSequence* PlayingAnim = Cast<UAnimSequence>(MainMesh->AnimationData.AnimToPlay.Get()))
+				{
+					GetMesh()->PlayAnimation(PlayingAnim, true);
+					UE_LOG(LogWowPlayerChar, Log, TEXT("Playing fallback animation from temp actor"));
+				}
+				else
+				{
+					UE_LOG(LogWowPlayerChar, Log, TEXT("No animation available from temp actor"));
+				}
 			}
 
 			// Position mesh so feet are at capsule bottom
