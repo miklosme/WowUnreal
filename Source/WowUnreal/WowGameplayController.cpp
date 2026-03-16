@@ -917,8 +917,9 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot setup local player model - missing world resources. Retrying later..."));
 
 		// Try again in 1 second - the world manager might not be ready yet
+		FTimerHandle RetryHandle;
 		GetWorldTimerManager().SetTimer(
-			FTimerHandle(),
+			RetryHandle,
 			[this, Entity]() { SetupLocalPlayerCharacterModel(Entity); },
 			1.0f,
 			false
