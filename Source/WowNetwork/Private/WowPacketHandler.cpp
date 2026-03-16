@@ -368,8 +368,13 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
     }
 
     default:
-        UE_LOG(LogWowPacket, Warning, TEXT("Unknown update block type: %d"), Type);
-        break;
+        UE_LOG(LogWowPacket, Warning, TEXT("Unknown update block type: %d (remaining: %d bytes) - skipping rest of packet to avoid corruption"),
+            Type, R.Remaining());
+
+        // Unknown block type - we can't safely parse this packet any further
+        // Skip to end of packet to avoid reading corrupted data
+        R.Skip(R.Remaining());
+        return;
     }
 }
 

@@ -794,20 +794,29 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
         }
     };
 
-    // CHEST/SHIRT: overlays [0]=ARM_UPPER, [1]=ARM_LOWER, [3]=TORSO_UPPER, [4]=TORSO_LOWER
-    TArray<uint32> ChestRegions = {0, 1, 3, 4};
-    ApplyItemOverlays(Equipment.ChestDisplayId, ChestRegions);
-    ApplyItemOverlays(Equipment.ShirtDisplayId, ChestRegions);
-
-    // Check if chest is a robe (affects leg regions too)
+    // CHEST: Check if it's a robe first, then apply appropriate regions
     if (Equipment.ChestDisplayId > 0)
     {
         const FItemDisplayInfoDbcEntry* ChestItem = Dbc.ItemDisplayInfo().GetById(Equipment.ChestDisplayId);
         if (ChestItem && ChestItem->GeosetGroups[2] > 0) // Robe indicator
         {
-            TArray<uint32> RobeRegions = {0, 1, 3, 4, 5, 6}; // Include LEG_UPPER, LEG_LOWER
+            // Robes include arms, torso, and legs
+            TArray<uint32> RobeRegions = {0, 1, 3, 4, 5, 6}; // ARM_UPPER, ARM_LOWER, TORSO_UPPER, TORSO_LOWER, LEG_UPPER, LEG_LOWER
             ApplyItemOverlays(Equipment.ChestDisplayId, RobeRegions);
         }
+        else
+        {
+            // Regular chest armor: arms and torso only
+            TArray<uint32> ChestRegions = {0, 1, 3, 4}; // ARM_UPPER, ARM_LOWER, TORSO_UPPER, TORSO_LOWER
+            ApplyItemOverlays(Equipment.ChestDisplayId, ChestRegions);
+        }
+    }
+
+    // SHIRT: always just arms and torso
+    if (Equipment.ShirtDisplayId > 0)
+    {
+        TArray<uint32> ShirtRegions = {0, 1, 3, 4}; // ARM_UPPER, ARM_LOWER, TORSO_UPPER, TORSO_LOWER
+        ApplyItemOverlays(Equipment.ShirtDisplayId, ShirtRegions);
     }
 
     // PANTS: overlays [5]=LEG_UPPER, [6]=LEG_LOWER

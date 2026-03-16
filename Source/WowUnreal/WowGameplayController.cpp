@@ -93,26 +93,26 @@ void AWowGameplayController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
 
-	// Left click for targeting
-	InputComponent->BindAction(TEXT("LeftClick"), IE_Released, this, &AWowGameplayController::OnLeftClick);
-	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &AWowGameplayController::OnLeftClick);
+	// Left click for targeting - use IE_Pressed for immediate responsiveness
+	InputComponent->BindAction(TEXT("LeftClick"), IE_Pressed, this, &AWowGameplayController::OnLeftClick);
+	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AWowGameplayController::OnLeftClick);
 
-	// Right click for auto-attack
-	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &AWowGameplayController::OnRightClick);
+	// Right click for auto-attack - use IE_Pressed for immediate responsiveness
+	InputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &AWowGameplayController::OnRightClick);
 
-	// Action bar keybinds - use IE_Released to avoid conflicts and match WoW behavior
-	InputComponent->BindKey(EKeys::One, IE_Released, this, &AWowGameplayController::OnActionSlot1);
-	InputComponent->BindKey(EKeys::Two, IE_Released, this, &AWowGameplayController::OnActionSlot2);
-	InputComponent->BindKey(EKeys::Three, IE_Released, this, &AWowGameplayController::OnActionSlot3);
-	InputComponent->BindKey(EKeys::Four, IE_Released, this, &AWowGameplayController::OnActionSlot4);
-	InputComponent->BindKey(EKeys::Five, IE_Released, this, &AWowGameplayController::OnActionSlot5);
-	InputComponent->BindKey(EKeys::Six, IE_Released, this, &AWowGameplayController::OnActionSlot6);
-	InputComponent->BindKey(EKeys::Seven, IE_Released, this, &AWowGameplayController::OnActionSlot7);
-	InputComponent->BindKey(EKeys::Eight, IE_Released, this, &AWowGameplayController::OnActionSlot8);
-	InputComponent->BindKey(EKeys::Nine, IE_Released, this, &AWowGameplayController::OnActionSlot9);
-	InputComponent->BindKey(EKeys::Zero, IE_Released, this, &AWowGameplayController::OnActionSlot0);
-	InputComponent->BindKey(EKeys::Hyphen, IE_Released, this, &AWowGameplayController::OnActionSlotMinus);
-	InputComponent->BindKey(EKeys::Equals, IE_Released, this, &AWowGameplayController::OnActionSlotEquals);
+	// Action bar keybinds - use IE_Pressed for immediate responsiveness like WoW
+	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &AWowGameplayController::OnActionSlot1);
+	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &AWowGameplayController::OnActionSlot2);
+	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &AWowGameplayController::OnActionSlot3);
+	InputComponent->BindKey(EKeys::Four, IE_Pressed, this, &AWowGameplayController::OnActionSlot4);
+	InputComponent->BindKey(EKeys::Five, IE_Pressed, this, &AWowGameplayController::OnActionSlot5);
+	InputComponent->BindKey(EKeys::Six, IE_Pressed, this, &AWowGameplayController::OnActionSlot6);
+	InputComponent->BindKey(EKeys::Seven, IE_Pressed, this, &AWowGameplayController::OnActionSlot7);
+	InputComponent->BindKey(EKeys::Eight, IE_Pressed, this, &AWowGameplayController::OnActionSlot8);
+	InputComponent->BindKey(EKeys::Nine, IE_Pressed, this, &AWowGameplayController::OnActionSlot9);
+	InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &AWowGameplayController::OnActionSlot0);
+	InputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &AWowGameplayController::OnActionSlotMinus);
+	InputComponent->BindKey(EKeys::Equals, IE_Pressed, this, &AWowGameplayController::OnActionSlotEquals);
 
 	// Minimap toggle
 	InputComponent->BindKey(EKeys::M, IE_Pressed, this, &AWowGameplayController::OnToggleMap);
@@ -1568,8 +1568,17 @@ void AWowGameplayController::OnTaxiNodesShown(uint64 NpcGuid, uint32 CurrentNode
 
 		if (GEngine && GEngine->GameViewport)
 		{
+			// Wrap in positioned overlay that passes clicks through when not interacting
+			TSharedRef<SWidget> TaxiMapContainer =
+				SNew(SOverlay)
+				.Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world when taxi map is closed
+				+ SOverlay::Slot()
+				[
+					TaxiMapWidget.ToSharedRef()
+				];
+
 			GEngine->GameViewport->AddViewportWidgetContent(
-				TaxiMapWidget.ToSharedRef(),
+				TaxiMapContainer,
 				200 // Very high Z-order for full screen overlay
 			);
 		}
