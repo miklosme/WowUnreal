@@ -6,6 +6,7 @@
 
 class UWowConnectionManager;
 class UWowUIManager;
+class UWowGameUI;
 class AWowWorldManager;
 class UWowDeathManager;
 class UWowCursorManager;
@@ -52,6 +53,10 @@ public:
     /** Tooltip manager for entity tooltips */
     UPROPERTY()
     TObjectPtr<UWowTooltipManager> TooltipManager;
+
+    /** Game UI manager for WoW-style windows */
+    UPROPERTY()
+    TObjectPtr<UWowGameUI> GameUI;
 
     /** Wire entity events from the packet handler (call after setting ConnectionManager) */
     void BindEntityEvents();

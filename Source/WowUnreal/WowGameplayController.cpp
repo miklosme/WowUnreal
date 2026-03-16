@@ -5,6 +5,7 @@
 #include "WowOpcodes.h"
 #include "WowPlayerCharacter.h"
 #include "WowUIManager.h"
+#include "WowGameUI.h"
 #include "WowEventSystem.h"
 #include "WowWorldManager.h"
 #include "WowCharacterBuilder.h"
@@ -39,6 +40,9 @@ AWowGameplayController::AWowGameplayController()
 {
 	bShowMouseCursor = false;
 	PrimaryActorTick.bCanEverTick = true;
+
+	// Create Game UI component
+	GameUI = CreateDefaultSubobject<UWowGameUI>(TEXT("WowGameUI"));
 }
 
 void AWowGameplayController::BeginPlay()
@@ -206,6 +210,58 @@ void AWowGameplayController::BindEntityEvents()
 			ActionBarWidget->RefreshActionButtons();
 		}
 	});
+
+	// Bind game UI events
+	ConnectionManager->PacketHandler.OnLootOpened.AddLambda(
+		[this](uint64 LootGuid, uint8 LootType, uint32 Gold, const TArray<FWowLootItem>& Items)
+		{
+			if (GameUI)
+			{
+				GameUI->ShowLootWindow(LootGuid, LootType, Gold, Items);
+			}
+		});
+
+	ConnectionManager->PacketHandler.OnLootClosed.AddLambda(
+		[this]()
+		{
+			if (GameUI)
+			{
+				GameUI->HideLootWindow();
+			}
+		});
+
+	ConnectionManager->PacketHandler.OnVendorOpened.AddLambda(
+		[this](uint64 VendorGuid, const TArray<FWowVendorItem>& Items)
+		{
+			if (GameUI)
+			{
+				GameUI->ShowVendorWindow(VendorGuid, Items);
+			}
+		});
+
+	ConnectionManager->PacketHandler.OnQuestDialog.AddLambda(
+		[this](const FWowQuestDetails& QuestDetails)
+		{
+			if (GameUI)
+			{
+				GameUI->ShowQuestDialog(QuestDetails);
+			}
+		});
+
+	ConnectionManager->PacketHandler.OnQuestRewardDialog.AddLambda(
+		[this](const FWowQuestDetails& QuestDetails)
+		{
+			if (GameUI)
+			{
+				GameUI->ShowQuestRewardDialog(QuestDetails);
+			}
+		});
+
+	// Setup GameUI connection manager
+	if (GameUI)
+	{
+		GameUI->SetConnectionManager(ConnectionManager);
+	}
 
 	// Cache UIManager for tick dispatch
 	if (UGameInstance* GI = GetGameInstance())

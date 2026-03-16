@@ -10,7 +10,11 @@ DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellFailure, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint8 /*FailureReason*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnAttackerStateUpdate, uint64 /*AttackerGuid*/, uint64 /*TargetGuid*/, uint32 /*HitInfo*/, uint32 /*Damage*/);
-DECLARE_MULTICAST_DELEGATE_TwoParams(FOnLootOpened, uint64 /*LootGuid*/, const TArray<FWowLootItem>& /*Items*/);
+DECLARE_MULTICAST_DELEGATE_FourParams(FOnLootOpened, uint64 /*LootGuid*/, uint8 /*LootType*/, uint32 /*Gold*/, const TArray<FWowLootItem>& /*Items*/);
+DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, const TArray<FWowVendorItem>& /*Items*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestDialog, const FWowQuestDetails& /*QuestDetails*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestRewardDialog, const FWowQuestDetails& /*QuestDetails*/);
 DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnOpcodeReceived, uint16 /*Opcode*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestAccepted, uint32 /*QuestId*/);
@@ -164,6 +168,10 @@ public:
     FOnSpellFailure OnSpellFailure;
     FOnAttackerStateUpdate OnAttackerStateUpdate;
     FOnLootOpened OnLootOpened;
+    FOnLootClosed OnLootClosed;
+    FOnVendorOpened OnVendorOpened;
+    FOnQuestDialog OnQuestDialog;
+    FOnQuestRewardDialog OnQuestRewardDialog;
     FOnQuestAccepted OnQuestAccepted;
     FOnQuestComplete OnQuestComplete;
     FOnTalentsUpdated OnTalentsUpdated;
@@ -221,6 +229,7 @@ private:
     void HandleLootResponse(FPacketReader& R);
     void HandleLootReleaseResponse(FPacketReader& R);
     void HandleItemPushResult(FPacketReader& R);
+    void HandleListInventory(FPacketReader& R);
 
     // Quest handlers
     void HandleQuestgiverStatus(FPacketReader& R);

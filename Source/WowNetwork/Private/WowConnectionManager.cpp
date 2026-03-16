@@ -406,6 +406,83 @@ void UWowConnectionManager::SendKeepAlive()
     WorldSocket->SendPacket(WowOpcode::CMSG_KEEP_ALIVE);
 }
 
+void UWowConnectionManager::SendLootItem(int32 LootSlot)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Add(static_cast<uint8>(LootSlot));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_AUTOSTORE_LOOT_ITEM, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Loot item slot %d"), LootSlot);
+}
+
+void UWowConnectionManager::SendBuyItem(int64 VendorGuid, int32 ItemId, int32 Count)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(16);
+
+    // uint64 vendor_guid, uint32 item_id, uint8 count
+    uint64 VGuid = static_cast<uint64>(VendorGuid);
+    Data.SetNumUninitialized(8);
+    FMemory::Memcpy(Data.GetData(), &VGuid, 8);
+
+    uint32 IId = static_cast<uint32>(ItemId);
+    Data.SetNumUninitialized(Data.Num() + 4);
+    FMemory::Memcpy(Data.GetData() + 8, &IId, 4);
+
+    Data.Add(static_cast<uint8>(Count));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_BUY_ITEM, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Buy item %d (count=%d) from vendor %lld"), ItemId, Count, VendorGuid);
+}
+
+void UWowConnectionManager::SendQuestAccept(int64 QuestGiverGuid, int32 QuestId)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(12);
+
+    // uint64 questgiver_guid, uint32 quest_id
+    uint64 QGuid = static_cast<uint64>(QuestGiverGuid);
+    Data.SetNumUninitialized(8);
+    FMemory::Memcpy(Data.GetData(), &QGuid, 8);
+
+    uint32 QId = static_cast<uint32>(QuestId);
+    Data.SetNumUninitialized(Data.Num() + 4);
+    FMemory::Memcpy(Data.GetData() + 8, &QId, 4);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_QUESTGIVER_ACCEPT_QUEST, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Accept quest %d from questgiver %lld"), QuestId, QuestGiverGuid);
+}
+
+void UWowConnectionManager::SendQuestChooseReward(int64 QuestGiverGuid, int32 QuestId, int32 RewardChoice)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(16);
+
+    // uint64 questgiver_guid, uint32 quest_id, uint32 reward_choice
+    uint64 QGuid = static_cast<uint64>(QuestGiverGuid);
+    Data.SetNumUninitialized(8);
+    FMemory::Memcpy(Data.GetData(), &QGuid, 8);
+
+    uint32 QId = static_cast<uint32>(QuestId);
+    Data.SetNumUninitialized(Data.Num() + 4);
+    FMemory::Memcpy(Data.GetData() + 8, &QId, 4);
+
+    uint32 RChoice = static_cast<uint32>(RewardChoice);
+    Data.SetNumUninitialized(Data.Num() + 4);
+    FMemory::Memcpy(Data.GetData() + 12, &RChoice, 4);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_QUESTGIVER_CHOOSE_REWARD, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Choose quest reward %d for quest %d from questgiver %lld"), RewardChoice, QuestId, QuestGiverGuid);
+}
+
 void UWowConnectionManager::SendRawPacket(uint32 Opcode, const TArray<uint8>& Data)
 {
     if (!WorldSocket.IsValid()) return;

@@ -71,9 +71,47 @@ struct FWowLootItem
     uint32 ItemId = 0;
     uint32 Count = 0;
     uint32 DisplayId = 0;
+    uint32 RandomSuffix = 0;
+    uint32 RandomProperty = 0;
     uint8 Quality = 0;
     uint8 Index = 0;
+    uint8 SlotType = 0;
     bool bLooted = false;
+};
+
+// Vendor item information
+struct FWowVendorItem
+{
+    uint32 Slot = 0;
+    uint32 ItemId = 0;
+    uint32 DisplayId = 0;
+    uint32 MaxCount = 0;
+    uint32 Price = 0;
+    uint32 MaxDurability = 0;
+    uint32 BuyCount = 0;
+    uint32 ExtendedCost = 0;
+};
+
+// Quest reward item
+struct FWowQuestRewardItem
+{
+    uint32 ItemId = 0;
+    uint32 Count = 0;
+    uint32 DisplayId = 0;
+};
+
+// Quest details for dialog
+struct FWowQuestDetails
+{
+    uint64 QuestGiverGuid = 0;
+    uint32 QuestId = 0;
+    FString Title;
+    FString Details;
+    FString Objectives;
+    TArray<FWowQuestRewardItem> RewardItems;
+    TArray<FWowQuestRewardItem> ChoiceRewards;
+    uint32 RewardMoney = 0;
+    uint32 RewardXP = 0;
 };
 
 enum class EWowEntityKind : uint8
