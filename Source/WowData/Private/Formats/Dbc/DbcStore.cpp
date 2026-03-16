@@ -377,7 +377,33 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharHairGeosets.dbc"), Parser))
+    {
+        CharHairGeosetsDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, CharHairGeosetsDbc.Num()); ++i)
+        {
+            const FCharHairGeosetsDbcEntry& E = CharHairGeosetsDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  CharHairGeosets[%d]: ID=%d Race=%d Sex=%d Variation=%d GeosetID=%d"),
+                i, E.ID, E.RaceID, E.SexID, E.VariationID, E.GeosetID);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharacterFacialHairStyles.dbc"), Parser))
+    {
+        CharacterFacialHairStylesDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, CharacterFacialHairStylesDbc.Num()); ++i)
+        {
+            const FCharacterFacialHairStylesDbcEntry& E = CharacterFacialHairStylesDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Log, TEXT("  CharacterFacialHairStyles[%d]: Race=%d Sex=%d Variation=%d Geosets=[%d,%d,%d,%d,%d]"),
+                i, E.RaceID, E.SexID, E.VariationID, E.Geosets[0], E.Geosets[1], E.Geosets[2], E.Geosets[3], E.Geosets[4]);
+        }
+    }
+
     bLoaded = Loaded > 0;
-    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/26 DBC tables"), Loaded);
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/28 DBC tables"), Loaded);
     return bLoaded;
 }

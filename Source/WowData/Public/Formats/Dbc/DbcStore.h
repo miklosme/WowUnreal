@@ -26,6 +26,8 @@
 #include "Formats/Dbc/SoundAmbienceDbc.h"
 #include "Formats/Dbc/CharComponentTextureLayoutsDbc.h"
 #include "Formats/Dbc/CharComponentTextureSectionsDbc.h"
+#include "Formats/Dbc/CharHairGeosetsDbc.h"
+#include "Formats/Dbc/CharacterFacialHairStylesDbc.h"
 
 class FMpqManager;
 
@@ -62,6 +64,8 @@ public:
     FSoundAmbienceDbc& SoundAmbience() { return SoundAmbienceDbc; }
     FCharComponentTextureLayoutsDbc& CharComponentTextureLayouts() { return CharComponentTextureLayoutsDbc; }
     FCharComponentTextureSectionsDbc& CharComponentTextureSections() { return CharComponentTextureSectionsDbc; }
+    FCharHairGeosetsDbc& CharHairGeosets() { return CharHairGeosetsDbc; }
+    FCharacterFacialHairStylesDbc& CharacterFacialHairStyles() { return CharacterFacialHairStylesDbc; }
 
     const FMapDbc& Maps() const { return MapDbc; }
     const FAreaTableDbc& AreaTable() const { return AreaTableDbc; }
@@ -89,6 +93,8 @@ public:
     const FSoundAmbienceDbc& SoundAmbience() const { return SoundAmbienceDbc; }
     const FCharComponentTextureLayoutsDbc& CharComponentTextureLayouts() const { return CharComponentTextureLayoutsDbc; }
     const FCharComponentTextureSectionsDbc& CharComponentTextureSections() const { return CharComponentTextureSectionsDbc; }
+    const FCharHairGeosetsDbc& CharHairGeosets() const { return CharHairGeosetsDbc; }
+    const FCharacterFacialHairStylesDbc& CharacterFacialHairStyles() const { return CharacterFacialHairStylesDbc; }
 
     bool IsLoaded() const { return bLoaded; }
 
@@ -119,5 +125,7 @@ private:
     FSoundAmbienceDbc SoundAmbienceDbc;
     FCharComponentTextureLayoutsDbc CharComponentTextureLayoutsDbc;
     FCharComponentTextureSectionsDbc CharComponentTextureSectionsDbc;
+    FCharHairGeosetsDbc CharHairGeosetsDbc;
+    FCharacterFacialHairStylesDbc CharacterFacialHairStylesDbc;
     bool bLoaded = false;
 };

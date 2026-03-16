@@ -300,23 +300,53 @@ UTexture2D* ResolveCreatureTextureOverride(FMpqManager* Mpq, FWowAssetCache* Cac
 TMap<uint16, uint16> FWowCharacterBuilder::ComputeDefaultGeosets(const FWowCharacterTexture::FCustomization& Customization)
 {
     TMap<uint16, uint16> Result;
+    const FDbcStore& Dbc = FDbcStore::Get();
 
     // WMV defaults ALL groups to variant 1. Variant 0 = hide entire group.
     // GeosetId = group*100 + variant. Group 0 variant 1 = geosetId 1 (body mesh).
 
-    // Group 0 (body): variant 1. GeosetId=0 is always visible via special case.
-    // This filters out equipment overlay sections (variant 2+) in group 0.
-    Result.Add(0, 1);
+    // Group 0 (CG_SKIN_OR_HAIRSTYLE): Hair mesh is in group 0!
+    // GeosetId=0 (base body) always visible via special case in mesh filter.
+    // Hair geoset ID from CharHairGeosets sets which additional group 0 variant to show.
+    {
+        const FCharHairGeosetsDbcEntry* HairEntry = Dbc.CharHairGeosets().GetByRaceGenderVariation(
+            Customization.RaceId, Customization.Gender, Customization.HairStyle);
 
-    Result.Add(1, static_cast<uint16>(Customization.HairStyle + 1)); // Hair
-    Result.Add(2, static_cast<uint16>(Customization.FacialHairStyle > 0 ? Customization.FacialHairStyle : 1)); // Facial hair
-    Result.Add(3, 1);  // Facial features
+        uint16 HairVariant = 1; // Default: variant 1 = basic body
+        if (HairEntry)
+        {
+            HairVariant = static_cast<uint16>(FMath::Max(1u, HairEntry->GeosetID));
+            UE_LOG(LogWowCharacter, Log, TEXT("Hair geoset: Race=%d Gender=%d Style=%d → group 0 variant %d"),
+                Customization.RaceId, Customization.Gender, Customization.HairStyle, HairVariant);
+        }
+        Result.Add(0, HairVariant);
+    }
+
+    // Groups 1, 2, 3 (Facial features): From CharacterFacialHairStyles DBC
+    // Group 1 = Geosets[0] (tusks/chin), Group 2 = Geosets[1], Group 3 = Geosets[2]
+    {
+        const FCharacterFacialHairStylesDbcEntry* FacialEntry = Dbc.CharacterFacialHairStyles().GetByRaceGenderVariation(
+            Customization.RaceId, Customization.Gender, Customization.FacialHairStyle);
+
+        if (FacialEntry)
+        {
+            Result.Add(1, static_cast<uint16>(FacialEntry->Geosets[0] > 0 ? FacialEntry->Geosets[0] : 1));
+            Result.Add(2, static_cast<uint16>(FacialEntry->Geosets[1] > 0 ? FacialEntry->Geosets[1] : 1));
+            Result.Add(3, static_cast<uint16>(FacialEntry->Geosets[2] > 0 ? FacialEntry->Geosets[2] : 1));
+        }
+        else
+        {
+            Result.Add(1, 1);
+            Result.Add(2, 1);
+            Result.Add(3, 1);
+        }
+    }
     Result.Add(4, 1);  // Forearms/gloves: variant 1 = bare forearms
     Result.Add(5, 1);  // Shins/boots: variant 1 = bare shins
     Result.Add(6, 1);  // Tail/misc
     Result.Add(7, 2);  // Ears: visible (WMV uses 2)
     Result.Add(8, 1);  // Wristbands/sleeves
-    Result.Add(9, 1);  // Kneepads/pants
+    Result.Add(9, 1);  // Kneepads
     Result.Add(10, 1); // Chest
     Result.Add(11, 1); // Pants lower
     Result.Add(12, 1); // Tabard
@@ -616,35 +646,67 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             SkelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
             SkelMesh->RegisterComponent();
 
-            // For characters, ALL sections should use the composite skin texture.
-            // The M2's TexturePaths for type!=0 (replaceable) are empty strings.
-            // Type 0 textures (hardcoded paths like hair detail) exist but should not
-            // replace the composite — only equipment overrides should do that.
+            // Resolve textures: composite skin for body, hair texture for hair sections
             UTexture2D* SkinTexture = OverrideTexture;
             if (!SkinTexture && M2Data->TexturePaths.Num() > 0 && !M2Data->TexturePaths[0].IsEmpty())
             {
                 SkinTexture = LoadBlpTexture(Mpq, Cache, M2Data->TexturePaths[0]);
             }
 
-            // Log M2 texture paths for debugging
-            for (int32 ti = 0; ti < M2Data->TexturePaths.Num(); ++ti)
+            // Load hair texture from CharSections if this is a character with customization
+            UTexture2D* HairTexture = nullptr;
+            if (Customization)
             {
-                UE_LOG(LogWowCharacter, Log, TEXT("  M2 Texture[%d]: %s"), ti,
-                    M2Data->TexturePaths[ti].IsEmpty() ? TEXT("(replaceable)") : *M2Data->TexturePaths[ti]);
+                // CharSections Hair type (3), Textures[0] = replaceable hair texture
+                for (const FCharSectionsDbcEntry& Entry : FDbcStore::Get().CharSections().GetAll())
+                {
+                    if (Entry.RaceID == Customization->RaceId && Entry.SexID == Customization->Gender &&
+                        Entry.Type == 3 && Entry.Variation == Customization->HairStyle &&
+                        Entry.Color == Customization->HairColor && !Entry.Textures[0].IsEmpty())
+                    {
+                        HairTexture = LoadBlpTexture(Mpq, Cache, Entry.Textures[0]);
+                        if (HairTexture)
+                        {
+                            UE_LOG(LogWowCharacter, Log, TEXT("Loaded hair texture: %s"), *Entry.Textures[0]);
+                        }
+                        break;
+                    }
+                }
             }
 
-            // Apply material to all sections.
-            // For characters with composite texture, use it for ALL sections (skin, hair, etc.)
-            // For creatures, use the override texture or M2's first texture path.
+            // Log sections and their texture mapping
+            for (int32 si = 0; si < GeosetInfo.Num(); ++si)
+            {
+                const auto& Info = GeosetInfo[si];
+                uint32 TexType = (Info.TextureIndex < static_cast<uint16>(M2Data->TextureTypes.Num()))
+                    ? M2Data->TextureTypes[Info.TextureIndex] : 999;
+                UE_LOG(LogWowCharacter, Verbose, TEXT("  Section[%d] geoset=%d texIdx=%d texType=%d"),
+                    si, Info.GeosetId, Info.TextureIndex, TexType);
+            }
+
+            // Apply per-section textures: skin composite for body, hair texture for hair sections
             if (UMaterial* BaseMat = GetCharacterMaterial())
             {
                 const int32 NumMatSlots = SkeletalMesh->GetMaterials().Num();
                 for (int32 MatIdx = 0; MatIdx < NumMatSlots; ++MatIdx)
                 {
                     UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(BaseMat, SkelMesh);
-                    if (SkinTexture)
+
+                    // Check if this section references a hair texture (type 6)
+                    UTexture2D* SectionTex = SkinTexture;
+                    if (HairTexture && GeosetInfo.IsValidIndex(MatIdx))
                     {
-                        MID->SetTextureParameterValue(TEXT("BaseTexture"), SkinTexture);
+                        uint16 TexIdx = GeosetInfo[MatIdx].TextureIndex;
+                        if (TexIdx < static_cast<uint16>(M2Data->TextureTypes.Num()) &&
+                            M2Data->TextureTypes[TexIdx] == 6) // TEXTURE_CHAR_HAIR
+                        {
+                            SectionTex = HairTexture;
+                        }
+                    }
+
+                    if (SectionTex)
+                    {
+                        MID->SetTextureParameterValue(TEXT("BaseTexture"), SectionTex);
                     }
                     SkelMesh->SetMaterial(MatIdx, MID);
                 }

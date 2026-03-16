@@ -98,6 +98,7 @@ struct WOWDATA_API FM2Data
     TArray<FM2Vertex> Vertices;
     TArray<uint16> Indices;
     TArray<FString> TexturePaths;
+    TArray<uint32> TextureTypes;  // M2 texture type per index (0=filename, 1=skin, 6=hair, etc.)
     TArray<FM2RenderPass> RenderPasses;
     FBox BoundingBox = FBox(ForceInit);
     float BoundingSphereRadius = 0.0f;

@@ -43,7 +43,7 @@ void SWowLoginWidget::Construct(const FArguments& InArgs)
                 SNew(SBox).MinDesiredWidth(300)
                 [
                     SAssignNew(ServerBox, SEditableTextBox)
-                    .Text(FText::FromString(TEXT("127.0.0.1:3724")))
+                    .Text(FText::FromString(TEXT("192.168.1.5:3724")))
                     .Font(FCoreStyle::GetDefaultFontStyle("Regular", 14))
                 ]
             ]
@@ -124,7 +124,7 @@ void SWowLoginWidget::Construct(const FArguments& InArgs)
 
 FReply SWowLoginWidget::OnLoginClicked()
 {
-    FString ServerStr = ServerBox.IsValid() ? ServerBox->GetText().ToString().TrimStartAndEnd() : TEXT("127.0.0.1:3724");
+    FString ServerStr = ServerBox.IsValid() ? ServerBox->GetText().ToString().TrimStartAndEnd() : TEXT("192.168.1.5:3724");
     FString User = UsernameBox.IsValid() ? UsernameBox->GetText().ToString().TrimStartAndEnd() : TEXT("");
     FString Pass = PasswordBox.IsValid() ? PasswordBox->GetText().ToString().TrimStartAndEnd() : TEXT("");
 

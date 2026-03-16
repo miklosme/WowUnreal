@@ -57,7 +57,7 @@ private:
     // Customization
     uint32 SkinColor = 0;
     uint32 FaceVariation = 0;
-    uint32 HairStyle = 0;
+    uint32 HairStyle = 2;
     uint32 HairColor = 0;
     uint32 FacialHairStyle = 0;
     uint32 MaxSkinColors = 1;

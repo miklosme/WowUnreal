@@ -501,9 +501,11 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
     if (Header.nTextures > 0 && SafeRead(M2Base, M2Size, Header.ofsTextures, Header.nTextures, TexEntries))
     {
         Result.TexturePaths.SetNum(Header.nTextures);
+        Result.TextureTypes.SetNum(Header.nTextures);
         for (uint32 i = 0; i < Header.nTextures; i++)
         {
             const FM2TextureEntry& Tex = TexEntries[i];
+            Result.TextureTypes[i] = Tex.Type;
             if (Tex.Type == 0 && Tex.NameLength > 1 &&
                 Tex.NameOffset + Tex.NameLength <= static_cast<uint32>(M2Size))
             {
