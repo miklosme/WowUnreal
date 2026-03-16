@@ -15,6 +15,7 @@ bool FMapDbc::Load(const FDbcParser& Parser)
         E.MapType      = Parser.GetUInt(i, 2);
         E.Flags        = Parser.GetUInt(i, 3);
         E.Name         = Parser.GetString(i, 5);
+        E.LoadingScreenID = Parser.GetUInt(i, 21);
         E.LinkedZone   = Parser.GetUInt(i, 22);
         E.ExpansionID  = Parser.GetUInt(i, 63);
         E.MaxPlayers   = Parser.GetUInt(i, 65);

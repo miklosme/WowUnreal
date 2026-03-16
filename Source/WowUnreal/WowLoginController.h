@@ -41,6 +41,7 @@ private:
     UFUNCTION() void OnCharacterList(const TArray<FWowCharacterInfo>& Characters);
     UFUNCTION() void OnError(const FString& Msg);
     UFUNCTION() void OnCharCreateResult(uint8 ResultCode);
+    UFUNCTION() void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);
 
     void HandleLoginSubmit(const FString& Server, int32 Port, const FString& User, const FString& Pass);
     void HandleRealmSelected(int32 Index);
@@ -60,6 +61,9 @@ private:
 
     /** Show the loading screen and start terrain loading around spawn */
     void ShowLoadingScreen();
+
+    /** Show loading screen for entering the world */
+    void ShowLoadingScreen(uint32 MapId);
 
     /** Called each tick while loading — checks progress and transitions to game */
     void UpdateLoadingProgress();
@@ -98,4 +102,7 @@ private:
     /** Character creation state */
     bool bCharCreateSent = false;
     bool bAutoEnterAfterCreate = false;
+
+    /** Handle for login verify world delegate binding */
+    FDelegateHandle LoginVerifyWorldHandle;
 };

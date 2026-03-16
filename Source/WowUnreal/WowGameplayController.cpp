@@ -9,10 +9,13 @@
 #include "WowWorldManager.h"
 #include "WowCharacterBuilder.h"
 #include "WowNameplateWidget.h"
+#include "SWowCombatLog.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
 #include "Components/WidgetComponent.h"
+#include "Engine/GameViewportClient.h"
+#include "Formats/Dbc/DbcStore.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
@@ -72,6 +75,12 @@ void AWowGameplayController::BindEntityEvents()
 	// Forward SMSG opcodes to UI event system
 	ConnectionManager->PacketHandler.OnOpcodeReceived.AddUObject(
 		this, &AWowGameplayController::OnOpcodeReceived);
+
+	// Bind combat log events
+	ConnectionManager->PacketHandler.OnSpellStart.AddUObject(
+		this, &AWowGameplayController::OnSpellStart);
+	ConnectionManager->PacketHandler.OnChatMessage.AddUObject(
+		this, &AWowGameplayController::OnChatMessage);
 
 	// Cache UIManager for tick dispatch
 	if (UGameInstance* GI = GetGameInstance())
@@ -141,6 +150,19 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 	if (!ConnectionManager) return;
 
 	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+
+	// Track health changes for combat log
+	static TMap<uint64, int32> LastKnownHealth;
+	int32 CurrentHealth = Entity.GetHealth();
+	int32* OldHealthPtr = LastKnownHealth.Find(Entity.Guid);
+	if (OldHealthPtr && *OldHealthPtr != CurrentHealth && CurrentHealth > 0)
+	{
+		OnEntityHealthChanged(Entity, *OldHealthPtr, CurrentHealth);
+	}
+	if (CurrentHealth > 0)
+	{
+		LastKnownHealth.Add(Entity.Guid, CurrentHealth);
+	}
 
 	if (Entity.Guid == LocalGuid)
 	{
@@ -714,4 +736,103 @@ void AWowGameplayController::SendWorldportAck()
 	ConnectionManager->SendRawPacket(WowOpcode::MSG_MOVE_WORLDPORT_ACK, {});
 
 	UE_LOG(LogWowGameplay, Log, TEXT("Sent MSG_MOVE_WORLDPORT_ACK"));
+}
+
+void AWowGameplayController::AddCombatMessage(const FString& Message, const FLinearColor& Color)
+{
+	if (CombatLog.IsValid())
+	{
+		CombatLog->AddCombatMessage(Message, Color);
+	}
+}
+
+void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags, int32 CastTime)
+{
+	if (!ConnectionManager) return;
+
+	const FDbcStore& DbcStore = FDbcStore::Get();
+	FString SpellName = FString::Printf(TEXT("Spell %u"), SpellId);
+
+	// Look up spell name from DBC
+	if (DbcStore.IsLoaded())
+	{
+		if (const auto* SpellEntry = DbcStore.Spells().GetById(SpellId))
+		{
+			SpellName = SpellEntry->SpellName;
+		}
+	}
+
+	// Determine who cast the spell
+	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+	FLinearColor MessageColor = FLinearColor::White;
+	FString CasterName = TEXT("Unknown");
+
+	if (CasterGuid == LocalGuid)
+	{
+		CasterName = TEXT("You");
+		MessageColor = FLinearColor::Yellow; // Yellow for player spells
+	}
+	else
+	{
+		const FWowEntity* Entity = ConnectionManager->PacketHandler.EntityManager.Find(CasterGuid);
+		if (Entity)
+		{
+			CasterName = FString::Printf(TEXT("Entity %llu"), CasterGuid);
+		}
+		MessageColor = FLinearColor(0.8f, 0.8f, 0.8f, 1.0f); // Light gray for other entities
+	}
+
+	FString Message = FString::Printf(TEXT("%s cast %s"), *CasterName, *SpellName);
+	AddCombatMessage(Message, MessageColor);
+}
+
+void AWowGameplayController::OnChatMessage(const FString& Message)
+{
+	// Show chat messages in the combat log as well (like in WoW)
+	AddCombatMessage(Message, FLinearColor::White);
+}
+
+void AWowGameplayController::OnEntityHealthChanged(const FWowEntity& Entity, int32 OldHealth, int32 NewHealth)
+{
+	if (!ConnectionManager) return;
+
+	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+	int32 HealthDiff = NewHealth - OldHealth;
+
+	if (HealthDiff == 0) return;
+
+	FLinearColor MessageColor;
+	FString Message;
+
+	if (Entity.Guid == LocalGuid)
+	{
+		// Player health change
+		if (HealthDiff > 0)
+		{
+			MessageColor = FLinearColor::Green; // Healing
+			Message = FString::Printf(TEXT("You are healed for %d"), HealthDiff);
+		}
+		else
+		{
+			MessageColor = FLinearColor::Red; // Damage
+			Message = FString::Printf(TEXT("You take %d damage"), -HealthDiff);
+		}
+	}
+	else
+	{
+		// Other entity health change
+		MessageColor = FLinearColor(0.8f, 0.8f, 0.8f, 1.0f); // Gray
+		FString EntityName = FString::Printf(TEXT("Entity %llu"), Entity.Guid);
+
+		if (HealthDiff > 0)
+		{
+			Message = FString::Printf(TEXT("%s is healed for %d"), *EntityName, HealthDiff);
+		}
+		else
+		{
+			Message = FString::Printf(TEXT("%s takes %d damage"), *EntityName, -HealthDiff);
+		}
+	}
+
+	AddCombatMessage(Message, MessageColor);
 }
