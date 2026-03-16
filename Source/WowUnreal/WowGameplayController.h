@@ -15,6 +15,8 @@ class FWowAssetCache;
 class SWowCombatLog;
 struct FWowEntity;
 class SWowActionBar;
+class SWowCastBar;
+struct FWowFloatingTextInfo;
 
 UCLASS()
 class WOWUNREAL_API AWowGameplayController : public APlayerController
@@ -64,6 +66,20 @@ public:
 
     /** Action bar widget */
     TSharedPtr<SWowActionBar> ActionBarWidget;
+
+    /** Cast a spell on the current target (or self if no target) */
+    UFUNCTION(BlueprintCallable)
+    void CastSpell(int32 SpellId);
+
+    /** Start auto-attack on targeted entity (right-click) */
+    void StartAutoAttack();
+
+    /** Stop auto-attack */
+    void StopAutoAttack();
+
+    /** Get auto-attack state */
+    UFUNCTION(BlueprintCallable)
+    bool IsAutoAttacking() const { return bIsAutoAttacking; }
 
 private:
     // Movement sync
@@ -161,8 +177,34 @@ private:
     FMpqManager* CachedMpq = nullptr;
     FWowAssetCache* CachedAssetCache = nullptr;
 
+    // Cast bar widget
+    TSharedPtr<SWowCastBar> CastBarWidget;
+
+    // Combat state
+    bool bIsAutoAttacking = false;
+    uint64 AutoAttackTargetGuid = 0;
+
+    // Spell casting
+    bool bIsCasting = false;
+    int32 CurrentSpellId = 0;
+    float CastStartTime = 0.0f;
+    float CastDuration = 0.0f;
+
     // Combat log event handlers
     void OnSpellStart(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags, int32 CastTime);
+    void OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags);
+    void OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason);
+    void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
     void OnChatMessage(const FString& Message);
     void OnEntityHealthChanged(const FWowEntity& Entity, int32 OldHealth, int32 NewHealth);
+
+    // Input handlers for spell casting (1-6 keys)
+    void OnSpellKey1() { CastSpell(133); } // Fireball
+    void OnSpellKey2() { CastSpell(116); } // Frostbolt
+    void OnSpellKey3() { CastSpell(2136); } // Fire Blast
+    void OnSpellKey4() { CastSpell(122); }  // Frost Nova
+    void OnSpellKey5() { CastSpell(1449); } // Arcane Explosion
+    void OnSpellKey6() { CastSpell(475); }  // Remove Curse
+
+    void OnRightClick();
 };
