@@ -8,8 +8,9 @@ class UMediaSource;
 class FMpqManager;
 
 /**
- * Manages extraction and playback of WoW login cinematics from MPQ archives.
- * Extracts AVI files to Saved/Cinematics/ and plays them via UE5 MediaFramework.
+ * Manages playback of WoW login cinematics.
+ * Finds AVI files in the WoW Data directory (loose files, not in MPQ)
+ * and plays them via UE5 MediaFramework.
  */
 class FWowCinematicManager
 {
@@ -17,10 +18,10 @@ public:
     FWowCinematicManager();
     ~FWowCinematicManager();
 
-    /** Extract cinematics from MPQ for the given expansion. Returns true if file is ready. */
+    /** Find the cinematic file for the given expansion on disk */
     bool PrepareCinematic(FMpqManager* Mpq, EWowExpansion Expansion);
 
-    /** Get the extracted file path for an expansion's cinematic */
+    /** Get the full path for an expansion's cinematic (empty if not found) */
     FString GetCinematicPath(EWowExpansion Expansion) const;
 
     /** Start playing the cinematic for the given expansion */
@@ -29,7 +30,7 @@ public:
     /** Stop current playback */
     void StopCinematic();
 
-    /** Get the media texture for rendering (bind to UI material) */
+    /** Get the media texture for rendering (bind to UI) */
     UMediaTexture* GetMediaTexture() const { return MediaTexture; }
 
     /** Get the media player */
@@ -38,22 +39,19 @@ public:
     /** Is a cinematic currently playing? */
     bool IsPlaying() const;
 
-    /** Check if a cinematic file exists for the given expansion */
+    /** Check if a cinematic file was found for the given expansion */
     bool HasCinematic(EWowExpansion Expansion) const;
 
 private:
-    /** Extract a single file from MPQ to disk */
-    bool ExtractFromMpq(FMpqManager* Mpq, const FString& MpqPath, const FString& DiskPath);
-
-    /** Get the MPQ path for an expansion's cinematic */
-    static FString GetMpqCinematicPath(EWowExpansion Expansion);
-
-    /** Get the directory for extracted cinematics */
-    FString GetCinematicDir() const;
+    /** Get the expected filename for an expansion's cinematic */
+    static FString GetCinematicFilename(EWowExpansion Expansion);
 
     UMediaPlayer* MediaPlayer = nullptr;
     UMediaTexture* MediaTexture = nullptr;
 
-    /** Track which expansions have been extracted */
+    /** Maps expansion → absolute file path on disk */
+    TMap<EWowExpansion, FString> CinematicPaths;
+
+    /** Track which expansions have been searched */
     TSet<EWowExpansion> ExtractedExpansions;
 };

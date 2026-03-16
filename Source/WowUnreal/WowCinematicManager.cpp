@@ -29,6 +29,10 @@ FWowCinematicManager::FWowCinematicManager()
         MediaTexture->SetMediaPlayer(MediaPlayer);
         MediaTexture->UpdateResource();
     }
+
+    UE_LOG(LogWowCinematic, Log, TEXT("CinematicManager created (MediaPlayer=%s MediaTexture=%s)"),
+        MediaPlayer ? TEXT("OK") : TEXT("FAIL"),
+        MediaTexture ? TEXT("OK") : TEXT("FAIL"));
 }
 
 FWowCinematicManager::~FWowCinematicManager()
@@ -47,84 +51,6 @@ FWowCinematicManager::~FWowCinematicManager()
     }
 }
 
-FString FWowCinematicManager::GetMpqCinematicPath(EWowExpansion Expansion)
-{
-    switch (Expansion)
-    {
-    case EWowExpansion::Classic:
-        return TEXT("Interface\\Cinematics\\WOW_Intro.avi");
-    case EWowExpansion::BurningCrusade:
-        return TEXT("Interface\\Cinematics\\BurningCrusade_Intro.avi");
-    case EWowExpansion::WrathOfTheLichKing:
-    default:
-        return TEXT("Interface\\Cinematics\\Wrath_Intro.avi");
-    }
-}
-
-FString FWowCinematicManager::GetCinematicDir() const
-{
-    return FPaths::ProjectSavedDir() / TEXT("Cinematics");
-}
-
-FString FWowCinematicManager::GetCinematicPath(EWowExpansion Expansion) const
-{
-    FString Filename;
-    switch (Expansion)
-    {
-    case EWowExpansion::Classic:
-        Filename = TEXT("WOW_Intro.avi");
-        break;
-    case EWowExpansion::BurningCrusade:
-        Filename = TEXT("BurningCrusade_Intro.avi");
-        break;
-    case EWowExpansion::WrathOfTheLichKing:
-    default:
-        Filename = TEXT("Wrath_Intro.avi");
-        break;
-    }
-    return GetCinematicDir() / Filename;
-}
-
-bool FWowCinematicManager::ExtractFromMpq(FMpqManager* Mpq, const FString& MpqPath, const FString& DiskPath)
-{
-    if (!Mpq) return false;
-
-    // Check if already extracted
-    if (FPaths::FileExists(DiskPath))
-    {
-        UE_LOG(LogWowCinematic, Log, TEXT("Cinematic already extracted: %s"), *DiskPath);
-        return true;
-    }
-
-    // Read from MPQ
-    TArray<uint8> FileData;
-    if (!Mpq->ReadFile(MpqPath, FileData))
-    {
-        UE_LOG(LogWowCinematic, Warning, TEXT("Cinematic not found in MPQ: %s"), *MpqPath);
-        return false;
-    }
-
-    UE_LOG(LogWowCinematic, Log, TEXT("Extracting cinematic: %s (%d bytes)"), *MpqPath, FileData.Num());
-
-    // Ensure directory exists
-    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    FString Dir = FPaths::GetPath(DiskPath);
-    if (!PlatformFile.DirectoryExists(*Dir))
-    {
-        PlatformFile.CreateDirectoryTree(*Dir);
-    }
-
-    // Write to disk
-    if (!FFileHelper::SaveArrayToFile(FileData, *DiskPath))
-    {
-        UE_LOG(LogWowCinematic, Error, TEXT("Failed to write cinematic to: %s"), *DiskPath);
-        return false;
-    }
-
-    UE_LOG(LogWowCinematic, Log, TEXT("Extracted cinematic to: %s"), *DiskPath);
-    return true;
-}
-
 bool FWowCinematicManager::PrepareCinematic(FMpqManager* Mpq, EWowExpansion Expansion)
 {
     if (ExtractedExpansions.Contains(Expansion))
@@ -132,15 +58,66 @@ bool FWowCinematicManager::PrepareCinematic(FMpqManager* Mpq, EWowExpansion Expa
         return HasCinematic(Expansion);
     }
 
-    FString MpqPath = GetMpqCinematicPath(Expansion);
-    FString DiskPath = GetCinematicPath(Expansion);
-
-    bool bSuccess = ExtractFromMpq(Mpq, MpqPath, DiskPath);
-    if (bSuccess)
+    // Cinematics are loose files on disk (not in MPQ), in the locale subfolder
+    // e.g. Data/enUS/Interface/Cinematics/WOW_Intro_800.avi
+    FString DataPath = Mpq ? Mpq->GetDataPath() : TEXT("");
+    if (DataPath.IsEmpty())
     {
-        ExtractedExpansions.Add(Expansion);
+        UE_LOG(LogWowCinematic, Warning, TEXT("No WoW data path available"));
+        return false;
     }
-    return bSuccess;
+
+    // Try multiple paths: locale-specific (enUS) and generic
+    TArray<FString> SearchPaths;
+    FString Filename = GetCinematicFilename(Expansion);
+
+    // Locale paths first (most common location)
+    SearchPaths.Add(DataPath / TEXT("enUS") / TEXT("Interface") / TEXT("Cinematics") / Filename);
+    SearchPaths.Add(DataPath / TEXT("Interface") / TEXT("Cinematics") / Filename);
+    // Also try 1024 variant
+    FString Filename1024 = Filename.Replace(TEXT("_800"), TEXT("_1024"));
+    SearchPaths.Add(DataPath / TEXT("enUS") / TEXT("Interface") / TEXT("Cinematics") / Filename1024);
+    SearchPaths.Add(DataPath / TEXT("Interface") / TEXT("Cinematics") / Filename1024);
+
+    for (const FString& Path : SearchPaths)
+    {
+        if (FPaths::FileExists(Path))
+        {
+            CinematicPaths.Add(Expansion, FPaths::ConvertRelativePathToFull(Path));
+            ExtractedExpansions.Add(Expansion);
+            UE_LOG(LogWowCinematic, Log, TEXT("Found cinematic for expansion %d: %s"),
+                static_cast<int32>(Expansion), *Path);
+            return true;
+        }
+    }
+
+    UE_LOG(LogWowCinematic, Warning, TEXT("Cinematic not found for expansion %d (tried %d paths)"),
+        static_cast<int32>(Expansion), SearchPaths.Num());
+    for (const FString& Path : SearchPaths)
+    {
+        UE_LOG(LogWowCinematic, Warning, TEXT("  Tried: %s"), *Path);
+    }
+    return false;
+}
+
+FString FWowCinematicManager::GetCinematicFilename(EWowExpansion Expansion)
+{
+    switch (Expansion)
+    {
+    case EWowExpansion::Classic:
+        return TEXT("WOW_Intro_800.avi");
+    case EWowExpansion::BurningCrusade:
+        return TEXT("WOW_Intro_BC_800.avi");
+    case EWowExpansion::WrathOfTheLichKing:
+    default:
+        return TEXT("WOW_FotLK_800.avi");
+    }
+}
+
+FString FWowCinematicManager::GetCinematicPath(EWowExpansion Expansion) const
+{
+    const FString* Path = CinematicPaths.Find(Expansion);
+    return Path ? *Path : FString();
 }
 
 void FWowCinematicManager::PlayCinematic(EWowExpansion Expansion)
@@ -148,21 +125,17 @@ void FWowCinematicManager::PlayCinematic(EWowExpansion Expansion)
     if (!MediaPlayer) return;
 
     FString Path = GetCinematicPath(Expansion);
-    if (!FPaths::FileExists(Path))
+    if (Path.IsEmpty())
     {
-        UE_LOG(LogWowCinematic, Warning, TEXT("Cinematic file not found: %s"), *Path);
+        UE_LOG(LogWowCinematic, Warning, TEXT("No cinematic path for expansion %d"), static_cast<int32>(Expansion));
         return;
     }
 
-    // Convert to absolute path
-    FString AbsPath = FPaths::ConvertRelativePathToFull(Path);
+    UE_LOG(LogWowCinematic, Log, TEXT("Playing cinematic: %s"), *Path);
 
-    UE_LOG(LogWowCinematic, Log, TEXT("Playing cinematic: %s"), *AbsPath);
-
-    // Open the file directly via URL
-    if (!MediaPlayer->OpenUrl(AbsPath))
+    if (!MediaPlayer->OpenUrl(Path))
     {
-        UE_LOG(LogWowCinematic, Error, TEXT("Failed to open cinematic: %s"), *AbsPath);
+        UE_LOG(LogWowCinematic, Error, TEXT("Failed to open cinematic: %s"), *Path);
     }
 }
 
@@ -181,5 +154,5 @@ bool FWowCinematicManager::IsPlaying() const
 
 bool FWowCinematicManager::HasCinematic(EWowExpansion Expansion) const
 {
-    return FPaths::FileExists(GetCinematicPath(Expansion));
+    return CinematicPaths.Contains(Expansion);
 }

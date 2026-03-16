@@ -678,6 +678,9 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
     // TextureOverlays[6] → LEG_LOWER (region 6)
     // TextureOverlays[7] → FOOT (region 7)
 
+    // Gender suffix for texture paths (WMVx searchSlotTexture convention)
+    TCHAR GenderChar = (Equipment.Gender == 1) ? TEXT('F') : TEXT('M');
+
     auto ApplyItemOverlays = [&](uint32 DisplayId, const TArray<uint32>& RegionIndices) {
         if (DisplayId == 0) return;
 
@@ -688,7 +691,6 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
         {
             if (Item->TextureOverlays[OverlayIdx].IsEmpty()) continue;
 
-            // Check if this overlay index maps to a region this item should affect
             bool bShouldApply = false;
             for (uint32 RegionIdx : RegionIndices)
             {
@@ -703,37 +705,42 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
             const FRegionCoords* Region = RegionCoords.Find(OverlayIdx);
             if (!Region) continue;
 
-            // Build full texture path with region-specific subdirectory
             static const TCHAR* RegionSubdirs[] = {
-                TEXT("ArmUpperTexture"),  // [0]
-                TEXT("ArmLowerTexture"),  // [1]
-                TEXT("HandTexture"),      // [2]
-                TEXT("TorsoUpperTexture"),// [3]
-                TEXT("TorsoLowerTexture"),// [4]
-                TEXT("LegUpperTexture"),  // [5]
-                TEXT("LegLowerTexture"),  // [6]
-                TEXT("FootTexture"),      // [7]
+                TEXT("ArmUpperTexture"),  TEXT("ArmLowerTexture"),  TEXT("HandTexture"),
+                TEXT("TorsoUpperTexture"),TEXT("TorsoLowerTexture"),
+                TEXT("LegUpperTexture"),  TEXT("LegLowerTexture"),  TEXT("FootTexture"),
             };
-            FString TexturePath = FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s"),
-                RegionSubdirs[OverlayIdx], *Item->TextureOverlays[OverlayIdx]);
-            if (!TexturePath.EndsWith(TEXT(".blp"), ESearchCase::IgnoreCase))
+
+            FString Name = Item->TextureOverlays[OverlayIdx];
+            TCHAR GenderSuffix = GenderChar;
+            if (Name.Len() >= 2)
             {
-                TexturePath += TEXT(".blp");
+                TCHAR SecondLast = Name[Name.Len() - 2];
+                if (SecondLast == TEXT('L') || SecondLast == TEXT('l'))
+                    GenderSuffix = TEXT('U');
             }
 
+            // Try multiple path formats — WoW 3.3.5 varies by item
+            TArray<FString> Paths = {
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s_%c.blp"), RegionSubdirs[OverlayIdx], *Name, GenderSuffix),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s\\%s.blp"), RegionSubdirs[OverlayIdx], *Name),
+                FString::Printf(TEXT("Item\\TextureComponents\\%s.blp"), *Name),
+            };
+
             uint32 OverlayW, OverlayH;
-            TArray<uint8> OverlayPixels = LoadBlpAsRGBA(Mpq, TexturePath, OverlayW, OverlayH);
+            TArray<uint8> OverlayPixels;
+            for (const FString& TryPath : Paths)
+            {
+                OverlayPixels = LoadBlpAsRGBA(Mpq, TryPath, OverlayW, OverlayH);
+                if (OverlayPixels.Num() > 0) break;
+            }
             if (OverlayPixels.Num() == 0)
             {
-                // Try without subdirectory as fallback
-                FString AltPath = FString::Printf(TEXT("Item\\TextureComponents\\%s.blp"),
-                    *Item->TextureOverlays[OverlayIdx]);
-                OverlayPixels = LoadBlpAsRGBA(Mpq, AltPath, OverlayW, OverlayH);
-                if (OverlayPixels.Num() == 0)
-                {
-                    UE_LOG(LogWowCharTex, Warning, TEXT("Failed to load equipment overlay: %s (also tried %s)"),
-                        *TexturePath, *AltPath);
-                }
+                // Try to verify the MPQ can read ANYTHING from Item\TextureComponents
+                TArray<uint8> TestData;
+                bool bMpqTest = Mpq->ReadFile(Paths[0], TestData);
+                UE_LOG(LogWowCharTex, Warning, TEXT("Equipment overlay not found for [%d]: %s (tried %d paths, MpqRead=%d, DataSize=%d)"),
+                    OverlayIdx, *Name, Paths.Num(), bMpqTest ? 1 : 0, TestData.Num());
             }
             if (OverlayPixels.Num() > 0)
             {
@@ -741,7 +748,7 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
                     OverlayW, OverlayH, Region->X, Region->Y, Region->W, Region->H);
 
                 UE_LOG(LogWowCharTex, Log, TEXT("Applied equipment overlay[%d] for DisplayId %d: %s"),
-                    OverlayIdx, DisplayId, *TexturePath);
+                    OverlayIdx, DisplayId, *Name);
             }
         }
     };

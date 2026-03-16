@@ -216,6 +216,7 @@ void AWowModelViewerGameMode::RespawnCharacter()
             int32 ExcludeIdx;     // Overlay index that must be empty (to distinguish from other slots), -1 = no exclusion
             uint32 FoundId = 0;
         };
+        Params.BodyEquipment.Gender = static_cast<uint32>(Params.Gender);
         TArray<FBodySlotSearch> BodySlots = {
             {&Params.BodyEquipment.ChestDisplayId, "Chest",  3, -1},  // TORSO_UPPER
             {&Params.BodyEquipment.PantsDisplayId, "Pants",  5,  3},  // LEG_UPPER, no TORSO_UPPER
