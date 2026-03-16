@@ -18,6 +18,7 @@ struct WOWASSETS_API FGeosetSectionInfo
 	uint16 GeosetId = 0;     // Raw geoset ID from M2 submesh (e.g. 0, 1, 101, 201, 401, 801)
 	uint16 GeosetGroup = 0;  // GeosetId / 100 (0=body, 1=hair, 2=facial, 4=gloves, 8=tabard, etc.)
 	uint16 GeosetVariant = 0; // GeosetId % 100 (0=default, 1+=specific customization/equipment)
+	uint16 TextureIndex = 0; // Index into M2Data.TexturePaths for this section's render pass
 };
 
 /**
@@ -31,10 +32,12 @@ public:
 
 	/** Build a USkeletalMesh from M2 vertices with bone weights.
 	 *  One mesh section per render pass, enabling per-geoset visibility control.
-	 *  OutGeosetInfo receives the geoset ID mapping for each section. */
+	 *  OutGeosetInfo receives the geoset ID mapping for each section.
+	 *  VisibleGeosets: if non-null, only include render passes whose geoset matches. */
 	static USkeletalMesh* CreateSkeletalMesh(const FM2Data& Data, USkeleton* Skeleton,
 		const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
-		TArray<FGeosetSectionInfo>* OutGeosetInfo = nullptr);
+		TArray<FGeosetSectionInfo>* OutGeosetInfo = nullptr,
+		const TMap<uint16, uint16>* VisibleGeosets = nullptr);
 
 	/** Build UAnimSequence assets for all parsed animation tracks. */
 	static TArray<UAnimSequence*> CreateAnimations(const FM2Data& Data, USkeleton* Skeleton,

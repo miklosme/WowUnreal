@@ -169,7 +169,8 @@ USkeleton* FWowSkeletalMeshBuilder::CreateSkeleton(const FM2Data& Data, const FS
 
 USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, USkeleton* Skeleton,
 	const FString& ModelName, FMpqManager* Mpq, FWowAssetCache* Cache,
-	TArray<FGeosetSectionInfo>* OutGeosetInfo)
+	TArray<FGeosetSectionInfo>* OutGeosetInfo,
+	const TMap<uint16, uint16>* VisibleGeosets)
 {
 	if (!Skeleton || Data.Vertices.Num() == 0 || Data.Indices.Num() == 0)
 	{
@@ -247,13 +248,46 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	FSkeletalMeshAttributes SkelAttrs(MeshDesc);
 	SkelAttrs.Register();
 
-	// Create one polygon group per render pass for per-geoset visibility control.
-	// Each render pass references a submesh (with a geoset ID) — we build a separate
-	// mesh section for each so the character builder can show/hide individual geosets.
+	// Build list of render passes to include (filter by geoset visibility if provided).
 	const int32 NumRenderPasses = Data.RenderPasses.Num();
 	const bool bHasRenderPasses = NumRenderPasses > 0 && Data.Submeshes.Num() > 0;
-	const int32 NumSections = bHasRenderPasses ? NumRenderPasses : 1;
 
+	// Determine which render passes are visible
+	TArray<int32> VisiblePasses;
+	if (bHasRenderPasses)
+	{
+		for (int32 i = 0; i < NumRenderPasses; ++i)
+		{
+			const FM2RenderPass& Pass = Data.RenderPasses[i];
+			if (Pass.SubmeshIndex >= static_cast<uint16>(Data.Submeshes.Num())) continue;
+
+			bool bInclude = true;
+			if (VisibleGeosets)
+			{
+				uint16 GeosetId = Data.Submeshes[Pass.SubmeshIndex].Id;
+				uint16 Group = GeosetId / 100;
+				uint16 Variant = GeosetId % 100;
+
+				const uint16* DesiredVariant = VisibleGeosets->Find(Group);
+				if (DesiredVariant)
+				{
+					// GeosetId 0 = base body mesh, always include
+					bInclude = (GeosetId == 0) || (Variant == *DesiredVariant);
+				}
+				// Groups not in rules: include by default (creatures, etc.)
+			}
+			if (bInclude)
+			{
+				VisiblePasses.Add(i);
+			}
+		}
+	}
+	else
+	{
+		VisiblePasses.Add(0); // Single section for models without render passes
+	}
+
+	const int32 NumSections = VisiblePasses.Num();
 	TArray<FPolygonGroupID> PolyGroups;
 	PolyGroups.SetNum(NumSections);
 	for (int32 i = 0; i < NumSections; ++i)
@@ -261,7 +295,8 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		PolyGroups[i] = MeshDesc.CreatePolygonGroup();
 	}
 
-	// Output geoset info for each section
+	// Map from visible pass index to original render pass index
+	// Output geoset info for each included section
 	if (OutGeosetInfo)
 	{
 		OutGeosetInfo->SetNum(NumSections);
@@ -271,12 +306,14 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 			Info.SectionIndex = i;
 			if (bHasRenderPasses)
 			{
-				const FM2RenderPass& Pass = Data.RenderPasses[i];
+				int32 OrigPassIdx = VisiblePasses[i];
+				const FM2RenderPass& Pass = Data.RenderPasses[OrigPassIdx];
 				if (Pass.SubmeshIndex < static_cast<uint16>(Data.Submeshes.Num()))
 				{
 					Info.GeosetId = Data.Submeshes[Pass.SubmeshIndex].Id;
 					Info.GeosetGroup = Info.GeosetId / 100;
 					Info.GeosetVariant = Info.GeosetId % 100;
+					Info.TextureIndex = Pass.TextureIndex;
 				}
 			}
 		}
@@ -348,14 +385,13 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		VertexUVs.Set(InstID, 0, FVector2f(V.TexCoord.X, V.TexCoord.Y));
 	}
 
-	// Build triangles per-section. When we have render passes, each render pass
-	// references a submesh with a triangle range. We emit those triangles into
-	// the corresponding polygon group so UE builds separate mesh sections.
+	// Build triangles per-section. Only include render passes that are in VisiblePasses.
 	if (bHasRenderPasses)
 	{
-		for (int32 PassIdx = 0; PassIdx < NumRenderPasses; ++PassIdx)
+		for (int32 SectionIdx = 0; SectionIdx < VisiblePasses.Num(); ++SectionIdx)
 		{
-			const FM2RenderPass& Pass = Data.RenderPasses[PassIdx];
+			int32 OrigPassIdx = VisiblePasses[SectionIdx];
+			const FM2RenderPass& Pass = Data.RenderPasses[OrigPassIdx];
 			if (Pass.SubmeshIndex >= static_cast<uint16>(Data.Submeshes.Num()))
 			{
 				continue;
@@ -386,7 +422,7 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 
 				if (TriVerts.Num() == 3)
 				{
-					MeshDesc.CreatePolygon(PolyGroups[PassIdx], TriVerts);
+					MeshDesc.CreatePolygon(PolyGroups[SectionIdx], TriVerts);
 				}
 			}
 		}

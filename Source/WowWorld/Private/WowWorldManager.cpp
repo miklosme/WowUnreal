@@ -391,7 +391,8 @@ void AWowWorldManager::BeginPlay()
 
     if (TestScene.Equals(TEXT("character"), ESearchCase::IgnoreCase) ||
         TestScene.Equals(TEXT("ui"), ESearchCase::IgnoreCase) ||
-        CurrentMapName.Equals(TEXT("CharacterTest"), ESearchCase::IgnoreCase))
+        CurrentMapName.Equals(TEXT("CharacterTest"), ESearchCase::IgnoreCase) ||
+        CurrentMapName.Equals(TEXT("ModelViewer"), ESearchCase::IgnoreCase))
     {
         UE_LOG(LogWowWorld, Log, TEXT("Terrain loading skipped for test scene '%s' on map '%s' (MPQ-only mode)"),
             *TestScene, *CurrentMapName);

@@ -31,6 +31,7 @@ int32 UWowMapCreatorCommandlet::Main(const FString& Params)
         { TEXT("UITest"),        TEXT("/Script/WowUnreal.WowTestGameMode") },
         { TEXT("NetworkTest"),   TEXT("/Script/WowUnreal.WowTestGameMode") },
         { TEXT("StreamingTest"), TEXT("/Script/WowUnreal.WowTestGameMode") },
+        { TEXT("ModelViewer"),   TEXT("/Script/WowUnreal.WowModelViewerGameMode") },
     };
 
     int32 Created = 0;

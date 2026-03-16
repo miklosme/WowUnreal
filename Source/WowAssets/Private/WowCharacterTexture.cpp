@@ -154,7 +154,111 @@ static TArray<uint8> DecompressToRGBA(const FBlpTexture& Blp)
         return Pixels;
     }
 
-    // DXT3/DXT5 — skip compositing for these (rare for character textures)
+    if (Blp.PixelFormat == EBlpPixelFormat::DXT3)
+    {
+        Pixels.SetNumZeroed(W * H * 4);
+        const uint8* Src = Blp.MipLevels[0].Data.GetData();
+        uint32 BlocksX = FMath::Max(1u, W / 4);
+        uint32 BlocksY = FMath::Max(1u, H / 4);
+
+        for (uint32 by = 0; by < BlocksY; by++)
+        {
+            for (uint32 bx = 0; bx < BlocksX; bx++)
+            {
+                // DXT3: 8 bytes explicit alpha + 8 bytes DXT1 color block
+                const uint8* AlphaBlock = Src;
+                const uint8* ColorBlock = Src + 8;
+
+                uint8 BlockPixels[64];
+                DecodeDXT1Block(ColorBlock, BlockPixels);
+
+                // Apply explicit 4-bit alpha per pixel
+                for (uint32 py = 0; py < 4; py++)
+                {
+                    uint16 AlphaRow = AlphaBlock[py * 2] | (AlphaBlock[py * 2 + 1] << 8);
+                    for (uint32 px = 0; px < 4; px++)
+                    {
+                        uint8 Alpha4 = (AlphaRow >> (px * 4)) & 0xF;
+                        BlockPixels[(py * 4 + px) * 4 + 3] = Alpha4 * 17; // 0-15 → 0-255
+                    }
+                }
+
+                Src += 16;
+
+                for (uint32 py = 0; py < 4 && (by * 4 + py) < H; py++)
+                {
+                    for (uint32 px = 0; px < 4 && (bx * 4 + px) < W; px++)
+                    {
+                        uint32 DstIdx = ((by * 4 + py) * W + (bx * 4 + px)) * 4;
+                        FMemory::Memcpy(&Pixels[DstIdx], &BlockPixels[(py * 4 + px) * 4], 4);
+                    }
+                }
+            }
+        }
+        return Pixels;
+    }
+
+    if (Blp.PixelFormat == EBlpPixelFormat::DXT5)
+    {
+        Pixels.SetNumZeroed(W * H * 4);
+        const uint8* Src = Blp.MipLevels[0].Data.GetData();
+        uint32 BlocksX = FMath::Max(1u, W / 4);
+        uint32 BlocksY = FMath::Max(1u, H / 4);
+
+        for (uint32 by = 0; by < BlocksY; by++)
+        {
+            for (uint32 bx = 0; bx < BlocksX; bx++)
+            {
+                // DXT5: 8 bytes interpolated alpha + 8 bytes DXT1 color block
+                uint8 Alpha0 = Src[0];
+                uint8 Alpha1 = Src[1];
+                uint8 AlphaLookup[8];
+                AlphaLookup[0] = Alpha0;
+                AlphaLookup[1] = Alpha1;
+                if (Alpha0 > Alpha1)
+                {
+                    for (int i = 0; i < 6; i++)
+                        AlphaLookup[2 + i] = (uint8)(((6 - i) * Alpha0 + (1 + i) * Alpha1 + 3) / 7);
+                }
+                else
+                {
+                    for (int i = 0; i < 4; i++)
+                        AlphaLookup[2 + i] = (uint8)(((4 - i) * Alpha0 + (1 + i) * Alpha1 + 2) / 5);
+                    AlphaLookup[6] = 0;
+                    AlphaLookup[7] = 255;
+                }
+
+                // 6 bytes of 3-bit alpha indices
+                uint64 AlphaBits = 0;
+                for (int b = 0; b < 6; b++)
+                    AlphaBits |= (uint64)Src[2 + b] << (b * 8);
+
+                const uint8* ColorBlock = Src + 8;
+                uint8 BlockPixels[64];
+                DecodeDXT1Block(ColorBlock, BlockPixels);
+
+                for (int p = 0; p < 16; p++)
+                {
+                    uint8 AlphaIdx = (AlphaBits >> (p * 3)) & 0x7;
+                    BlockPixels[p * 4 + 3] = AlphaLookup[AlphaIdx];
+                }
+
+                Src += 16;
+
+                for (uint32 py = 0; py < 4 && (by * 4 + py) < H; py++)
+                {
+                    for (uint32 px = 0; px < 4 && (bx * 4 + px) < W; px++)
+                    {
+                        uint32 DstIdx = ((by * 4 + py) * W + (bx * 4 + px)) * 4;
+                        FMemory::Memcpy(&Pixels[DstIdx], &BlockPixels[(py * 4 + px) * 4], 4);
+                    }
+                }
+            }
+        }
+        return Pixels;
+    }
+
+    // Unsupported format
     return Pixels;
 }
 
@@ -280,7 +384,7 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
                 FacePixels = ScalePixels(FacePixels, FaceW, FaceH, SkinW, SkinH);
             AlphaBlendLayer(Composite, FacePixels, SkinW, SkinH);
             LayersComposited++;
-            UE_LOG(LogWowCharTex, Verbose, TEXT("Composited face: %s"), *FacePath);
+            UE_LOG(LogWowCharTex, Log, TEXT("Composited face: %s (%dx%d)"), *FacePath, FaceW, FaceH);
         }
     }
 
@@ -288,6 +392,9 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
     FString HairPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
         ESectionType::Hair, static_cast<int32>(Customization.HairStyle),
         static_cast<int32>(Customization.HairColor));
+    UE_LOG(LogWowCharTex, Log, TEXT("Hair texture lookup: Race=%d Gender=%d Style=%d Color=%d -> %s"),
+        Customization.RaceId, Customization.Gender, Customization.HairStyle, Customization.HairColor,
+        HairPath.IsEmpty() ? TEXT("EMPTY") : *HairPath);
     if (!HairPath.IsEmpty())
     {
         uint32 HairW, HairH;
@@ -298,7 +405,7 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
                 HairPixels = ScalePixels(HairPixels, HairW, HairH, SkinW, SkinH);
             AlphaBlendLayer(Composite, HairPixels, SkinW, SkinH);
             LayersComposited++;
-            UE_LOG(LogWowCharTex, Verbose, TEXT("Composited hair: %s"), *HairPath);
+            UE_LOG(LogWowCharTex, Log, TEXT("Composited hair texture: %s (%dx%d)"), *HairPath, HairW, HairH);
         }
     }
 
@@ -316,7 +423,7 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
                 FhPixels = ScalePixels(FhPixels, FhW, FhH, SkinW, SkinH);
             AlphaBlendLayer(Composite, FhPixels, SkinW, SkinH);
             LayersComposited++;
-            UE_LOG(LogWowCharTex, Verbose, TEXT("Composited facial hair: %s"), *FacialPath);
+            UE_LOG(LogWowCharTex, Log, TEXT("Composited facial hair: %s"), *FacialPath);
         }
     }
 
@@ -333,7 +440,7 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
                 UwPixels = ScalePixels(UwPixels, UwW, UwH, SkinW, SkinH);
             AlphaBlendLayer(Composite, UwPixels, SkinW, SkinH);
             LayersComposited++;
-            UE_LOG(LogWowCharTex, Verbose, TEXT("Composited underwear: %s"), *UnderwearPath);
+            UE_LOG(LogWowCharTex, Log, TEXT("Composited underwear: %s"), *UnderwearPath);
         }
     }
 
