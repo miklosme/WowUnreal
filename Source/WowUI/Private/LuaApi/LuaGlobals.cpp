@@ -124,6 +124,7 @@ DEF_STRING_ALIAS(strrep, rep)
 DEF_STRING_ALIAS(gsub, gsub)
 DEF_STRING_ALIAS(gmatch, gmatch)
 DEF_STRING_ALIAS(strmatch, match)
+DEF_STRING_ALIAS(strrev, reverse)
 
 // ─── Table functions ────────────────────────────────────────────────────────────
 
@@ -179,6 +180,161 @@ static int L_sort(lua_State* L)
     return 0;
 }
 
+// getn — returns table size (for indexed arrays)
+static int L_getn(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_pushnumber(L, luaL_getn(L, 1));
+    return 1;
+}
+
+// foreach — iterate over table, calling function for each key-value pair
+static int L_foreach(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+
+    lua_pushnil(L); // first key
+    while (lua_next(L, 1) != 0) // table is at index 1
+    {
+        lua_pushvalue(L, 2); // function
+        lua_pushvalue(L, -3); // key
+        lua_pushvalue(L, -3); // value
+        lua_call(L, 2, 1); // call function(key, value)
+
+        if (!lua_isnil(L, -1))
+        {
+            // If function returns non-nil, stop iteration
+            lua_pop(L, 2); // remove value and key
+            return 1;
+        }
+        lua_pop(L, 2); // remove result and value, keep key for next iteration
+    }
+    return 0;
+}
+
+// foreachi — iterate over indexed array, calling function for each index-value pair
+static int L_foreachi(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+
+    int n = luaL_getn(L, 1);
+    for (int i = 1; i <= n; i++)
+    {
+        lua_pushvalue(L, 2); // function
+        lua_pushnumber(L, i); // index
+        lua_rawgeti(L, 1, i); // value
+        lua_call(L, 2, 1); // call function(index, value)
+
+        if (!lua_isnil(L, -1))
+        {
+            // If function returns non-nil, return it and stop
+            return 1;
+        }
+        lua_pop(L, 1); // remove result
+    }
+    return 0;
+}
+
+// unpack — unpack array elements onto the stack
+static int L_unpack(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    int n = luaL_getn(L, 1);
+    luaL_checkstack(L, n, "table too big to unpack");
+    for (int i = 1; i <= n; i++)
+    {
+        lua_rawgeti(L, 1, i);
+    }
+    return n;
+}
+
+// select — return arguments starting from index (WoW-specific function)
+static int L_select(lua_State* L)
+{
+    int n = lua_gettop(L);
+    if (n == 0)
+    {
+        lua_pushnumber(L, 0);
+        return 1;
+    }
+
+    if (lua_isstring(L, 1) && strcmp(lua_tostring(L, 1), "#") == 0)
+    {
+        lua_pushnumber(L, n - 1);
+        return 1;
+    }
+
+    int start = static_cast<int>(luaL_checknumber(L, 1));
+    if (start < 0) start = n + start + 1; // negative indices count from end
+
+    if (start <= 0) start = 1;
+    if (start > n) return 0;
+
+    for (int i = start + 1; i <= n; i++)
+    {
+        lua_pushvalue(L, i);
+    }
+    return n - start;
+}
+
+// pairs — return iterator for table
+static int L_pairs(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getglobal(L, "next");
+    lua_pushvalue(L, 1);
+    lua_pushnil(L);
+    return 3;
+}
+
+// ipairs — return iterator for indexed array
+static int L_ipairs(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_pushcfunction(L, [](lua_State* L2) -> int {
+        int i = static_cast<int>(luaL_checknumber(L2, 2)) + 1;
+        lua_pushnumber(L2, i);
+        lua_rawgeti(L2, 1, i);
+        return lua_isnil(L2, -1) ? 0 : 2;
+    });
+    lua_pushvalue(L, 1);
+    lua_pushnumber(L, 0);
+    return 3;
+}
+
+// next — basic table iterator
+static int L_next(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_settop(L, 2);
+    if (lua_next(L, 1))
+        return 2;
+    else
+    {
+        lua_pushnil(L);
+        return 1;
+    }
+}
+
+// rawget — get table value without invoking metamethods
+static int L_rawget(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_rawget(L, 1);
+    return 1;
+}
+
+// rawset — set table value without invoking metamethods
+static int L_rawset(lua_State* L)
+{
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_rawset(L, 1);
+    lua_pushvalue(L, 1);
+    return 1;
+}
+
 // ─── Time functions ─────────────────────────────────────────────────────────────
 
 // GetTime() — returns game time in seconds as a float
@@ -223,20 +379,65 @@ static int L_seterrorhandler(lua_State* L)
     return 0;
 }
 
+// securecall — call function in secure environment
+static int L_securecall(lua_State* L)
+{
+    if (lua_gettop(L) == 0) return 0;
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+
+    int nargs = lua_gettop(L) - 1;
+    lua_call(L, nargs, LUA_MULTRET);
+    return lua_gettop(L);
+}
+
+// hooksecurefunc — hook a secure function
+static int L_hooksecurefunc(lua_State* L)
+{
+    // For now, just store the hook but don't actually implement secure call hooking
+    return 0;
+}
+
+// issecurevariable — check if a variable is secure
+static int L_issecurevariable(lua_State* L)
+{
+    lua_pushboolean(L, 1); // Everything is secure for now
+    return 1;
+}
+
+// forceinsecure — force insecure context
+static int L_forceinsecure(lua_State* L)
+{
+    return 0;
+}
+
+// tostringall — convert all arguments to strings and return them
+static int L_tostringall(lua_State* L)
+{
+    int n = lua_gettop(L);
+    for (int i = 1; i <= n; i++)
+    {
+        const char* s = luaL_tolstring(L, i, nullptr);
+        lua_remove(L, i);
+        lua_insert(L, i);
+    }
+    return n;
+}
+
 // ─── Math aliases ───────────────────────────────────────────────────────────────
 static void RegisterMathAliases(lua_State* L)
 {
     // WoW provides these as global aliases for math.* functions
     const char* aliases[] = {
-        "abs", "ceil", "floor", "max", "min", "mod", "random",
-        "sqrt", "sin", "cos", "atan2", "pow", "log", "exp", nullptr
+        "abs", "ceil", "floor", "max", "min", "mod", "fmod", "random",
+        "sqrt", "sin", "cos", "tan", "atan", "atan2", "pow", "log", "exp",
+        "deg", "rad", nullptr
     };
 
     for (int i = 0; aliases[i]; i++)
     {
         lua_getglobal(L, "math");
         const char* name = aliases[i];
-        // "mod" maps to math.fmod in Lua 5.1
+        // "mod" maps to math.fmod in Lua 5.1, but also add "fmod" alias
         if (strcmp(name, "mod") == 0)
             lua_getfield(L, -1, "fmod");
         else
@@ -247,6 +448,23 @@ static void RegisterMathAliases(lua_State* L)
         else
             lua_pop(L, 1);
     }
+
+    // Add math constants
+    lua_getglobal(L, "math");
+    lua_getfield(L, -1, "pi");
+    if (!lua_isnil(L, -1))
+        lua_setglobal(L, "pi");
+    else
+        lua_pop(L, 1);
+
+    lua_getfield(L, -1, "huge");
+    if (!lua_isnil(L, -1))
+        lua_setglobal(L, "huge");
+    else
+        lua_pop(L, 1);
+
+    lua_pop(L, 1); // pop math table
+}
 }
 
 // ─── Registration ───────────────────────────────────────────────────────────────
@@ -270,12 +488,23 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
     lua_register(L, "gsub", L_gsub);
     lua_register(L, "gmatch", L_gmatch);
     lua_register(L, "strmatch", L_strmatch);
+    lua_register(L, "strrev", L_strrev);
 
     // Table functions
     lua_register(L, "wipe", L_wipe);
     lua_register(L, "tinsert", L_tinsert);
     lua_register(L, "tremove", L_tremove);
     lua_register(L, "sort", L_sort);
+    lua_register(L, "getn", L_getn);
+    lua_register(L, "foreach", L_foreach);
+    lua_register(L, "foreachi", L_foreachi);
+    lua_register(L, "unpack", L_unpack);
+    lua_register(L, "select", L_select);
+    lua_register(L, "pairs", L_pairs);
+    lua_register(L, "ipairs", L_ipairs);
+    lua_register(L, "next", L_next);
+    lua_register(L, "rawget", L_rawget);
+    lua_register(L, "rawset", L_rawset);
 
     // Time
     lua_register(L, "GetTime", L_GetTime);
@@ -284,6 +513,13 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
     // Error handling
     lua_register(L, "geterrorhandler", L_geterrorhandler);
     lua_register(L, "seterrorhandler", L_seterrorhandler);
+
+    // Security functions
+    lua_register(L, "securecall", L_securecall);
+    lua_register(L, "hooksecurefunc", L_hooksecurefunc);
+    lua_register(L, "issecurevariable", L_issecurevariable);
+    lua_register(L, "forceinsecure", L_forceinsecure);
+    lua_register(L, "tostringall", L_tostringall);
 
     // Math aliases
     RegisterMathAliases(L);
