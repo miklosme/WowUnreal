@@ -4,6 +4,9 @@
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/Images/SImage.h"
+#include "Engine/TextureRenderTarget2D.h"
 
 static FString GetRaceName(uint8 Race)
 {
@@ -148,18 +151,31 @@ void SWowCharacterSelectWidget::Construct(const FArguments& InArgs)
                 ]
             ]
 
-            // ═══ Right side: 3D character preview area (placeholder) ═══
+            // ═══ Right side: 3D character preview ═══
             + SHorizontalBox::Slot().FillWidth(1.0f).Padding(15, 30, 30, 30)
             [
                 SNew(SBorder)
                 .BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.3f))
                 .BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
                 [
-                    SNew(SVerticalBox)
-                    + SVerticalBox::Slot().FillHeight(1.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
+                    SNew(SOverlay)
+
+                    // Preview image (hidden until render target is set)
+                    + SOverlay::Slot()
+                    .HAlign(HAlign_Fill)
+                    .VAlign(VAlign_Fill)
                     [
-                        SNew(STextBlock)
-                        .Text(FText::FromString(TEXT("Character Preview")))
+                        SAssignNew(PreviewImage, SImage)
+                        .Visibility(EVisibility::Collapsed)
+                    ]
+
+                    // Placeholder text (shown when no preview)
+                    + SOverlay::Slot()
+                    .HAlign(HAlign_Center)
+                    .VAlign(VAlign_Center)
+                    [
+                        SAssignNew(PreviewPlaceholder, STextBlock)
+                        .Text(FText::FromString(TEXT("Select a character")))
                         .Font(FCoreStyle::GetDefaultFontStyle("Regular", 16))
                         .ColorAndOpacity(FLinearColor(0.3f, 0.3f, 0.4f))
                     ]
@@ -192,6 +208,9 @@ void SWowCharacterSelectWidget::PopulateCharacters(const TArray<FWowCharacterInf
         FString DetailLine = FString::Printf(TEXT("Level %d %s %s"),
             C.Level, *GetRaceName(C.Race), *GetClassName(C.Class));
 
+        uint8 CharRace = C.Race;
+        uint8 CharGender = C.Gender;
+
         CharListBox->AddSlot().AutoHeight().Padding(0, 2)
         [
             SNew(SBorder)
@@ -201,8 +220,10 @@ void SWowCharacterSelectWidget::PopulateCharacters(const TArray<FWowCharacterInf
             [
                 SNew(SButton)
                 .ButtonColorAndOpacity(WowCSUI::ListItem)
-                .OnClicked_Lambda([this, CharGuid]() -> FReply
+                .OnClicked_Lambda([this, CharGuid, CharRace, CharGender]() -> FReply
                 {
+                    // First click highlights (shows preview), second click enters world
+                    OnCharacterHighlighted.ExecuteIfBound(CharRace, CharGender);
                     OnCharacterSelected.ExecuteIfBound(CharGuid);
                     return FReply::Handled();
                 })
@@ -231,6 +252,28 @@ void SWowCharacterSelectWidget::PopulateCharacters(const TArray<FWowCharacterInf
     }
 
     SetStatusText(FString::Printf(TEXT("%d character(s) — click to enter world"), Characters.Num()));
+}
+
+void SWowCharacterSelectWidget::SetPreviewRenderTarget(UTextureRenderTarget2D* InRenderTarget)
+{
+    if (!PreviewImage.IsValid()) return;
+
+    if (InRenderTarget)
+    {
+        PreviewBrush = MakeShared<FSlateBrush>();
+        PreviewBrush->SetResourceObject(InRenderTarget);
+        PreviewBrush->ImageSize = FVector2D(512, 768);
+        PreviewBrush->DrawAs = ESlateBrushDrawType::Image;
+        PreviewBrush->Tiling = ESlateBrushTileType::NoTile;
+
+        PreviewImage->SetImage(PreviewBrush.Get());
+        PreviewImage->SetVisibility(EVisibility::SelfHitTestInvisible);
+
+        if (PreviewPlaceholder.IsValid())
+        {
+            PreviewPlaceholder->SetVisibility(EVisibility::Collapsed);
+        }
+    }
 }
 
 void SWowCharacterSelectWidget::SetStatusText(const FString& Text)

@@ -59,4 +59,25 @@ public:
     /** Look up a CharSections texture path for the given parameters */
     static FString GetSectionTexture(uint32 RaceId, uint32 Gender, ESectionType Type,
         int32 Variation = INDEX_NONE, int32 Color = INDEX_NONE);
+
+    /** Body equipment IDs that affect texture overlays */
+    struct FBodyEquipment
+    {
+        uint32 ChestDisplayId = 0;
+        uint32 PantsDisplayId = 0;
+        uint32 BootsDisplayId = 0;
+        uint32 GlovesDisplayId = 0;
+        uint32 BracersDisplayId = 0;
+        uint32 ShirtDisplayId = 0;
+        uint32 TabardDisplayId = 0;
+        uint32 BeltDisplayId = 0;
+        uint32 CapeDisplayId = 0;
+    };
+
+    /**
+     * Apply equipment texture overlays to an existing composite texture.
+     * This should be called after BuildCompositeTexture to add equipment textures.
+     */
+    static void ApplyEquipmentOverlays(TArray<uint8>& Composite, uint32 CompositeW, uint32 CompositeH,
+        const FBodyEquipment& Equipment, FMpqManager* Mpq, FWowAssetCache* Cache);
 };

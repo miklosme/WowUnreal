@@ -5,6 +5,7 @@
 #include "WowCharacterSelectWidget.h"
 #include "WowCharacterCreateWidget.h"
 #include "WowCinematicManager.h"
+#include "WowCharacterPreview.h"
 #include "WowGameplayController.h"
 #include "WowWorldManager.h"
 #include "WowAudioManager.h"
@@ -226,6 +227,14 @@ void AWowLoginController::HandleBackToCharSelect()
     ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
 }
 
+void AWowLoginController::HandleCharacterHighlighted(uint8 Race, uint8 Gender)
+{
+    if (CharacterPreview)
+    {
+        CharacterPreview->ShowCharacter(Race, Gender);
+    }
+}
+
 void AWowLoginController::InitializeCinematics()
 {
     if (!WorldManager || !WorldManager->GetMpqManager()) return;
@@ -284,6 +293,14 @@ void AWowLoginController::ClearCurrentScreen()
     RealmSelectWidget.Reset();
     CharSelectWidget.Reset();
     CharCreateWidget.Reset();
+
+    // Clean up character preview when leaving character select
+    if (CharacterPreview)
+    {
+        CharacterPreview->ClearCharacter();
+        CharacterPreview->Destroy();
+        CharacterPreview = nullptr;
+    }
 }
 
 void AWowLoginController::ShowLoginScreen()
@@ -326,12 +343,38 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
     CharSelectWidget = SNew(SWowCharacterSelectWidget);
     CharSelectWidget->OnCharacterSelected.BindUObject(this, &AWowLoginController::HandleCharacterSelected);
     CharSelectWidget->OnCreateCharacterRequest.BindUObject(this, &AWowLoginController::HandleCreateCharacterRequest);
+    CharSelectWidget->OnCharacterHighlighted.BindUObject(this, &AWowLoginController::HandleCharacterHighlighted);
     CharSelectWidget->PopulateCharacters(Characters);
     CurrentWidget = CharSelectWidget;
 
     if (GEngine && GEngine->GameViewport)
     {
         GEngine->GameViewport->AddViewportWidgetContent(CurrentWidget.ToSharedRef(), 100);
+    }
+
+    // Create character preview actor if we have a world manager
+    if (WorldManager && !CharacterPreview)
+    {
+        UWorld* World = GetWorld();
+        if (World)
+        {
+            FActorSpawnParameters PreviewParams;
+            PreviewParams.Name = FName(TEXT("WowCharacterPreview"));
+            CharacterPreview = World->SpawnActor<AWowCharacterPreview>(
+                AWowCharacterPreview::StaticClass(),
+                FVector::ZeroVector, FRotator::ZeroRotator, PreviewParams);
+            if (CharacterPreview)
+            {
+                CharacterPreview->Setup(WorldManager);
+                CharSelectWidget->SetPreviewRenderTarget(CharacterPreview->GetRenderTarget());
+            }
+        }
+    }
+
+    // Auto-highlight first character
+    if (Characters.Num() > 0 && CharacterPreview)
+    {
+        CharacterPreview->ShowCharacter(Characters[0].Race, Characters[0].Gender);
     }
 }
 

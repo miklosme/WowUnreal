@@ -35,6 +35,9 @@ public:
         FWowEquipmentManager::EAttachmentPoint AttachPoint = FWowEquipmentManager::EAttachmentPoint::RightHand;
     };
 
+    /** Body equipment that affects texture overlays and geosets (defined in WowCharacterTexture.h) */
+    using FBodyEquipment = FWowCharacterTexture::FBodyEquipment;
+
     /** Full character spawn parameters */
     struct FCharacterParams
     {
@@ -42,6 +45,7 @@ public:
         EGender Gender = EGender::Male;
         FWowCharacterTexture::FCustomization Customization;
         TArray<FEquipmentSlot> Equipment;
+        FBodyEquipment BodyEquipment;
     };
 
     /** Get the M2 model path for a race/gender combo using ChrRaces.dbc */
@@ -73,6 +77,14 @@ public:
     static TMap<uint16, uint16> ComputeDefaultGeosets(const FWowCharacterTexture::FCustomization& Customization);
 
     /**
+     * Compute geoset visibility with equipment modifications.
+     * Applies equipment-based geoset changes on top of the default customization geosets.
+     */
+    static TMap<uint16, uint16> ComputeGeosetWithEquipment(
+        const FWowCharacterTexture::FCustomization& Customization,
+        const FBodyEquipment& BodyEquipment);
+
+    /**
      * Apply geoset visibility to a skeletal mesh component.
      * Shows sections whose geoset matches the desired variant for their group;
      * hides all others. VisibleGeosets maps group -> variant to show.
@@ -86,5 +98,6 @@ private:
     static AActor* SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,
         const FString& ModelPath, const FVector& Location, const FRotator& Rotation, float Scale = 1.0f,
         UTexture2D* OverrideTexture = nullptr,
-        const FWowCharacterTexture::FCustomization* Customization = nullptr);
+        const FWowCharacterTexture::FCustomization* Customization = nullptr,
+        const FBodyEquipment* BodyEquipment = nullptr);
 };

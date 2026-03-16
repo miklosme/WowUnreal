@@ -9,6 +9,7 @@ class AWowWorldManager;
 class AWowAudioManager;
 class UWowUIManager;
 class FWowCinematicManager;
+class AWowCharacterPreview;
 class SWowLoginWidget;
 class SWowRealmSelectWidget;
 class SWowCharacterSelectWidget;
@@ -47,6 +48,7 @@ private:
         uint8 Skin, uint8 Face, uint8 HairStyle, uint8 HairColor, uint8 FacialHair);
     void HandleBackToCharSelect();
     void HandleExpansionChanged(uint8 ExpansionIndex);
+    void HandleCharacterHighlighted(uint8 Race, uint8 Gender);
 
     /** Initialize world systems when entering the game world */
     void InitializeWorldSystems();
@@ -69,4 +71,8 @@ private:
 
     /** Cinematic manager for login screen backgrounds (owned, cleaned up in EndPlay) */
     FWowCinematicManager* CinematicManager = nullptr;
+
+    /** Character preview for 3D model display in character select */
+    UPROPERTY()
+    TObjectPtr<AWowCharacterPreview> CharacterPreview;
 };
