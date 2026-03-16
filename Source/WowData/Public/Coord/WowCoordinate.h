@@ -24,10 +24,15 @@ struct WOWDATA_API FWowCoordinate
     static constexpr float MAP_ORIGIN = 32.0f * TILE_SIZE;
     static constexpr float SCALE = 100.0f;
 
-    /** Convert WoW ADT coords (X=east, Y=up, Z=south) to UE coords */
+    /** ADT center offset: tile (32,32) center in ADT coords, so UE (0,0) = map center.
+     *  This keeps all coordinates within ~17km of origin for float precision. */
+    static constexpr float ADT_CENTER_X = 32.0f * TILE_SIZE + TILE_SIZE * 0.5f;
+    static constexpr float ADT_CENTER_Z = 32.0f * TILE_SIZE + TILE_SIZE * 0.5f;
+
+    /** Convert WoW ADT coords (X=east, Y=up, Z=south) to UE coords (centered on map) */
     static FVector AdtToUE(float NgX, float NgY, float NgZ)
     {
-        return FVector(-NgZ * SCALE, NgX * SCALE, NgY * SCALE);
+        return FVector(-(NgZ - ADT_CENTER_Z) * SCALE, (NgX - ADT_CENTER_X) * SCALE, NgY * SCALE);
     }
 
     /** Get UE world position for the center of a tile (for placing the tile actor) */
@@ -41,9 +46,9 @@ struct WOWDATA_API FWowCoordinate
     /** Get the tile indices for a given UE world position */
     static FIntPoint WorldToTile(const FVector& UEPos)
     {
-        // Reverse of AdtToUE: NgZ = -UE.X / SCALE, NgX = UE.Y / SCALE
-        float NgX = UEPos.Y / SCALE;
-        float NgZ = -UEPos.X / SCALE;
+        // Reverse of centered AdtToUE
+        float NgX = UEPos.Y / SCALE + ADT_CENTER_X;
+        float NgZ = -UEPos.X / SCALE + ADT_CENTER_Z;
         int32 TX = FMath::FloorToInt32(NgX / TILE_SIZE);
         int32 TY = FMath::FloorToInt32(NgZ / TILE_SIZE);
         return FIntPoint(TX, TY);
@@ -59,9 +64,9 @@ struct WOWDATA_API FWowCoordinate
     static FVector WowToUE(const FVector& P) { return WowToUE(P.X, P.Y, P.Z); }
     static FVector UEToWow(const FVector& P)
     {
-        const float NgX = P.Y / SCALE;
+        const float NgX = P.Y / SCALE + ADT_CENTER_X;
         const float NgY = P.Z / SCALE;
-        const float NgZ = -P.X / SCALE;
+        const float NgZ = -P.X / SCALE + ADT_CENTER_Z;
         return FVector(MAP_ORIGIN - NgZ, MAP_ORIGIN - NgX, NgY);
     }
 
