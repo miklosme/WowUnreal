@@ -178,6 +178,20 @@ void AWowGameplayController::BindEntityEvents()
 	ConnectionManager->PacketHandler.OnChatMessage.AddUObject(
 		this, &AWowGameplayController::OnChatMessage);
 
+	// Bind party/group events
+	ConnectionManager->PacketHandler.OnGroupUpdated.AddUObject(
+		this, &AWowGameplayController::OnGroupUpdated);
+	ConnectionManager->PacketHandler.OnGroupInviteReceived.AddUObject(
+		this, &AWowGameplayController::OnGroupInviteReceived);
+	ConnectionManager->PacketHandler.OnPartyCommandResult.AddUObject(
+		this, &AWowGameplayController::OnPartyCommandResult);
+
+	// Bind taxi events
+	ConnectionManager->PacketHandler.OnTaxiNodesShown.AddUObject(
+		this, &AWowGameplayController::OnTaxiNodesShown);
+	ConnectionManager->PacketHandler.OnTaxiActivateReply.AddUObject(
+		this, &AWowGameplayController::OnTaxiActivateReply);
+
 	// Listen for name query responses
 	ConnectionManager->PacketHandler.OnPlayerNameReceived.AddUObject(
 		this, &AWowGameplayController::OnPlayerNameReceived);

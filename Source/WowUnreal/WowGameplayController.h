@@ -18,6 +18,9 @@ struct FWowEntity;
 class SWowActionBar;
 class SWowCastBar;
 class SWowMinimap;
+class SWowPartyFrame;
+class SWowPartyInvite;
+class SWowTaxiMap;
 struct FWowFloatingTextInfo;
 
 UCLASS()
@@ -75,6 +78,15 @@ public:
     /** Minimap widget */
     TSharedPtr<SWowMinimap> MinimapWidget;
 
+    /** Party frame widget */
+    TSharedPtr<SWowPartyFrame> PartyFrameWidget;
+
+    /** Party invite dialog widget */
+    TSharedPtr<SWowPartyInvite> PartyInviteWidget;
+
+    /** Taxi map widget */
+    TSharedPtr<SWowTaxiMap> TaxiMapWidget;
+
     /** Cast a spell on the current target (or self if no target) */
     UFUNCTION(BlueprintCallable)
     void CastSpell(int32 SpellId);
@@ -126,6 +138,9 @@ public:
 
     /** Create and show the minimap widget */
     void CreateMinimapWidget();
+
+    /** Create and show the chat window */
+    void CreateChatWindow();
 
     /** Handle keyboard input for action bar slots */
     void HandleActionBarInput();
@@ -208,8 +223,17 @@ private:
     void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
     void OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel);
 
-    /** Create and show the chat window */
-    void CreateChatWindow();
+    // Party/Group event handlers
+    void OnGroupUpdated();
+    void OnGroupInviteReceived(const FString& InviterName);
+    void OnPartyCommandResult(uint8 Command, const FString& PlayerName, uint8 Result);
+
+    // Taxi event handlers
+    void OnTaxiNodesShown(uint64 NpcGuid, uint32 CurrentNodeId);
+    void OnTaxiActivateReply(uint8 Result);
+
+    /** Create and show party frame */
+    void CreatePartyFrame();
 
     /** Handle Enter key for chat input */
     void OnEnterKey();
