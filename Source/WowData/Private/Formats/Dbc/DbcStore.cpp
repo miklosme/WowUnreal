@@ -403,7 +403,25 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         }
     }
 
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\CharStartOutfit.dbc"), Parser))
+    {
+        CharStartOutfitDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, CharStartOutfitDbc.Num()); ++i)
+        {
+            const FCharStartOutfitDbcEntry& E = CharStartOutfitDbc.GetAll()[i];
+            int32 ItemCount = 0;
+            for (int32 j = 0; j < 24; ++j)
+            {
+                if (E.ItemDisplayIds[j] > 0) ItemCount++;
+            }
+            UE_LOG(LogDbcStore, Log, TEXT("  CharStartOutfit[%d]: ID=%d Race=%d Class=%d Gender=%d Items=%d"),
+                i, E.ID, E.RaceID, E.ClassID, E.GenderID, ItemCount);
+        }
+    }
+
     bLoaded = Loaded > 0;
-    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/28 DBC tables"), Loaded);
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/29 DBC tables"), Loaded);
     return bLoaded;
 }

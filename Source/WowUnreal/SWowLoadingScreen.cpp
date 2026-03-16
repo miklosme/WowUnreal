@@ -72,3 +72,9 @@ void SWowLoadingScreen::SetProgressText(const FString& Text)
         ProgressText->SetText(FText::FromString(Text));
     }
 }
+
+void SWowLoadingScreen::SetProgress(float Fraction, const FString& StatusText)
+{
+    int32 Pct = FMath::Clamp(FMath::RoundToInt32(Fraction * 100.0f), 0, 100);
+    SetProgressText(FString::Printf(TEXT("%s (%d%%)"), *StatusText, Pct));
+}

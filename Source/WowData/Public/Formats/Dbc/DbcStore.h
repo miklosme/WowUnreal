@@ -28,6 +28,7 @@
 #include "Formats/Dbc/CharComponentTextureSectionsDbc.h"
 #include "Formats/Dbc/CharHairGeosetsDbc.h"
 #include "Formats/Dbc/CharacterFacialHairStylesDbc.h"
+#include "Formats/Dbc/CharStartOutfitDbc.h"
 
 class FMpqManager;
 
@@ -66,6 +67,7 @@ public:
     FCharComponentTextureSectionsDbc& CharComponentTextureSections() { return CharComponentTextureSectionsDbc; }
     FCharHairGeosetsDbc& CharHairGeosets() { return CharHairGeosetsDbc; }
     FCharacterFacialHairStylesDbc& CharacterFacialHairStyles() { return CharacterFacialHairStylesDbc; }
+    FCharStartOutfitDbc& CharStartOutfit() { return CharStartOutfitDbc; }
 
     const FMapDbc& Maps() const { return MapDbc; }
     const FAreaTableDbc& AreaTable() const { return AreaTableDbc; }
@@ -95,6 +97,7 @@ public:
     const FCharComponentTextureSectionsDbc& CharComponentTextureSections() const { return CharComponentTextureSectionsDbc; }
     const FCharHairGeosetsDbc& CharHairGeosets() const { return CharHairGeosetsDbc; }
     const FCharacterFacialHairStylesDbc& CharacterFacialHairStyles() const { return CharacterFacialHairStylesDbc; }
+    const FCharStartOutfitDbc& CharStartOutfit() const { return CharStartOutfitDbc; }
 
     bool IsLoaded() const { return bLoaded; }
 
@@ -127,5 +130,6 @@ private:
     FCharComponentTextureSectionsDbc CharComponentTextureSectionsDbc;
     FCharHairGeosetsDbc CharHairGeosetsDbc;
     FCharacterFacialHairStylesDbc CharacterFacialHairStylesDbc;
+    FCharStartOutfitDbc CharStartOutfitDbc;
     bool bLoaded = false;
 };

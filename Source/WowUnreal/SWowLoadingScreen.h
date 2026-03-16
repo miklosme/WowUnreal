@@ -21,6 +21,9 @@ public:
     /** Update the progress text */
     void SetProgressText(const FString& Text);
 
+    /** Update progress with fraction and status (convenience) */
+    void SetProgress(float Fraction, const FString& StatusText);
+
 private:
     TSharedPtr<class SImage> BackgroundImage;
     TSharedPtr<class STextBlock> ProgressText;

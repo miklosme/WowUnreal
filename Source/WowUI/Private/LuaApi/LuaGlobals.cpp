@@ -416,7 +416,7 @@ static int L_tostringall(lua_State* L)
     int n = lua_gettop(L);
     for (int i = 1; i <= n; i++)
     {
-        const char* s = luaL_tolstring(L, i, nullptr);
+        const char* s = lua_tolstring(L, i, nullptr);
         lua_remove(L, i);
         lua_insert(L, i);
     }
@@ -464,7 +464,6 @@ static void RegisterMathAliases(lua_State* L)
         lua_pop(L, 1);
 
     lua_pop(L, 1); // pop math table
-}
 }
 
 // ─── Registration ───────────────────────────────────────────────────────────────

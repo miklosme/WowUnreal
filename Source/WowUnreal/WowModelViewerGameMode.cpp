@@ -6,6 +6,7 @@
 #include "WowEquipmentManager.h"
 #include "WowDebugHUD.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "Formats/Dbc/CharStartOutfitDbc.h"
 #include "Engine/World.h"
 #include "Engine/PointLight.h"
 #include "Components/PointLightComponent.h"
@@ -184,140 +185,108 @@ void AWowModelViewerGameMode::RespawnCharacter()
         Params.Equipment.Add(Slot);
     }
 
-    // Starter gear: find first available equipment for each attachment slot
+    // Starter gear: use CharStartOutfit.dbc for race/class/gender
     if (ViewerWidget->GetShowStarterGear())
     {
-        struct FSlotSearch
-        {
-            FWowEquipmentManager::EAttachmentPoint Point;
-            uint32 FoundId = 0;
-        };
-        TArray<FSlotSearch> Slots = {
-            {FWowEquipmentManager::EAttachmentPoint::RightHand},
-            {FWowEquipmentManager::EAttachmentPoint::LeftHand},
-            {FWowEquipmentManager::EAttachmentPoint::Helmet},
-            {FWowEquipmentManager::EAttachmentPoint::LeftShoulder},
-            {FWowEquipmentManager::EAttachmentPoint::Back},
-            {FWowEquipmentManager::EAttachmentPoint::Shield},
-        };
+        // Default to Warrior class for testing
+        uint32 ClassId = 1;
+        uint32 RaceId = static_cast<uint32>(Params.Race);
+        uint32 GenderId = static_cast<uint32>(Params.Gender);
 
-        // Find body equipment by matching specific texture overlay patterns per slot
-        // Each slot type has characteristic overlay indices:
-        // Chest: [3]=TORSO_UPPER must be non-empty
-        // Pants: [5]=LEG_UPPER must be non-empty, [3]=TORSO_UPPER must be empty
-        // Boots: [7]=FOOT must be non-empty
-        // Gloves: [2]=HAND must be non-empty
-        // Belt: [4]=TORSO_LOWER non-empty, [3] empty
-        struct FBodySlotSearch
+        const FCharStartOutfitDbcEntry* OutfitEntry = FDbcStore::Get().CharStartOutfit().GetByRaceClassGender(RaceId, ClassId, GenderId);
+        if (OutfitEntry)
         {
-            uint32* SlotPtr;
-            const char* SlotName;
-            int32 RequiredIdx;    // Overlay index that MUST be non-empty
-            int32 ExcludeIdx;     // Overlay index that must be empty (to distinguish from other slots), -1 = no exclusion
-            uint32 FoundId = 0;
-        };
-        Params.BodyEquipment.RaceId = Params.Customization.RaceId;
-        Params.BodyEquipment.Gender = static_cast<uint32>(Params.Gender);
-        TArray<FBodySlotSearch> BodySlots = {
-            {&Params.BodyEquipment.ChestDisplayId, "Chest",  3, -1},  // TORSO_UPPER
-            {&Params.BodyEquipment.PantsDisplayId, "Pants",  5,  3},  // LEG_UPPER, no TORSO_UPPER
-            {&Params.BodyEquipment.BootsDisplayId, "Boots",  7, -1},  // FOOT
-            {&Params.BodyEquipment.GlovesDisplayId, "Gloves", 2, -1}, // HAND
-            {&Params.BodyEquipment.BeltDisplayId,  "Belt",   4,  3},  // TORSO_LOWER, no TORSO_UPPER
-        };
+            Params.BodyEquipment.RaceId = RaceId;
+            Params.BodyEquipment.Gender = GenderId;
 
-        FString ResolvedPath;
-        TSet<uint32> UsedIds; // Prevent same 3D item in multiple slots
-        TSet<uint32> UsedBodyIds; // Prevent same body item in multiple slots
-
-        // Debug: log first 5 items with texture overlays to understand the data
-        int32 DebugCount = 0;
-        for (const FItemDisplayInfoDbcEntry& Entry : FDbcStore::Get().ItemDisplayInfo().GetAll())
-        {
-            bool bAny = false;
-            for (int32 i = 0; i < 8; ++i) if (!Entry.TextureOverlays[i].IsEmpty()) bAny = true;
-            if (bAny && DebugCount < 5)
+            auto AddEquipment = [&Params, bDrawn](uint32 DisplayId, FWowEquipmentManager::EAttachmentPoint AttachPoint)
             {
-                FString Overlays;
-                for (int32 i = 0; i < 8; ++i)
-                    Overlays += FString::Printf(TEXT("[%d]=%s "), i, Entry.TextureOverlays[i].IsEmpty() ? TEXT("-") : *Entry.TextureOverlays[i].Left(30));
-                UE_LOG(LogModelViewer, Log, TEXT("ItemDisplay %d overlays: %s"), Entry.ID, *Overlays);
-                DebugCount++;
-            }
-        }
-
-        for (const FItemDisplayInfoDbcEntry& Entry : FDbcStore::Get().ItemDisplayInfo().GetAll())
-        {
-            // Check 3D equipment
-            for (auto& S : Slots)
-            {
-                if (S.FoundId == 0 && !UsedIds.Contains(Entry.ID))
+                if (DisplayId > 0)
                 {
-                    if (FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID, S.Point, ResolvedPath))
-                    {
-                        S.FoundId = Entry.ID;
-                        UsedIds.Add(Entry.ID);
-                    }
+                    FWowCharacterBuilder::FEquipmentSlot Slot;
+                    Slot.ItemDisplayId = DisplayId;
+                    Slot.AttachPoint = AttachPoint;
+                    Params.Equipment.Add(Slot);
+                }
+            };
+
+            // Process each item in the outfit
+            for (int32 i = 0; i < 24; ++i)
+            {
+                int32 DisplayId = OutfitEntry->ItemDisplayIds[i];
+                int32 InventorySlot = OutfitEntry->ItemInventorySlots[i];
+
+                if (DisplayId <= 0) continue; // Skip empty slots
+
+                // Map inventory slot to attachment point or body equipment
+                switch (InventorySlot)
+                {
+                    case 1: // HEAD
+                        AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::Helmet);
+                        break;
+                    case 3: // SHOULDER
+                        AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::LeftShoulder);
+                        AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::RightShoulder);
+                        break;
+                    case 4: // BODY (shirt)
+                        Params.BodyEquipment.ShirtDisplayId = DisplayId;
+                        break;
+                    case 5: // CHEST
+                        Params.BodyEquipment.ChestDisplayId = DisplayId;
+                        break;
+                    case 6: // WAIST (belt)
+                        Params.BodyEquipment.BeltDisplayId = DisplayId;
+                        break;
+                    case 7: // LEGS (pants)
+                        Params.BodyEquipment.PantsDisplayId = DisplayId;
+                        break;
+                    case 8: // FEET (boots)
+                        Params.BodyEquipment.BootsDisplayId = DisplayId;
+                        break;
+                    case 9: // WRISTS (bracers)
+                        Params.BodyEquipment.BracersDisplayId = DisplayId;
+                        break;
+                    case 10: // HANDS (gloves)
+                        Params.BodyEquipment.GlovesDisplayId = DisplayId;
+                        break;
+                    case 15: // RANGED
+                    case 16: // BACK (cape)
+                        AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::Back);
+                        break;
+                    case 17: // TWOHANDED
+                    case 21: // MAINHAND
+                        if (bDrawn)
+                            AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::RightHand);
+                        else
+                            AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::Back);
+                        break;
+                    case 22: // OFFHAND
+                    case 23: // HOLDABLE
+                        if (bDrawn)
+                            AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::LeftHand);
+                        else
+                            AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::Shield);
+                        break;
+                    case 24: // THROWN/AMMO
+                        // Usually thrown weapons or ammo pouches - can be ranged
+                        AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::Back);
+                        break;
+                    case 26: // RANGED (right)
+                        AddEquipment(DisplayId, FWowEquipmentManager::EAttachmentPoint::Back);
+                        break;
+                    default:
+                        UE_LOG(LogModelViewer, Verbose, TEXT("Unhandled inventory slot %d for display ID %d"), InventorySlot, DisplayId);
+                        break;
                 }
             }
 
-            // Check body equipment by overlay pattern (don't exclude by UsedIds —
-            // body slots use texture overlays, not 3D models, so they don't conflict)
-            for (auto& BS : BodySlots)
-            {
-                if (BS.FoundId == 0)
-                {
-                    bool bRequired = !Entry.TextureOverlays[BS.RequiredIdx].IsEmpty();
-                    bool bExcluded = (BS.ExcludeIdx >= 0) && !Entry.TextureOverlays[BS.ExcludeIdx].IsEmpty();
-                    if (bRequired && !bExcluded && !UsedBodyIds.Contains(Entry.ID))
-                    {
-                        BS.FoundId = Entry.ID;
-                        *BS.SlotPtr = Entry.ID;
-                        UsedBodyIds.Add(Entry.ID);
-                        UsedIds.Add(Entry.ID);
-                        UE_LOG(LogModelViewer, Log, TEXT("Found %s: DisplayID=%d overlay[%d]=%s"),
-                            ANSI_TO_TCHAR(BS.SlotName), Entry.ID, BS.RequiredIdx,
-                            *Entry.TextureOverlays[BS.RequiredIdx]);
-                    }
-                }
-            }
-
-            // Check if all slots found
-            bool bAllDone = true;
-            for (const auto& S : Slots) if (S.FoundId == 0) bAllDone = false;
-            for (const auto& BS : BodySlots) if (BS.FoundId == 0) bAllDone = false;
-            if (bAllDone) break;
+            UE_LOG(LogModelViewer, Log, TEXT("CharStartOutfit loaded: Race=%d Class=%d Gender=%d, Equipment=%d slots"),
+                RaceId, ClassId, GenderId, Params.Equipment.Num());
         }
-
-        auto AddEquip = [&Params](uint32 Id, FWowEquipmentManager::EAttachmentPoint Pt)
+        else
         {
-            if (Id == 0) return;
-            FWowCharacterBuilder::FEquipmentSlot Slot;
-            Slot.ItemDisplayId = Id;
-            Slot.AttachPoint = Pt;
-            Params.Equipment.Add(Slot);
-        };
-
-        for (const auto& S : Slots)
-        {
-            auto Point = S.Point;
-            // Swap weapon attachment points based on draw/sheathe toggle
-            if (!bDrawn)
-            {
-                if (Point == FWowEquipmentManager::EAttachmentPoint::RightHand)
-                    Point = FWowEquipmentManager::EAttachmentPoint::Back; // Sheathed on back
-                else if (Point == FWowEquipmentManager::EAttachmentPoint::LeftHand)
-                    Point = FWowEquipmentManager::EAttachmentPoint::Shield; // Shield on back
-            }
-            AddEquip(S.FoundId, Point);
-            // Shoulders: add both sides
-            if (S.Point == FWowEquipmentManager::EAttachmentPoint::LeftShoulder && S.FoundId > 0)
-            {
-                AddEquip(S.FoundId, FWowEquipmentManager::EAttachmentPoint::RightShoulder);
-            }
+            UE_LOG(LogModelViewer, Warning, TEXT("CharStartOutfit not found for Race=%d Class=%d Gender=%d"), RaceId, ClassId, GenderId);
         }
-
-        UE_LOG(LogModelViewer, Log, TEXT("Starter gear equipped: %d 3D slots + body equipment"), Params.Equipment.Num());
     }
 
     const FRotator FacingCamera(0.0f, -90.0f, 0.0f);

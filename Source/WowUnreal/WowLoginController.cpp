@@ -9,7 +9,7 @@
 #include "WowCredentialStore.h"
 #include "WowGameplayController.h"
 #include "WowPlayerCharacter.h"
-#include "WowLoadingScreen.h"
+// removed: now using SWowLoadingScreen.h
 #include "GameFramework/CharacterMovementComponent.h"
 #include "WowWorldManager.h"
 #include "WowAudioManager.h"
