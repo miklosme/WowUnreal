@@ -117,6 +117,10 @@ private:
     // Entity movement interpolation
     void UpdateEntitySplineMovement(float DeltaTime);
 
+    // Animation state management
+    void UpdateEntityAnimations();
+    void UpdatePlayerAnimations();
+
     UPROPERTY()
     TMap<uint64, TObjectPtr<AActor>> SpawnedEntityActors;
 

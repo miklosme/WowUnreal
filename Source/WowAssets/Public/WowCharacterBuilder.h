@@ -93,6 +93,12 @@ public:
         const TArray<FGeosetSectionInfo>& GeosetInfo,
         const TMap<uint16, uint16>& VisibleGeosets);
 
+    /**
+     * Get the WoW animation controller from a spawned character actor.
+     * Returns nullptr if the actor doesn't have an animation controller.
+     */
+    static class UWowAnimationController* GetAnimationController(AActor* CharacterActor);
+
 private:
     /** Internal: load M2, build skeleton + mesh + anims, spawn actor */
     static AActor* SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWowAssetCache* Cache,

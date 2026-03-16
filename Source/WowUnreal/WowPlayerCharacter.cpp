@@ -533,3 +533,10 @@ void AWowPlayerCharacter::SetCharacterModel(UWorld* World, FMpqManager* Mpq, FWo
 
 	UE_LOG(LogWowPlayerChar, Log, TEXT("Character model set successfully"));
 }
+
+void AWowPlayerCharacter::SetupAnimationController(UWowAnimationController* AnimController)
+{
+	this->AnimationController = AnimController;
+	UE_LOG(LogWowPlayerChar, Log, TEXT("Animation controller setup for local player character"));
+}
+}

@@ -7,6 +7,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
+class UWowAnimationController;
 struct FInputActionValue;
 
 UCLASS()
@@ -89,6 +90,9 @@ public:
         uint8 Race, uint8 Gender, uint8 SkinColor = 0, uint8 Face = 0, uint8 HairStyle = 0,
         uint8 HairColor = 0, uint8 FacialHair = 0);
 
+    /** Setup animation controller for local player character model */
+    void SetupAnimationController(class UWowAnimationController* AnimController);
+
 private:
     void OnMove(const FInputActionValue& Value);
     void OnLook(const FInputActionValue& Value);
@@ -108,4 +112,8 @@ private:
 
     // Left mouse drag turns character
     bool bLeftMouseTurning = false;
+
+    // Animation controller for character model (if using WoW character model)
+    UPROPERTY()
+    TObjectPtr<UWowAnimationController> AnimationController;
 };

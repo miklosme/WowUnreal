@@ -4,6 +4,7 @@
 #include "WowEquipmentManager.h"
 #include "WowAssetCache.h"
 #include "WowTextureFactory.h"
+#include "WowAnimationController.h"
 #include "Mpq/MpqManager.h"
 #include "Formats/M2Parser.h"
 #include "Formats/M2Types.h"
@@ -903,15 +904,37 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
                 CharAnimCache.Add(NormPath, CachedAnimations);
             }
 
+            // Setup animation controller for state-based animation switching
             if (CachedAnimations.Num() > 0)
             {
-                int32 AnimIndex = FindPreferredAnimationIndex(*M2Data);
-                if (!CachedAnimations.IsValidIndex(AnimIndex) || !CachedAnimations[AnimIndex].IsValid())
+                // Convert weak pointers to strong pointers for the animation controller
+                TArray<UAnimSequence*> Animations;
+                for (const TWeakObjectPtr<UAnimSequence>& WeakAnim : CachedAnimations)
                 {
-                    AnimIndex = 0;
+                    if (UAnimSequence* Anim = WeakAnim.Get())
+                    {
+                        Animations.Add(Anim);
+                    }
                 }
 
-                if (CachedAnimations[AnimIndex].IsValid())
+                if (Animations.Num() > 0)
+                {
+                    // Create and initialize animation controller
+                    UWowAnimationController* AnimController = NewObject<UWowAnimationController>(Actor, TEXT("WowAnimationController"));
+                    AnimController->Initialize(SkelMesh, Animations);
+
+                    // Store the controller by tagging the actor so we can find it later
+                    // The gameplay controller will retrieve this when updating entity animations
+                    Actor->Tags.Add(FName(TEXT("HasWowAnimController")));
+
+                    UE_LOG(LogWowCharacter, Log, TEXT("Created animation controller with %d animations"), Animations.Num());
+                }
+            }
+            else
+            {
+                // Fallback: use legacy single animation mode if no animations available
+                int32 AnimIndex = FindPreferredAnimationIndex(*M2Data);
+                if (CachedAnimations.IsValidIndex(AnimIndex) && CachedAnimations[AnimIndex].IsValid())
                 {
                     SkelMesh->SetAnimationMode(EAnimationMode::AnimationSingleNode);
                     SkelMesh->PlayAnimation(CachedAnimations[AnimIndex].Get(), true);
@@ -978,4 +1001,18 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
         *ModelPath, *Location.ToString(), Scale, NumVerts, NumIndices / 3);
 
     return Actor;
+}
+
+UWowAnimationController* FWowCharacterBuilder::GetAnimationController(AActor* CharacterActor)
+{
+    if (!CharacterActor) return nullptr;
+
+    // Check if this actor has an animation controller
+    if (!CharacterActor->Tags.Contains(FName(TEXT("HasWowAnimController"))))
+    {
+        return nullptr;
+    }
+
+    // Find the animation controller by name
+    return FindObject<UWowAnimationController>(CharacterActor, TEXT("WowAnimationController"));
 }

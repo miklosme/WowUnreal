@@ -8,6 +8,7 @@
 #include "WowEventSystem.h"
 #include "WowWorldManager.h"
 #include "WowCharacterBuilder.h"
+#include "WowAnimationController.h"
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
 #include "WowDeathManager.h"
@@ -17,6 +18,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
 #include "Components/WidgetComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/GameViewportClient.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Framework/Application/SlateApplication.h"
@@ -289,6 +291,10 @@ void AWowGameplayController::Tick(float DeltaTime)
 		KeepAliveTimer = 0.0f;
 		ConnectionManager->SendKeepAlive();
 	}
+
+	// Update character animations
+	UpdatePlayerAnimations();
+	UpdateEntityAnimations();
 }
 
 void AWowGameplayController::SendMovementUpdate()
@@ -986,4 +992,46 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 	// Set the character model on the player pawn
 	PlayerChar->SetCharacterModel(World, CachedMpq, CachedAssetCache,
 		RaceId, Gender, SkinColor, Face, HairStyle, HairColor, FacialHair);
+}
+
+void AWowGameplayController::UpdatePlayerAnimations()
+{
+	// Update local player animation based on character movement
+	if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
+	{
+		// If the player has an animation controller, update it
+		if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
+		{
+			AnimController->UpdateLocalPlayerState(PlayerChar);
+		}
+	}
+}
+
+void AWowGameplayController::UpdateEntityAnimations()
+{
+	if (!ConnectionManager) return;
+
+	// Update animations for all spawned entity actors based on their movement state
+	for (auto& Pair : SpawnedEntityActors)
+	{
+		uint64 Guid = Pair.Key;
+		AActor* Actor = Pair.Value;
+
+		if (!Actor || !IsValid(Actor)) continue;
+
+		// Get the animation controller for this actor
+		UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(Actor);
+		if (!AnimController) continue;
+
+		// Get the entity data to determine animation state
+		const FWowEntity* Entity = ConnectionManager->PacketHandler.EntityManager.GetEntity(Guid);
+		if (!Entity) continue;
+
+		// Update animation based on entity movement info
+		// For now, we'll use basic combat/casting state detection
+		bool bIsInCombat = false; // TODO: Detect combat state from entity fields
+		bool bIsCasting = false;  // TODO: Detect casting state from entity fields
+
+		AnimController->UpdateAnimationState(Entity->Movement, bIsInCombat, bIsCasting);
+	}
 }
