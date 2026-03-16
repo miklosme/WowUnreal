@@ -2,6 +2,15 @@
 #include "CoreMinimal.h"
 #include "WowUpdateFields.h"
 
+// Spline movement waypoint for SMSG_MONSTER_MOVE
+struct FWowSplineWaypoint
+{
+    FVector Position = FVector::ZeroVector;
+
+    FWowSplineWaypoint() = default;
+    FWowSplineWaypoint(const FVector& InPosition) : Position(InPosition) {}
+};
+
 // Movement info for a living entity
 struct FWowMovementInfo
 {
@@ -22,6 +31,16 @@ struct FWowMovementInfo
     uint64 TransportGuid = 0;
     FVector TransportOffset = FVector::ZeroVector;
     float TransportOrientation = 0.0f;
+
+    // Spline movement data from SMSG_MONSTER_MOVE
+    bool bHasActiveSpline = false;
+    uint32 SplineId = 0;
+    uint32 SplineFlags = 0;
+    uint32 SplineDuration = 0;  // Movement duration in milliseconds
+    float SplineElapsed = 0.0f; // Time elapsed since spline started
+    TArray<FWowSplineWaypoint> SplineWaypoints;
+    FVector SplineStartPosition = FVector::ZeroVector;
+    uint8 SplineMoveType = 0; // 0=normal, 1=stop, 2=facing point, 3=facing angle, 4=facing target
 };
 
 // Aura information for a single aura slot

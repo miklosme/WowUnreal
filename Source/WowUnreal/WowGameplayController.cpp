@@ -8,9 +8,11 @@
 #include "WowEventSystem.h"
 #include "WowWorldManager.h"
 #include "WowCharacterBuilder.h"
+#include "WowNameplateWidget.h"
 #include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
+#include "Components/WidgetComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
@@ -184,6 +186,22 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			(*ActorPtr)->SetActorLocation(UEPos);
 			(*ActorPtr)->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Entity.Movement.Orientation), 0.0f));
 		}
+
+		// Update nameplate health if needed
+		TObjectPtr<UWidgetComponent>* NameplatePtr = EntityNameplates.Find(Entity.Guid);
+		if (NameplatePtr && *NameplatePtr)
+		{
+			UWidgetComponent* NameplateComponent = *NameplatePtr;
+			if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
+			{
+				int32 Health = Entity.GetHealth();
+				int32 MaxHealth = Entity.GetMaxHealth();
+				if (Health > 0 && MaxHealth > 0)
+				{
+					NameplateWidget->UpdateHealth(Health, MaxHealth);
+				}
+			}
+		}
 	}
 }
 
@@ -198,6 +216,9 @@ void AWowGameplayController::Tick(float DeltaTime)
 	}
 
 	if (!ConnectionManager) return;
+
+	// Update entity spline movement
+	UpdateEntitySplineMovement(DeltaTime);
 
 	// Movement heartbeat — send position to server while moving
 	MovementSyncTimer += DeltaTime;
@@ -332,6 +353,9 @@ void AWowGameplayController::OnEntityDestroyed(uint64 Guid)
 		UE_LOG(LogWowGameplay, Log, TEXT("Destroyed entity model for GUID %llu"), Guid);
 	}
 	SpawnedEntityActors.Remove(Guid);
+
+	// Clean up nameplate
+	EntityNameplates.Remove(Guid);
 }
 
 void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
@@ -395,6 +419,197 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		// Tag actor with GUID for targeting
 		SpawnedActor->Tags.Add(FName(*FString::Printf(TEXT("%llu"), Entity.Guid)));
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
+
+		// Create nameplate widget component
+		UWidgetComponent* NameplateComponent = NewObject<UWidgetComponent>(SpawnedActor);
+		if (NameplateComponent)
+		{
+			NameplateComponent->SetupAttachment(SpawnedActor->GetRootComponent());
+			NameplateComponent->SetWidgetSpace(EWidgetSpace::Screen);
+			NameplateComponent->SetDrawSize(FVector2D(200.0f, 40.0f));
+
+			// Position the nameplate above the entity (offset Z by ~200cm)
+			NameplateComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 200.0f));
+
+			// Create the nameplate widget class
+			UClass* NameplateClass = UWowNameplateWidget::StaticClass();
+			if (NameplateClass)
+			{
+				NameplateComponent->SetWidgetClass(NameplateClass);
+
+				// Get entity name and health
+				FString EntityName = TEXT("NPC");
+				bool bIsHostile = false;
+
+				if (Entity.IsPlayer())
+				{
+					EntityName = FString::Printf(TEXT("Player %llu"), Entity.Guid);
+					bIsHostile = false; // Assume other players are friendly for now
+				}
+				else
+				{
+					EntityName = FString::Printf(TEXT("NPC %d"), Entity.Entry);
+
+					// Determine hostility based on faction (simplified)
+					const FWowUnitEntity* UnitEntity = static_cast<const FWowUnitEntity*>(&Entity);
+					uint32 FactionTemplate = UnitEntity->GetFactionTemplate();
+					// Simple heuristic: most hostile creatures have faction > 100
+					bIsHostile = (FactionTemplate > 100 && FactionTemplate != 2000); // 2000 is often neutral/friendly
+				}
+
+				int32 Health = Entity.GetHealth();
+				int32 MaxHealth = Entity.GetMaxHealth();
+
+				// Initialize the nameplate widget
+				if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
+				{
+					NameplateWidget->SetupNameplate(EntityName, Health, MaxHealth, bIsHostile);
+				}
+				else
+				{
+					// Widget not yet created, store data to initialize later
+					UE_LOG(LogWowGameplay, Log, TEXT("Nameplate widget not ready yet for entity %llu, will initialize on first update"), Entity.Guid);
+				}
+
+				NameplateComponent->RegisterComponent();
+				EntityNameplates.Add(Entity.Guid, NameplateComponent);
+
+				UE_LOG(LogWowGameplay, Log, TEXT("Created nameplate for entity %llu (%s)"), Entity.Guid, *EntityName);
+			}
+		}
+	}
+}
+
+void AWowGameplayController::UpdateEntitySplineMovement(float DeltaTime)
+{
+	if (!ConnectionManager) return;
+
+	// Iterate through all entities and update those with active splines
+	FWowEntityManager& EntityManager = ConnectionManager->PacketHandler.EntityManager;
+
+	for (const auto& EntityPair : EntityManager.GetAll())
+	{
+		FWowEntity* EntityPtr = EntityPair.Value.Get();
+		if (!EntityPtr) continue;
+		FWowEntity& Entity = *EntityPtr;
+
+		// Skip local player
+		if (Entity.Guid == EntityManager.LocalPlayerGuid) continue;
+
+		// Skip entities without active splines
+		if (!Entity.Movement.bHasActiveSpline || Entity.Movement.SplineWaypoints.Num() == 0)
+			continue;
+
+		// Update spline elapsed time
+		Entity.Movement.SplineElapsed += DeltaTime * 1000.0f; // Convert to milliseconds
+
+		// Check if spline is complete
+		if (Entity.Movement.SplineElapsed >= Entity.Movement.SplineDuration)
+		{
+			// Move to final position
+			if (Entity.Movement.SplineWaypoints.Num() > 0)
+			{
+				Entity.Movement.Position = Entity.Movement.SplineWaypoints.Last().Position;
+			}
+
+			// Calculate final orientation to face the last waypoint direction
+			if (Entity.Movement.SplineWaypoints.Num() > 1)
+			{
+				const FVector LastWP = Entity.Movement.SplineWaypoints.Last().Position;
+				const FVector SecondLastWP = Entity.Movement.SplineWaypoints[Entity.Movement.SplineWaypoints.Num() - 2].Position;
+				FVector Dir = FVector(LastWP.X - SecondLastWP.X, LastWP.Y - SecondLastWP.Y, 0.0f);
+				if (!Dir.IsNearlyZero())
+				{
+					Entity.Movement.Orientation = FMath::Atan2(Dir.Y, Dir.X);
+				}
+			}
+
+			// Clear spline
+			Entity.Movement.bHasActiveSpline = false;
+			Entity.Movement.SplineWaypoints.Empty();
+
+			UE_LOG(LogWowGameplay, Log, TEXT("Spline movement completed for entity %llu"), Entity.Guid);
+		}
+		else
+		{
+			// Interpolate along the spline
+			float Progress = Entity.Movement.SplineElapsed / float(Entity.Movement.SplineDuration);
+			Progress = FMath::Clamp(Progress, 0.0f, 1.0f);
+
+			// Simple linear interpolation between waypoints
+			if (Entity.Movement.SplineWaypoints.Num() == 1)
+			{
+				// Single waypoint: interpolate from current position to waypoint
+				Entity.Movement.Position = FMath::Lerp(
+					Entity.Movement.SplineStartPosition,
+					Entity.Movement.SplineWaypoints[0].Position,
+					Progress);
+			}
+			else if (Entity.Movement.SplineWaypoints.Num() > 1)
+			{
+				// Multiple waypoints: treat as segments
+				float TotalSegments = float(Entity.Movement.SplineWaypoints.Num());
+				float SegmentProgress = Progress * TotalSegments;
+				int32 CurrentSegment = FMath::FloorToInt32(SegmentProgress);
+				float LocalProgress = SegmentProgress - CurrentSegment;
+
+				if (CurrentSegment == 0)
+				{
+					// First segment: from start position to first waypoint
+					Entity.Movement.Position = FMath::Lerp(
+						Entity.Movement.SplineStartPosition,
+						Entity.Movement.SplineWaypoints[0].Position,
+						LocalProgress);
+				}
+				else if (CurrentSegment < Entity.Movement.SplineWaypoints.Num())
+				{
+					// Intermediate segments: from previous waypoint to current waypoint
+					Entity.Movement.Position = FMath::Lerp(
+						Entity.Movement.SplineWaypoints[CurrentSegment - 1].Position,
+						Entity.Movement.SplineWaypoints[CurrentSegment].Position,
+						LocalProgress);
+				}
+				else
+				{
+					// Final waypoint
+					Entity.Movement.Position = Entity.Movement.SplineWaypoints.Last().Position;
+				}
+			}
+
+			// Update orientation to face movement direction
+			if (Entity.Movement.SplineWaypoints.Num() > 0)
+			{
+				FVector TargetPos;
+				if (Entity.Movement.SplineWaypoints.Num() == 1)
+				{
+					TargetPos = Entity.Movement.SplineWaypoints[0].Position;
+				}
+				else
+				{
+					// Face the next waypoint
+					float TotalSegments = float(Entity.Movement.SplineWaypoints.Num());
+					float SegmentProgress = Progress * TotalSegments;
+					int32 NextSegment = FMath::CeilToInt32(SegmentProgress);
+					NextSegment = FMath::Clamp(NextSegment, 0, Entity.Movement.SplineWaypoints.Num() - 1);
+					TargetPos = Entity.Movement.SplineWaypoints[NextSegment].Position;
+				}
+
+				FVector Dir = FVector(TargetPos.X - Entity.Movement.Position.X, TargetPos.Y - Entity.Movement.Position.Y, 0.0f);
+				if (!Dir.IsNearlyZero())
+				{
+					Entity.Movement.Orientation = FMath::Atan2(Dir.Y, Dir.X);
+				}
+			}
+		}
+
+		// Update the visual actor position
+		TObjectPtr<AActor>* ActorPtr = SpawnedEntityActors.Find(Entity.Guid);
+		if (ActorPtr && *ActorPtr)
+		{
+			FVector UEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
+			(*ActorPtr)->SetActorLocation(UEPos);
+			(*ActorPtr)->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Entity.Movement.Orientation), 0.0f));
+		}
 	}
 }
 

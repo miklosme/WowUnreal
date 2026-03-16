@@ -831,22 +831,90 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
     uint8 MoveType = R.ReadU8();
 
     FWowEntity* Entity = EntityManager.Find(TargetGuid);
-    if (Entity)
+    if (!Entity)
     {
-        // Update entity position
-        Entity->Movement.Position.X = PosX;
-        Entity->Movement.Position.Y = PosY;
-        Entity->Movement.Position.Z = PosZ;
+        UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: entity with GUID %llu not found"), TargetGuid);
+        return;
     }
+
+    // Store current position as the starting point for spline movement
+    Entity->Movement.SplineStartPosition = Entity->Movement.Position;
+
+    // Update entity position to the starting position from packet
+    Entity->Movement.Position.X = PosX;
+    Entity->Movement.Position.Y = PosY;
+    Entity->Movement.Position.Z = PosZ;
+    Entity->Movement.SplineMoveType = MoveType;
 
     uint32 PointCount = 0;
 
-    if (MoveType == 0) // Normal movement with spline
+    if (MoveType == 1) // Stop movement
     {
-        if (!R.CanRead(12)) return;
+        // Just update position and clear any active spline
+        Entity->Movement.bHasActiveSpline = false;
+        Entity->Movement.SplineWaypoints.Empty();
+        UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: STOP guid=%llu pos=(%.1f,%.1f,%.1f)"),
+            TargetGuid, PosX, PosY, PosZ);
+    }
+    else if (MoveType == 2) // Facing point
+    {
+        if (R.CanRead(12))
+        {
+            float FaceX = R.ReadFloat();
+            float FaceY = R.ReadFloat();
+            float FaceZ = R.ReadFloat();
+            // Calculate orientation to face the point
+            FVector FaceDir = FVector(FaceX - PosX, FaceY - PosY, 0.0f);
+            if (!FaceDir.IsNearlyZero())
+            {
+                Entity->Movement.Orientation = FMath::Atan2(FaceDir.Y, FaceDir.X);
+            }
+            UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: FACE_POINT guid=%llu face=(%.1f,%.1f,%.1f)"),
+                TargetGuid, FaceX, FaceY, FaceZ);
+        }
+        Entity->Movement.bHasActiveSpline = false;
+        Entity->Movement.SplineWaypoints.Empty();
+    }
+    else if (MoveType == 3) // Facing angle
+    {
+        if (R.CanRead(4))
+        {
+            float FaceAngle = R.ReadFloat();
+            Entity->Movement.Orientation = FaceAngle;
+            UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: FACE_ANGLE guid=%llu angle=%.3f"),
+                TargetGuid, FaceAngle);
+        }
+        Entity->Movement.bHasActiveSpline = false;
+        Entity->Movement.SplineWaypoints.Empty();
+    }
+    else if (MoveType == 4) // Facing target
+    {
+        if (R.CanRead(8))
+        {
+            uint64 FaceTarget = R.ReadU64();
+            UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: FACE_TARGET guid=%llu target=%llu"),
+                TargetGuid, FaceTarget);
+        }
+        Entity->Movement.bHasActiveSpline = false;
+        Entity->Movement.SplineWaypoints.Empty();
+    }
+    else if (MoveType == 0) // Normal movement with spline
+    {
+        if (!R.CanRead(12))
+        {
+            UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: insufficient data for spline"));
+            return;
+        }
+
         uint32 SplineFlags = R.ReadU32();
         uint32 Duration = R.ReadU32();
         PointCount = R.ReadU32();
+
+        Entity->Movement.SplineFlags = SplineFlags;
+        Entity->Movement.SplineDuration = Duration;
+        Entity->Movement.SplineElapsed = 0.0f;
+        Entity->Movement.SplineWaypoints.Empty();
+        Entity->Movement.bHasActiveSpline = (PointCount > 0 && Duration > 0);
 
         // Read waypoints
         for (uint32 i = 0; i < PointCount && R.CanRead(12); ++i)
@@ -854,17 +922,20 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
             float WPX = R.ReadFloat();
             float WPY = R.ReadFloat();
             float WPZ = R.ReadFloat();
-            // Store waypoints if needed
+            Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(FVector(WPX, WPY, WPZ)));
         }
+
+        UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: SPLINE guid=%llu pos=(%.1f,%.1f,%.1f) duration=%ums points=%u"),
+            TargetGuid, PosX, PosY, PosZ, Duration, PointCount);
     }
-
-    UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: guid=%llu pos=(%.1f,%.1f,%.1f) points=%u"),
-        TargetGuid, PosX, PosY, PosZ, PointCount);
-
-    if (Entity)
+    else
     {
-        EntityManager.OnEntityUpdated.Broadcast(*Entity);
+        UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: unknown move type %u for guid %llu"), MoveType, TargetGuid);
+        Entity->Movement.bHasActiveSpline = false;
+        Entity->Movement.SplineWaypoints.Empty();
     }
+
+    EntityManager.OnEntityUpdated.Broadcast(*Entity);
 }
 
 // ── SMSG_INVENTORY_CHANGE_FAILURE ─────────────────────────────────────────
