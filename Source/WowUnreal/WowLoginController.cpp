@@ -20,6 +20,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameViewportClient.h"
 #include "Components/CanvasPanel.h"
+#include "Widgets/SOverlay.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "WowAssetCache.h"
 #include "Mpq/MpqManager.h"
@@ -320,10 +321,13 @@ void AWowLoginController::InitializeWorldSystems()
             if (GPC->ChatWindow.IsValid())
             {
                 // Add to viewport at bottom-left with z-order 55 (above UI elements)
-                TSharedRef<SWidget> ChatWindowContainer = SNew(SBox)
-                    .HAlign(HAlign_Left)
+                TSharedRef<SWidget> ChatWindowContainer =
+                    SNew(SOverlay)
+                    .Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world
+                    + SOverlay::Slot()
+                    .HAlign(HAlign_Left)   // Bottom left positioning
                     .VAlign(VAlign_Bottom)
-                    .Padding(FMargin(20.0f, 0.0f, 0.0f, 100.0f))
+                    .Padding(20, 0, 0, 100) // 20px from left, 100px from bottom
                     [
                         GPC->ChatWindow.ToSharedRef()
                     ];
@@ -715,16 +719,19 @@ void AWowLoginController::ShowLoadingScreen(uint32 MapId)
     if (WorldManager && WorldManager->GetMpqManager())
     {
         const FDbcStore& DbcStore = FDbcStore::Get();
+        UE_LOG(LogWowLogin, Log, TEXT("ShowLoadingScreen: MapId=%u, DbcStore loaded=%s"), MapId, DbcStore.IsLoaded() ? TEXT("true") : TEXT("false"));
         if (DbcStore.IsLoaded())
         {
             // Try to find the loading screen using DBC relationship
             UTexture2D* LoadingTexture = nullptr;
             if (const auto* MapEntry = DbcStore.Maps().GetById(MapId))
             {
+                UE_LOG(LogWowLogin, Log, TEXT("Found map entry for MapId=%u, LoadingScreenID=%u"), MapId, MapEntry->LoadingScreenID);
                 // Look up the loading screen by ID
                 if (const auto* LoadingScreenEntry = DbcStore.LoadingScreens().GetById(MapEntry->LoadingScreenID))
                 {
                     FString LoadingScreenPath = LoadingScreenEntry->FileName;
+                    UE_LOG(LogWowLogin, Log, TEXT("Found loading screen entry, FileName='%s'"), *LoadingScreenPath);
                     if (!LoadingScreenPath.IsEmpty())
                     {
                         // Ensure proper path format
@@ -738,8 +745,10 @@ void AWowLoginController::ShowLoadingScreen(uint32 MapId)
                         }
 
                         TArray<uint8> BlpData;
+                        UE_LOG(LogWowLogin, Log, TEXT("Trying to read loading screen: %s"), *LoadingScreenPath);
                         if (WorldManager->GetMpqManager()->ReadFile(LoadingScreenPath, BlpData))
                         {
+                            UE_LOG(LogWowLogin, Log, TEXT("Successfully read BLP file, size=%d bytes"), BlpData.Num());
                             FBlpTexture BlpTex = FBlpParser::Parse(BlpData);
                             if (!BlpTex.MipLevels.IsEmpty())
                             {
@@ -783,17 +792,43 @@ void AWowLoginController::ShowLoadingScreen(uint32 MapId)
                 }
             }
 
-            // Fall back to a generic loading screen
+            // Fall back to common loading screens
             if (!LoadingTexture)
             {
-                TArray<uint8> BlpData;
-                if (WorldManager->GetMpqManager()->ReadFile(TEXT("Interface\\Glues\\LoadingScreens\\LoadingScreen.blp"), BlpData))
+                UE_LOG(LogWowLogin, Warning, TEXT("DBC loading screen failed, trying fallback paths"));
+                TArray<FString> FallbackPaths = {
+                    TEXT("Interface\\Glues\\LoadingScreens\\LoadScreenEasternKingdoms.blp"),
+                    TEXT("Interface\\Glues\\LoadingScreens\\LoadScreenKalimdor.blp"),
+                    TEXT("Interface\\Glues\\LoadingScreens\\LoadingScreen.blp"),
+                    TEXT("Interface\\Glues\\LoadingScreens\\LoadScreen_Barrens.blp"),
+                    TEXT("Interface\\Glues\\LoadingScreens\\LoadScreen_Elwynn.blp")
+                };
+
+                for (const FString& Path : FallbackPaths)
                 {
-                    FBlpTexture BlpTex = FBlpParser::Parse(BlpData);
-                    if (!BlpTex.MipLevels.IsEmpty())
+                    TArray<uint8> BlpData;
+                    UE_LOG(LogWowLogin, Log, TEXT("Trying fallback loading screen: %s"), *Path);
+                    if (WorldManager->GetMpqManager()->ReadFile(Path, BlpData))
                     {
-                        LoadingTexture = FWowTextureFactory::CreateTexture(BlpTex, TEXT("LoadingScreen"));
-                        UE_LOG(LogWowLogin, Log, TEXT("Loaded generic loading screen"));
+                        UE_LOG(LogWowLogin, Log, TEXT("Successfully read fallback BLP file, size=%d bytes"), BlpData.Num());
+                        FBlpTexture BlpTex = FBlpParser::Parse(BlpData);
+                        if (!BlpTex.MipLevels.IsEmpty())
+                        {
+                            LoadingTexture = FWowTextureFactory::CreateTexture(BlpTex, Path);
+                            if (LoadingTexture)
+                            {
+                                UE_LOG(LogWowLogin, Log, TEXT("Loaded fallback loading screen: %s"), *Path);
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            UE_LOG(LogWowLogin, Warning, TEXT("Failed to parse BLP: %s"), *Path);
+                        }
+                    }
+                    else
+                    {
+                        UE_LOG(LogWowLogin, Warning, TEXT("Failed to read file: %s"), *Path);
                     }
                 }
             }
@@ -801,8 +836,21 @@ void AWowLoginController::ShowLoadingScreen(uint32 MapId)
             if (LoadingTexture)
             {
                 LoadingScreenWidget->SetBackgroundImage(LoadingTexture);
+                UE_LOG(LogWowLogin, Log, TEXT("Set loading screen background image successfully"));
+            }
+            else
+            {
+                UE_LOG(LogWowLogin, Warning, TEXT("No loading screen image could be loaded - showing blank background"));
             }
         }
+        else
+        {
+            UE_LOG(LogWowLogin, Warning, TEXT("DBC Store not loaded - cannot load loading screen image"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogWowLogin, Warning, TEXT("WorldManager or MpqManager not available - cannot load loading screen image"));
     }
 
     LoadingScreenWidget->SetProgress(0.0f, TEXT("Loading terrain..."));

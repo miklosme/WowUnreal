@@ -34,6 +34,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWeakWidget.h"
 #include "Widgets/SCanvas.h"
+#include "Widgets/SOverlay.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -71,19 +72,12 @@ void AWowGameplayController::BeginPlay()
 
 	// Create cast bar widget wrapped in positioning container
 	TSharedRef<SWidget> CastBarContainer =
-		SNew(SCanvas)
-		+ SCanvas::Slot()
-		.Position(TAttribute<FVector2D>::Create(TAttribute<FVector2D>::FGetter::CreateLambda([this]()
-		{
-			// Position at bottom center of screen
-			FVector2D ViewportSize;
-			if (GEngine && GEngine->GameViewport)
-			{
-				GEngine->GameViewport->GetViewportSize(ViewportSize);
-			}
-			return FVector2D(ViewportSize.X * 0.5f - 150.0f, ViewportSize.Y - 100.0f); // Center horizontally, near bottom
-		})))
-		.Size(FVector2D(300.0f, 40.0f))
+		SNew(SOverlay)
+		.Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Center)  // Bottom center positioning
+		.VAlign(VAlign_Bottom)
+		.Padding(0, 0, 0, 80)  // 80px margin from bottom (above action bar)
 		[
 			SAssignNew(CastBarWidget, SWowCastBar)
 		];
@@ -1329,17 +1323,25 @@ void AWowGameplayController::CreateActionBarWidget()
 	ActionBarWidget = SNew(SWowActionBar)
 		.ConnectionManager(ConnectionManager);
 
-	// Add to viewport
+	// Add to viewport with proper positioning container
 	if (GEngine && GEngine->GameViewport)
 	{
+		// Wrap in positioned overlay that passes clicks through
+		TSharedRef<SWidget> ActionBarContainer =
+			SNew(SOverlay)
+			.Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Center)  // Bottom center positioning
+			.VAlign(VAlign_Bottom)
+			.Padding(0, 0, 0, 20)  // 20px margin from bottom edge
+			[
+				ActionBarWidget.ToSharedRef()
+			];
+
 		GEngine->GameViewport->AddViewportWidgetContent(
-			ActionBarWidget.ToSharedRef(),
+			ActionBarContainer,
 			60 // Z-order
 		);
-
-		// Position at bottom center
-		ActionBarWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(0.5f, 1.0f)));
-		ActionBarWidget->SetRenderTransformPivot(FVector2D(0.5f, 1.0f));
 	}
 
 	UE_LOG(LogWowGameplay, Log, TEXT("Created action bar widget"));
@@ -1375,17 +1377,25 @@ void AWowGameplayController::CreateMinimapWidget()
 		.EntityManager(&ConnectionManager->PacketHandler.EntityManager)
 		.WorldManager(WorldManager);
 
-	// Add to viewport
+	// Add to viewport with proper positioning container
 	if (GEngine && GEngine->GameViewport)
 	{
+		// Wrap in positioned overlay that passes clicks through
+		TSharedRef<SWidget> MinimapContainer =
+			SNew(SOverlay)
+			.Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Right)  // Top right positioning
+			.VAlign(VAlign_Top)
+			.Padding(0, 20, 20, 0)  // 20px margin from top and right edges
+			[
+				MinimapWidget.ToSharedRef()
+			];
+
 		GEngine->GameViewport->AddViewportWidgetContent(
-			MinimapWidget.ToSharedRef(),
+			MinimapContainer,
 			70 // Z-order (above action bar)
 		);
-
-		// Position at top-right corner
-		MinimapWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(1.0f, 0.0f)));
-		MinimapWidget->SetRenderTransformPivot(FVector2D(1.0f, 0.0f));
 	}
 
 	UE_LOG(LogWowGameplay, Log, TEXT("Created minimap widget"));
@@ -1402,17 +1412,25 @@ void AWowGameplayController::CreatePartyFrame()
 	PartyFrameWidget = SNew(SWowPartyFrame)
 		.ConnectionManager(ConnectionManager);
 
-	// Add to viewport
+	// Add to viewport with proper positioning container
 	if (GEngine && GEngine->GameViewport)
 	{
+		// Wrap in positioned overlay that passes clicks through
+		TSharedRef<SWidget> PartyFrameContainer =
+			SNew(SOverlay)
+			.Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Left)   // Top left positioning
+			.VAlign(VAlign_Top)
+			.Padding(20, 100, 0, 0)  // 20px from left, 100px from top (below minimap area)
+			[
+				PartyFrameWidget.ToSharedRef()
+			];
+
 		GEngine->GameViewport->AddViewportWidgetContent(
-			PartyFrameWidget.ToSharedRef(),
+			PartyFrameContainer,
 			50 // Z-order
 		);
-
-		// Position at top left
-		PartyFrameWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(0.0f, 0.1f)));
-		PartyFrameWidget->SetRenderTransformPivot(FVector2D(0.0f, 0.0f));
 	}
 
 	UE_LOG(LogWowGameplay, Log, TEXT("Created party frame widget"));
@@ -1447,10 +1465,7 @@ void AWowGameplayController::OnGroupInviteReceived(const FString& InviterName)
 	// Close any existing invite dialog
 	if (PartyInviteWidget.IsValid())
 	{
-		if (GEngine && GEngine->GameViewport)
-		{
-			GEngine->GameViewport->RemoveViewportWidgetContent(PartyInviteWidget.ToSharedRef());
-		}
+		// For party invites, the widget manages its own lifecycle and will auto-remove
 		PartyInviteWidget.Reset();
 	}
 
@@ -1461,14 +1476,21 @@ void AWowGameplayController::OnGroupInviteReceived(const FString& InviterName)
 
 	if (GEngine && GEngine->GameViewport)
 	{
+		// Wrap in positioned overlay for center positioning
+		TSharedRef<SWidget> PartyInviteContainer =
+			SNew(SOverlay)
+			.Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world (except the widget itself)
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Center)  // Center positioning
+			.VAlign(VAlign_Center)
+			[
+				PartyInviteWidget.ToSharedRef()
+			];
+
 		GEngine->GameViewport->AddViewportWidgetContent(
-			PartyInviteWidget.ToSharedRef(),
+			PartyInviteContainer,
 			100 // High Z-order to appear on top
 		);
-
-		// Position in center of screen
-		PartyInviteWidget->SetRenderTransform(FSlateRenderTransform(FVector2D(0.5f, 0.5f)));
-		PartyInviteWidget->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
 	}
 }
 

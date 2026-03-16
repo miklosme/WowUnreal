@@ -210,22 +210,25 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 	// Create the UI overlay for Slate widgets
 	if (FSlateApplication::IsInitialized())
 	{
-		UIOverlay = SNew(SOverlay);
+		UIOverlay = SNew(SOverlay)
+			.Visibility(EVisibility::SelfHitTestInvisible); // Pass clicks through to 3D world
 
-		// Create bag window
+		// Create bag window (right side, padded from edge)
 		BagWindow = SNew(SWowBagWindow, InventoryManager);
 		UIOverlay->AddSlot()
 		.HAlign(HAlign_Right)
 		.VAlign(VAlign_Center)
+		.Padding(0, 0, 20, 0)  // 20px from right edge
 		[
 			BagWindow.ToSharedRef()
 		];
 
-		// Create character panel
+		// Create character panel (left side, padded from edge)
 		CharacterPanel = SNew(SWowCharacterPanel, InventoryManager);
 		UIOverlay->AddSlot()
 		.HAlign(HAlign_Left)
 		.VAlign(VAlign_Center)
+		.Padding(20, 0, 0, 0)  // 20px from left edge
 		[
 			CharacterPanel.ToSharedRef()
 		];
@@ -233,7 +236,7 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 		// Add the overlay to the viewport
 		if (GEngine && GEngine->GameViewport)
 		{
-			GEngine->GameViewport->AddViewportWidgetContent(UIOverlay.ToSharedRef());
+			GEngine->GameViewport->AddViewportWidgetContent(UIOverlay.ToSharedRef(), 80); // Z-order above main UI
 		}
 
 		UE_LOG(LogWowUIManager, Log, TEXT("Created bag and character panel UI"));
