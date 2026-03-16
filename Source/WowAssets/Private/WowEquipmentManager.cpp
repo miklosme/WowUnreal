@@ -425,6 +425,19 @@ USceneComponent* FWowEquipmentManager::AttachEquipment(FMpqManager* Mpq, FWowAss
             Attachment->Position.X * FWowCoordinate::SCALE,
             Attachment->Position.Z * FWowCoordinate::SCALE);
         WeaponComp->SetRelativeLocation(Offset);
+        UE_LOG(LogWowEquip, Log, TEXT("  Attachment offset: WoW(%.1f,%.1f,%.1f) → UE(%.1f,%.1f,%.1f)"),
+            Attachment->Position.X, Attachment->Position.Y, Attachment->Position.Z,
+            Offset.X, Offset.Y, Offset.Z);
+    }
+    else
+    {
+        UE_LOG(LogWowEquip, Warning, TEXT("  No attachment offset found for point %d"), static_cast<uint32>(AttachPoint));
+    }
+
+    // Mirror shoulders: right shoulder needs X-axis mirror of left shoulder model
+    if (AttachPoint == EAttachmentPoint::RightShoulder)
+    {
+        WeaponComp->SetRelativeScale3D(FVector(-1.0f, 1.0f, 1.0f));
     }
 
     WeaponComp->RegisterComponent();

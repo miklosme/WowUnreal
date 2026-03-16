@@ -4,8 +4,13 @@
 #include "WowRealmSelectWidget.h"
 #include "WowCharacterSelectWidget.h"
 #include "WowCharacterCreateWidget.h"
+#include "WowGameplayController.h"
+#include "WowWorldManager.h"
+#include "WowAudioManager.h"
+#include "WowUIManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameViewportClient.h"
+#include "Components/CanvasPanel.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLogin, Log, All);
 
@@ -61,8 +66,9 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
         ShowCharacterSelectScreen(ConnectionManager->GetCachedCharacters());
         break;
     case EWowSessionState::WorldInGame:
-        UE_LOG(LogWowLogin, Log, TEXT("Entered world — removing login UI"));
+        UE_LOG(LogWowLogin, Log, TEXT("Entered world — removing login UI and initializing world"));
         ClearCurrentScreen();
+        InitializeWorldSystems();
         if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
         {
             PC->bShowMouseCursor = false;
@@ -111,6 +117,64 @@ void AWowLoginController::OnCharCreateResult(uint8 ResultCode)
         default: ErrMsg = FString::Printf(TEXT("Creation failed (0x%02X)"), ResultCode); break;
         }
         SetStatusText(FString::Printf(TEXT("Error: %s"), *ErrMsg));
+    }
+}
+
+void AWowLoginController::InitializeWorldSystems()
+{
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    // 1. Enable terrain streaming on the WorldManager
+    if (WorldManager)
+    {
+        WorldManager->bStreamingEnabled = true;
+        UE_LOG(LogWowLogin, Log, TEXT("Enabled terrain streaming"));
+    }
+
+    // 2. Bind ConnectionManager to the GameplayController
+    if (AWowGameplayController* GPC = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
+    {
+        GPC->ConnectionManager = ConnectionManager;
+        GPC->BindEntityEvents();
+        UE_LOG(LogWowLogin, Log, TEXT("Bound ConnectionManager to GameplayController"));
+    }
+
+    // 3. Start AudioManager
+    if (WorldManager && WorldManager->GetMpqManager())
+    {
+        FActorSpawnParameters AudioParams;
+        AudioParams.Name = FName(TEXT("WowAudioManager"));
+        AWowAudioManager* AudioMgr = World->SpawnActor<AWowAudioManager>(
+            AWowAudioManager::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, AudioParams);
+        if (AudioMgr)
+        {
+            AudioMgr->SetMpqManager(WorldManager->GetMpqManager());
+            UE_LOG(LogWowLogin, Log, TEXT("Spawned AudioManager"));
+        }
+    }
+
+    // 4. Load UI system (Lua VM + FrameXML)
+    if (WorldManager && WorldManager->GetMpqManager())
+    {
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
+            {
+                // Create root canvas for WoW UI frame system
+                if (GEngine && GEngine->GameViewport)
+                {
+                    UCanvasPanel* UIRootCanvas = NewObject<UCanvasPanel>(GetTransientPackage());
+                    UIRootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+                    GEngine->GameViewport->AddViewportWidgetContent(
+                        UIRootCanvas->TakeWidget(), 50);
+                    UIManager->SetRootCanvas(UIRootCanvas);
+                }
+
+                UIManager->LoadUI(WorldManager->GetMpqManager());
+                UE_LOG(LogWowLogin, Log, TEXT("Loaded WoW UI system"));
+            }
+        }
     }
 }
 

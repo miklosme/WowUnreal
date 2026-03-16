@@ -398,13 +398,22 @@ void AWowViewerGameMode::SetupLoginScene(UWorld* World)
 
     SpawnDirectionalLight(World);
 
-    // No world manager needed for login — just UI over sky background
+    // Spawn WorldManager early for MPQ access (streaming is disabled by default,
+    // will be enabled by LoginController when entering the world)
+    AWowWorldManager* WorldMgr = SpawnWorldManager(World);
 
     // Spawn the login flow controller (shows login screen UI)
     FActorSpawnParameters LoginParams;
     LoginParams.Name = FName(TEXT("WowLoginController"));
-    World->SpawnActor<AWowLoginController>(AWowLoginController::StaticClass(),
+    AWowLoginController* LoginCtrl = World->SpawnActor<AWowLoginController>(
+        AWowLoginController::StaticClass(),
         FVector::ZeroVector, FRotator::ZeroRotator, LoginParams);
+
+    // Give the LoginController a reference to WorldManager for world entry
+    if (LoginCtrl)
+    {
+        LoginCtrl->WorldManager = WorldMgr;
+    }
 }
 
 void AWowViewerGameMode::SetupNetworkTestScene(UWorld* World)

@@ -182,33 +182,42 @@ void AWowModelViewerGameMode::RespawnCharacter()
         Params.Equipment.Add(Slot);
     }
 
-    // Starter gear: find first available equipment for each slot
+    // Starter gear: find first available equipment for each attachment slot
     if (ViewerWidget->GetShowStarterGear())
     {
-        FString ResolvedPath;
-        uint32 FoundWeapon = 0, FoundHelmet = 0, FoundShoulder = 0;
+        struct FSlotSearch
+        {
+            FWowEquipmentManager::EAttachmentPoint Point;
+            uint32 FoundId = 0;
+        };
+        TArray<FSlotSearch> Slots = {
+            {FWowEquipmentManager::EAttachmentPoint::RightHand},
+            {FWowEquipmentManager::EAttachmentPoint::LeftHand},
+            {FWowEquipmentManager::EAttachmentPoint::Helmet},
+            {FWowEquipmentManager::EAttachmentPoint::LeftShoulder},
+            {FWowEquipmentManager::EAttachmentPoint::Back},
+            {FWowEquipmentManager::EAttachmentPoint::Shield},
+        };
 
+        FString ResolvedPath;
         for (const FItemDisplayInfoDbcEntry& Entry : FDbcStore::Get().ItemDisplayInfo().GetAll())
         {
-            if (FoundWeapon == 0 &&
-                FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID,
-                    FWowEquipmentManager::EAttachmentPoint::RightHand, ResolvedPath))
+            bool bAllFound = true;
+            for (auto& S : Slots)
             {
-                FoundWeapon = Entry.ID;
+                if (S.FoundId == 0)
+                {
+                    if (FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID, S.Point, ResolvedPath))
+                    {
+                        S.FoundId = Entry.ID;
+                    }
+                    else
+                    {
+                        bAllFound = false;
+                    }
+                }
             }
-            if (FoundHelmet == 0 &&
-                FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID,
-                    FWowEquipmentManager::EAttachmentPoint::Helmet, ResolvedPath))
-            {
-                FoundHelmet = Entry.ID;
-            }
-            if (FoundShoulder == 0 &&
-                FWowEquipmentManager::ResolveEquipmentPaths(Mpq, Entry.ID,
-                    FWowEquipmentManager::EAttachmentPoint::LeftShoulder, ResolvedPath))
-            {
-                FoundShoulder = Entry.ID;
-            }
-            if (FoundWeapon && FoundHelmet && FoundShoulder) break;
+            if (bAllFound) break;
         }
 
         auto AddEquip = [&Params](uint32 Id, FWowEquipmentManager::EAttachmentPoint Pt)
@@ -220,13 +229,17 @@ void AWowModelViewerGameMode::RespawnCharacter()
             Params.Equipment.Add(Slot);
         };
 
-        AddEquip(FoundWeapon, FWowEquipmentManager::EAttachmentPoint::RightHand);
-        AddEquip(FoundHelmet, FWowEquipmentManager::EAttachmentPoint::Helmet);
-        AddEquip(FoundShoulder, FWowEquipmentManager::EAttachmentPoint::LeftShoulder);
-        AddEquip(FoundShoulder, FWowEquipmentManager::EAttachmentPoint::RightShoulder);
+        for (const auto& S : Slots)
+        {
+            AddEquip(S.FoundId, S.Point);
+            // Shoulders: add both sides
+            if (S.Point == FWowEquipmentManager::EAttachmentPoint::LeftShoulder && S.FoundId > 0)
+            {
+                AddEquip(S.FoundId, FWowEquipmentManager::EAttachmentPoint::RightShoulder);
+            }
+        }
 
-        UE_LOG(LogModelViewer, Log, TEXT("Starter gear: weapon=%d helmet=%d shoulder=%d"),
-            FoundWeapon, FoundHelmet, FoundShoulder);
+        UE_LOG(LogModelViewer, Log, TEXT("Starter gear equipped: %d slots"), Params.Equipment.Num());
     }
 
     const FRotator FacingCamera(0.0f, -90.0f, 0.0f);
