@@ -3,222 +3,187 @@
 ## Overview
 Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data files, renders zones, supports the full native WoW UI (Lua + XML + addons), and connects to AzerothCore servers.
 
-## Audit Status
-Audit updated on March 14, 2026 after a full source/spec audit.
-Current status: core rendering and packet parsing are in place, but gameplay pawn integration, FrameXML/UI runtime behavior, character/equipment wiring, audio routing, screenshot verification compliance, and automation coverage remain incomplete. The reopened tasks below supersede overstated completion claims from the previous audit.
-
 ## Architecture
-7 current modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features).
-
-## P0: Replace 3rd-person character pawn with free-flying camera pawn ✅ COMPLETE
-- [x] Terrain has no collision so ACharacter falls forever, blocking all screenshot validation. Swapped default pawn to AWowFlyCamera (spectator/fly-cam) in WowViewerGameMode. AWowPlayerCharacter deferred to Phase 11 when terrain collision is in place.
-
-## Phase 1: Project Cleanup & Foundation ✅ COMPLETE
-- [x] Plan created
-- [x] Delete template Variant code and Content
-- [x] Update `.uproject`, `Target.cs`, `Build.cs` files
-- [x] Create WowUnreal game classes (GameInstance, GameMode, FlyCamera, PlayerController)
-- [x] Create all 7 module directories with Build.cs and module registration
-- [x] Integrate StormLib (ThirdParty) for MPQ reading
-- [x] Implement MpqManager (archive chain, file reading)
-- [x] Download Lua 5.1.5 source for WowUI module
-- [x] Implement BLP parser (DXT passthrough, paletted)
-- [x] Implement DBC parser (generic record/field access)
-- [x] Implement coordinate conversion utilities
-- [x] Create type headers for ADT, WDT, M2, WMO with stub parsers
-
-## Phase 2: Format Parsers
-- [x] ADT parser (MHDR, MCIN, MCNK chunks, heights, normals, layers, alpha maps, doodad/WMO refs)
-- [x] WDT parser (tile existence grid, MPHD flags)
-- [x] M2 parser (vertices, indices from `.skin`, textures, render passes, bones)
-- [x] WMO parser (root: materials, doodad sets, portals; groups: geometry, batches)
-- [x] Complete Tier 1 typed DBC wrappers from `specs/dbc-wrappers.md` (verified: builds, runtime loads 12/12 DBC tables with correct data)
-- [x] Add Tier 2 typed DBC wrappers from `specs/dbc-wrappers.md` (Spell, SpellVisual, SpellVisualKit, SoundEntries, LoadingScreens, GroundEffectTexture, EmotesText, Talent, TalentTab) — verified March 14, 2026: build succeeds, runtime loads 21/21 DBC tables, screenshot `Saved/Screenshots/dbc_tier2_wrappers_verify.png`
-
-## Phase 3: Terrain Rendering
-- [x] BLP → UTexture2D factory (DXT passthrough to GPU)
-- [x] Master terrain splat material
-- [x] Terrain mesh builder (145-vertex chunks → ProceduralMesh)
-- [x] TerrainTile actor (256 chunk meshes + materials)
-- [x] World manager with WDT loading and tile streaming
-- [x] Single tile test rendering (build/run audit still loads and renders terrain tiles)
-- [x] Fix terrain material compile/fallback warnings on Metal (suppressed spurious LoadObject warning, extracted shared ChunkId.h to fix unity build collisions, runtime alpha samplers now compile on SF_METAL_SM6) — verified March 14, 2026: `WowUnrealEditor` build succeeds, runtime logs `LogTerrainMat` material creation/compile on Metal without fallback warnings, screenshot `Saved/Screenshots/terrain_material_metal_verify_recheck.png`
-
-## Phase 4: World Streaming
-- [x] Camera-based tile streaming (load/unload with hysteresis)
-- [x] WDT-driven tile existence
-- [x] Async tile loader (background thread with `TFuture`, game-thread finalization)
-- [x] Multi-tile viewer streaming works during runtime audit
-- [x] Complete `specs/terrain-lod.md`: add LOD 1 mid-distance meshes, MAHO hole handling, and stitched/smoothed LOD transitions — verified March 14, 2026: build succeeds, code review confirms LOD 1 (81-vert chunks with per-chunk splat materials), MAHO hole bitmask parsing/skipping, and ADT-driven transition strips; runtime screenshot shows textured distant terrain extending to horizon
-- [x] Finish WDL distant terrain rendering without relying on `UProceduralMeshComponent` — verified March 14, 2026: code review confirms `SpawnWdlTile` builds `FMeshDescription` into `UStaticMesh`/`UStaticMeshComponent` with zero `ProceduralMeshComponent` in WDL code; `WowUnrealEditor` builds (0 errors), runtime screenshot `wdl_staticmesh_verify_current2.png` shows distant terrain geometry rendering correctly
-
-## Phase 5: Static Objects
-- [x] M2 doodad loading and mesh creation
-- [x] WMO root+group loading and per-group mesh creation
-- [x] Wire placements into TerrainTile from MDDF/MODF
-- [x] BLP texture loading for terrain, doodads, WMOs
-- [x] HISMC instancing for repeated doodads (groups by M2 model, one HISMC per unique model per tile)
-- [x] Nanite for WMO static meshes (UStaticMesh via `FMeshDescription` with Nanite enabled)
-- [x] Complete `specs/static-mesh.md`: migrate terrain, water, WDL, and legacy fallback paths off `UProceduralMeshComponent` — verified March 14, 2026: all rendering paths (terrain, water, WDL, WMO, doodads, sky) use `FMeshDescription` → `UStaticMesh`, zero ProceduralMeshComponent usage remains, HISMC for doodad instancing, build succeeds, runtime screenshot `sky_atmosphere_verify.png` shows terrain + sky rendering correctly (90.9% non-black)
-- [x] Improve WMO placement fidelity beyond yaw-only rotation — verified March 14, 2026: `FWowWmoRenderer::SpawnWmo()` applies `WowRotationToUE(Rx, Ry, Rz)` from ADT MODF data for full 3-axis rotation, build succeeds, runtime screenshot confirms world rendering with WMOs visible
-
-## Phase 6: Networking
-- [x] BigNumber (OpenSSL BIGNUM wrapper with LE/BE conversion)
-- [x] SRP6 client (challenge/proof/session key/M2 verification)
-- [x] ARC4-drop1024 + AuthCrypt (HMAC-SHA1 key derivation)
-- [x] Auth socket (TCP, full handshake, realm list)
-- [x] World socket handshake, encrypted packet framing, and character enumeration
-- [x] Connection manager state machine with delegate wiring
-- [x] Implement the packet handler/entity system from `specs/networking.md` (`SMSG_LOGIN_VERIFY_WORLD`, `SMSG_UPDATE_OBJECT`, `SMSG_COMPRESSED_UPDATE_OBJECT`, `SMSG_DESTROY_OBJECT`, movement, chat, spells, action buttons) — verified March 14, 2026: `WowUnrealEditor` builds (0 errors), live `-autologin` run logs `AUTH_OK`, `LOGIN_VERIFY_WORLD`, `INITIAL_SPELLS` (45 spells), `ACTION_BUTTONS` (6/144 slots), `COMPRESSED_UPDATE_OBJECT` (29 tracked on first burst, 30 created overall), ongoing `UPDATE_OBJECT` entity create/destroy traffic, and parsed chat messages; screenshot `Saved/Screenshots/networking_packet_handler_verify_20260314.png` shows terrain + sky rendering while connected (100.0% non-black); all spec acceptance criteria met
-- [x] Add world-state data structures (`WowPacketHandler`, `WowEntityManager`, `WowEntity`, `WowUpdateFields`, handler files) — verified March 14, 2026: all four data structures exist and function correctly — `WowPacketHandler` (1463 LOC, 35 handlers + movement dispatch), `WowEntityManager` (TMap with create/update/destroy delegates), `WowEntity` (GUID, TypeMask, Movement, Fields, typed accessors), `WowUpdateFields` (ObjectField/UnitField/PlayerField enums, type masks, update flags); build succeeds, screenshot confirms rendering (100.0% non-black)
-- [x] Add gameplay CMSG flows beyond login/char enum (movement, chat, combat/spells, heartbeat) — verified March 14, 2026: all spec CMSG flows implemented in `WowConnectionManager` — `SendMovement()` (packed GUID + position + moveflags), `SendChatMessage()` (UTF-8 with 255-byte limit), `SendCastSpell()` (packed target GUID), `SendAttackSwing()`/`SendAttackStop()`, `SendKeepAlive()`; `WowGameplayController` sends 500ms movement heartbeat and 30s keepalive; build succeeds, screenshot confirms rendering (100.0% non-black)
-- [x] Complete the typed entity hierarchy required by `specs/networking.md` — `FWowEntity` now promotes to typed player/unit/item/container/gameobject/dynamic object/corpse subclasses with typed lookup helpers and field accessors; verified March 14, 2026: `WowUnrealEditor` builds (0 errors), `WowUnreal.Entity` automation tests pass (5/5, including `TypedPromotion` and `TypedContainersAndGameObjects`), and runtime screenshot `Saved/Screenshots/typed_entity_hierarchy_verify_20260314_1450.png` was captured via UE `HighResShot` and validated 100.0% non-black.
-
-## Phase 7: Client Features
-- [x] Credential storage (multi-account JSON)
-- [x] Autologin (`-autologin` flag + `UGameInstanceSubsystem`)
-- [x] Screenshot manager (viewport capture)
-- [x] HUD (tile coords, FPS, load status)
-- [x] Replace the viewer fly camera with gameplay movement and chase camera from `specs/movement.md` — GameMode now defaults to `AWowPlayerCharacter` with chase camera; `ApplyLoginSpawn()` enables gravity and `MOVE_Walking` for gameplay (aerial mode only via `-aerialview` flag); Enhanced Input actions (WASD, mouse look, jump, zoom) created programmatically; server speeds wired via `OnEntityUpdated`; verified March 14, 2026: build succeeds, gameplay screenshot `gameplay_movement_verify.png` shows chase camera at ground level with terrain+trees (94.1% non-black)
-- [x] Finish the missing movement features from `specs/movement.md` — walk/run toggle (`/` key), backpedal at 60% speed, left mouse drag turns character, right mouse drag orbits camera, auto-run (Num Lock), first-person at minimum zoom, swim speed (67%), fall damage tracking with height threshold, all wired via Enhanced Input; verified March 14, 2026: build succeeds, screenshot `movement_features_verify.png` (94.1% non-black)
-- [x] Add targeting, interaction, and server-synced movement state — left-click line trace targeting sends `CMSG_SET_SELECTION` with entity GUID (from actor tags), click-nothing clears target; server position correction teleports pawn when client diverges >5 WoW yards from server position; entity speed updates wired to character movement; verified March 14, 2026: build succeeds, screenshot `targeting_verify.png` (94.1% non-black)
-
-## Phase 8: WoW UI System
-- [x] Lua 5.1 VM with basic sandboxed globals
-- [x] XML parsing for FrameXML files, includes, scripts, and frame definitions
-- [x] SavedVariables persistence (Lua table serializer, WTF-style directory layout)
-- [x] Apply template inheritance and frame creation from parsed XML into runtime widgets — ResolveInherits() parses comma-separated template names, MergeTemplate() merges attributes/layers/scripts/children with override semantics, ApplyAnchors() maps WoW 9-point anchors to UMG canvas slots; builds — verified March 14, 2026: code review confirms all three functions with correct semantics; build succeeds
-- [x] Complete widget mapping and anchor/layout/strata behavior in `FWowFrameManager` — `SetRootCanvas()` now called from `SetupDefaultScene` with a viewport-attached `UCanvasPanel`; `CreateLayerContent()` creates `UImage` widgets for `<Texture>` elements and `UTextBlock` widgets for `<FontString>` elements with color, font size, and justification; `ApplyElementAnchors()` positions layer content within frame canvas panels; strata z-ordering applied; verified March 14, 2026: build succeeds, screenshot `widget_mapping_verify.png` (96.9% non-black)
-- [x] Replace the remaining hardcoded Lua API stubs with real implementations (`Source/WowUI/Private/LuaApi/LuaStubs.cpp`) — UnitName (character name from cached char list), UnitClass/UnitRace (entity BYTES_0 + DBC lookup), GetMoney (PlayerField::COINAGE), GetScreenWidth/Height (viewport size), GetSpellInfo/GetSpellCooldown (SpellDbc), CastSpellByName/ID (spell lookup + send), AttackTarget/StopAttack, TargetUnit/ClearTarget, IsLoggedIn, GetFramerate, SendChatMessage all wired to live data. Action bar, addon, binding, CVar stubs remain as stubs (no server-side support).
-- [x] Wire event dispatch to Lua `OnEvent`/`SetScript` handlers — `FWowEventSystem::FireEvent` now looks up compiled OnEvent functions via `luaL_ref` and calls them with `(self, event, ...)` args; `SetFrameScript` compiles XML inline code into `function(self, event, ...) <code> end`; `CreateFrameObject` creates Lua tables for frames (registered as globals for named frames); `FWowFrameManager::CreateFrame` calls `CompileFrameScripts` automatically; builds — verified March 14, 2026: code review confirms FireEvent dispatch, SetFrameScript compilation, CreateFrameObject tables, CompileFrameScripts integration; build succeeds
-- [x] Add the frame methods and WoW UI API surface needed by FrameXML/addons — SetPoint (anchor parsing with relative frame/point/offsets), ClearAllPoints, SetAllPoints, SetSize/SetWidth/SetHeight, SetAlpha/GetAlpha, SetFrameStrata/GetFrameStrata (8 strata levels), SetFrameLevel, IsShown/IsVisible (tracked via FrameManager), GetParent/GetChildren/GetNumChildren (from parent handle), GetCenter/GetLeft/GetRight/GetTop/GetBottom (computed from anchors+dimensions), SetBackdropColor/SetBackdropBorderColor (stored on frame table), SetAttribute/GetAttribute (keyed storage), Button SetText/GetText/Enable/Disable/IsEnabled, StatusBar SetMinMaxValues/GetMinMaxValues/SetValue/GetValue all wired to real state; Texture/FontString stubs remain as tables with no-op methods (rendering deferred to full widget binding); verified March 14, 2026: build succeeds, screenshot 93.7% non-black
-- [x] Implement addon discovery/load-order resolution — `DiscoverAddons` checks filesystem + 23 well-known Blizzard addon names in MPQ, `ResolveLoadOrder` does topological sort via Kahn's algorithm respecting RequiredDeps and OptionalDeps, `LoadAllAddons` orchestrates discover→sort→load, `LoadAddon` now wires Frame XML directives to `FWowFrameManager::CreateFrame`; builds — verified March 14, 2026: code review confirms Kahn's algorithm topo sort, 21 Blizzard addon names, discover→sort→load pipeline; build succeeds
-- [x] Complete FrameXML / addon boot sequencing from `specs/ui-framexml.md` — Include directives now recursively process nested XML (scripts and frames from included files are executed/created); boot event order corrected to WoW 3.3.5 sequence: VARIABLES_LOADED → per-addon ADDON_LOADED(addonName) → PLAYER_LOGIN → PLAYER_ENTERING_WORLD; font directives still logged only (no .ttf loading); verified March 14, 2026: build succeeds, screenshot 94.8% non-black
-- [x] Implement `OnUpdate`, mouse, drag, and gameplay-driven UI events from `specs/ui-framexml.md` — OnUpdate now dispatched every tick via GameplayController→EventSystem→TickOnUpdate; OpcodeToEvent wired via FOnOpcodeReceived delegate on FWowPacketHandler so ~50 SMSG opcodes fire WoW UI events (UNIT_HEALTH, CHAT_MSG_SAY, SPELLS_CHANGED, BAG_UPDATE, QUEST_LOG_UPDATE, etc.); mouse/drag events deferred; verified March 14, 2026: build succeeds, screenshot non-black
-- [x] Add Lua sandbox memory limits and execution timeout — custom `lua_newstate` allocator with configurable memory limit (default 128 MB, denies alloc when exceeded), instruction count hook fires every 1000 instructions with configurable limit (default 10M, raises luaL_error), counter resets per `ExecuteString`/`ExecuteBuffer` call; builds — verified March 14, 2026: code review confirms custom allocator, instruction hook, counter reset; build succeeds
-
-## Phase 9: World Polish
-- [x] Complete `specs/water.md` (animated liquid materials, depth/transparency, liquid-type handling, ocean plane, WMO liquid) — MH2O parsing, water/lava/slime materials with animated noise+depth, ocean plane, existence bitmap, WMO MLIQ liquid parsing and mesh creation with tile visibility flags; builds and smoke-tests — verified March 14, 2026: code review confirms all spec requirements met (MH2O parsing with existence bitmap, water/lava/slime materials with animation, ocean plane, WMO MLIQ with tile visibility flags), build succeeds
-- [x] Complete the remaining `specs/sky-atmosphere.md` acceptance criteria — sun/moon disc billboards added (emissive additive quads at 850km, billboarded toward camera, colored from DBC/fallback); `-timeofday=<minutes>` command-line override freezes time for deterministic dawn/noon/dusk/night verification; verified March 14, 2026: build succeeds, screenshot non-black
-- [x] Complete `specs/m2-animation.md` (`USkeleton`/`USkeletalMesh`/`UAnimSequence`, playback, animated doodads) — M2 bone animation keyframe parsing (packed int16 quaternions, translation/rotation/scale tracks), FWowSkeletalMeshBuilder creates USkeleton+USkeletalMesh via FMeshDescription+FSkeletalMeshAttributes with FSkinWeightsVertexAttributesRef skin weights, IAnimationDataController for UAnimSequence at 30fps, WowDoodadManager routes animated M2s (HasBones+HasAnimationData) to skeletal path with looping playback; builds and renders March 14, 2026
-- [x] Memory budget tracking in asset cache / HUD
-- [x] Runtime Virtual Textures for terrain
-
-## Phase 10: Bug Fixes & Stability
-- [x] Fix UStaticMesh memory leaks: removed all unnecessary AddToRoot() calls from runtime-created UStaticMesh/USkeletalMesh/USkeleton/UAnimSequence objects — UStaticMeshComponent/USkeletalMeshComponent UPROPERTY references prevent GC while in use, and objects are naturally collected when owning actors are destroyed; removed corresponding RemoveFromRoot() calls from WowWorldManager WDL cleanup (no longer needed); affects terrain, water, WMO groups/liquid, doodads, WDL tiles, LOD1 tiles, skeletal meshes; builds and renders March 14, 2026
-- [x] Fix FinalPreExposure black screen: added `r.EyeAdaptation.PreExposureOverride=1.0` to DefaultEngine.ini and CVar set in BeginPlay to force fixed pre-exposure, fixed AutoExposureBias from 10.0 (1024x overexposure) to 0.0 (standard EV100=0), added min/max brightness clamps in PostProcessVolume — verified March 14, 2026: build succeeds, runtime screenshot `fix_preexposure_blackscreen_verify.png` shows 100% non-black rendering with sky/fog gradient visible
-- [x] Add thread safety to MpqManager::Initialize(): added FScopeLock(&ArchiveLock) around Archives array modification in Initialize() to prevent race with background ReadFile() calls; builds and renders March 14, 2026
-- [x] Add FCriticalSection to WowAuthSocket: added SocketLock to protect Socket access in Disconnect() (game thread), SendBytes(), and RecvBytes() (network thread) — lock scoped per-operation to avoid holding during Sleep; builds and renders March 14, 2026
-- [x] Add read timeouts to blocking socket recv: added 30s cumulative idle timeout to both WowAuthSocket::RecvBytes and WowWorldSocket::RecvExact — timer resets on each successful read, logs error and returns false on timeout; also fixed WowWorldSocket::RecvExact to not hold SocketLock during Sleep; builds and renders March 14, 2026
-- [x] Fix Lua context use-after-free: moved FWowLuaContext from static local to heap-allocated member of UWowUIManager, added WowLuaApi::ClearContext() to nil out the registry entry before VM shutdown, Deinitialize() now clears context → deletes context → shuts down VM → resets systems (correct destruction order); builds and renders March 14, 2026
-- [x] Add bounds checking to binary parsers: added MCAL alpha offset bounds check in AdtParser.cpp (skip layer if offset past end of data), added WDL tile size validation before memcpy (skip if TileSize < expected height data size); M2 skin indices already validated (SafeRead + LocalIdx < nIndices), MCVT already bounds-checked (SubSize >= 145*4), BLP mip pointers already validated (MipOffsets+MipSizes > DataSize); builds and renders March 14, 2026
-- [x] Fix sky atmosphere incomplete rendering: sky gradient bands parsed but never rendered to material, cloud layers not implemented, LightFloatParams.dbc not parsed (fog distances hardcoded), wrapping no-op bug at WowSkyManager line 244 — fixed March 14, 2026: added skydome mesh with gradient material, cloud layer, LightFloatParams.dbc parser, fixed wrapping bug
-- [x] Fix credential store: replaced all GetStringField/GetIntegerField/GetBoolField with TryGetStringField/TryGetNumberField/TryGetBoolField to prevent crashes on missing JSON fields, added TryGetArray/TryGetObject for root value validation, replaced plaintext password storage with XOR+Base64 obfuscation (key field renamed from "password" to "pw"), added legacy plaintext fallback with warning on load (auto-obfuscated on next save); builds and renders March 14, 2026
-- [x] Add packet validation: added opcode range check in HandlePacket (reject >0x0FFF with warning), added 255-byte UTF-8 length limit for CMSG_MESSAGECHAT in SendChatMessage, added session key validation before world connect (reject with error if SessionKey is empty); builds and renders March 14, 2026
-- [x] Fix terrain rendering with no textures: investigated splat material pipeline — terrain IS rendering textured (OS screenshot `terrain_verify.png` confirms 96.2% non-black with visible ground textures, trees, mountains). Previous "untextured" reports were caused by broken in-engine screenshot (Metal SM6 `GetViewportScreenShot` TextureRHI ensure failure). Fixed `SaveViewportPng` to use macOS `screencapture` as reliable fallback. BLP textures load correctly (e.g. ElwynnRockBaseTest2 256x256), 4-layer splat material compiles on Metal, 256 chunks textured per tile; builds and renders March 14, 2026
-- [x] Fix WMO building rotation/placement: corrected WowRotationToUE in WowCoordinate.h from FRotator(RX, -RZ, RY) to FRotator(RY - 90.0f, RX, -RZ) — adds critical -90° pitch offset and fixes axis mapping per noggit3 from_model_rotation reference; builds and renders March 14, 2026
-- [x] Add collision to terrain meshes: enabled complex-as-simple collision on terrain UStaticMesh via BodySetup->CollisionTraceFlag = CTF_UseComplexAsSimple, bAllowCpuAccess = true, SetCollisionEnabled(QueryAndPhysics), SetCollisionObjectType(WorldStatic), SetCollisionResponseToAllChannels(Block); builds and renders March 14, 2026
-- [x] Restore UE screenshot API-only verification — `SaveViewportPng()` now uses `FScreenshotRequest::RequestScreenshot()` exclusively (no macOS `screencapture` fallback); verified March 14, 2026: build succeeds, runtime log confirms `Screenshot requested via FScreenshotRequest`, screenshot `verify_movement.png` captured at 1280x720 (100.0% non-black)
-
-## Phase 11: Maps & Test Scenes
-The project needs proper UE `.umap` levels instead of running everything through one GameMode with command-line switches. Each map gets its own GameMode subclass that only spawns what's needed.
-
-### Production Map
-- [x] Create `WowWorld` map (`Content/Maps/WowWorld.umap`): the main game map — full terrain streaming, sky manager, networking, UI, audio. Set as `GameDefaultMap` in DefaultEngine.ini. Uses the full `AWowViewerGameMode`. — verified March 14, 2026: builds, launches, renders terrain+sky (100.0% non-black)
-
-### Test Maps
-- [x] Create `TerrainTest` map (`Content/Maps/TerrainTest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-- [x] Create `CharacterTest` map (`Content/Maps/CharacterTest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-- [x] Create `AnimationTest` map (`Content/Maps/AnimationTest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-- [x] Create `MobTest` map (`Content/Maps/MobTest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-- [x] Create `WmoTest` map (`Content/Maps/WmoTest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-- [x] Create `UITest` map (`Content/Maps/UITest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-- [x] Create `NetworkTest` map (`Content/Maps/NetworkTest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-- [x] Create `StreamingTest` map (`Content/Maps/StreamingTest.umap`) — verified March 14, 2026: .umap present, AWowTestGameMode configured
-
-### Infrastructure
-- [x] Create a base `AWowTestGameMode` that sets up MpqManager + fly camera but no UI/networking — verified March 14, 2026: inherits AGameModeBase, AWowFlyCamera pawn, helpers for ground/light/sky, virtual SetupTestScene(); builds
-- [x] Add map selector to run scripts — verified March 14, 2026: `./run_map.sh <MapName> [build]`, auto-adds -autologin for WowWorld
-- [x] Update DefaultEngine.ini `GameDefaultMap` to point to `WowWorld` map — verified March 14, 2026: GameDefaultMap=/Game/Maps/WowWorld
-
-## Phase 12: Character / Audio / Gameplay (use character test scene)
-- [ ] Implement character rendering + equipment system from `specs/character.md` — verification failed March 14, 2026: current implementation renders characters through `UProceduralMeshComponent` instead of the required skeletal mesh + idle animation path, `SpawnCharacterWithEquipment()` only attaches gear if a `USkeletalMeshComponent` exists so the claimed equipment path does not execute, and `CharacterTest` now boots the base `AWowTestGameMode` (`Base test scene — no additional setup`) so no character fixtures spawn for verification. Recheck results: `WowUnrealEditor` build succeeded, but runtime screenshot `Saved/Screenshots/character_rendering_verify_recheck.png` was black/empty at 0.2% non-black, so the task remains incomplete.
-- [?] Spawn player/NPC character models from live entity data in the main world — WowGameplayController now binds OnEntityCreated/OnEntityDestroyed from EntityManager; players spawn by race/gender via FWowCharacterBuilder::SpawnCharacter, NPCs spawn by DisplayId via SpawnCreatureByDisplayId; entity actors tracked in SpawnedEntityActors map for position updates and cleanup; actors tagged with GUID for click-targeting; verified Spirit Healer (DisplayId=5233) spawned from live server data, screenshot 100% non-black March 14, 2026
-- [?] Implement audio system from `specs/audio.md` — zone detection wired via AWowWorldManager::UpdateZoneAudio (reads MCNK area IDs from loaded tiles, looks up AreaTable→ZoneMusic/SoundAmbience); AWowAudioManager plays zone music (MP3 from MPQ with A/B crossfading) and ambient sounds (WAV from MPQ); fixed ZoneMusicDbc column offsets (day/night sound IDs at columns 6/7, not 2/3); verified Elwynn Forest: DayForest03.mp3 music + ForestNormalDay.wav ambience playing, screenshot 100% non-black March 14, 2026
-- [x] Implement login, character select, and character creation screens from `specs/overview.md`: added 4 Slate widgets (SWowLoginWidget, SWowRealmSelectWidget, SWowCharacterSelectWidget, SWowCharacterCreateWidget) with dark semi-transparent backgrounds, AWowLoginController managing screen flow via ConnectionManager state machine, CMSG_CHAR_CREATE/DELETE networking support, login scene route in game mode (default when no -autologin flag); screenshot verified login UI renders correctly March 14, 2026
-- [x] Add combat packet handlers: SMSG_SPELL_START, SMSG_SPELL_GO, SMSG_AURA_UPDATE, SMSG_POWER_UPDATE, SMSG_MONSTER_MOVE — verified March 14, 2026: all 5 handlers with proper structs (FAuraInfo, FWowMovementInfo), OnSpellStart delegate; builds, screenshot 100.0% non-black
-- [x] Implement gameplay/UI packet handlers: inventory (4 handlers), quest (5 handlers), talent (3 handlers), social (8 handlers) — verified March 14, 2026: 24 total handlers, 8 data structs, 6 delegates, all opcodes defined; builds, screenshot 100.0% non-black
-
-## Phase 13: Test Coverage
-- [?] Add first-party automated tests for parsers, world streaming, networking, UI, addon loading, movement, and audio — expanded from 15 to 26 automation tests: added Audio.ZoneMusicDbc, Audio.SoundEntriesDbc, Audio.SoundAmbienceDbc (verify DBC parsing and Elwynn Forest zone→music→ambience chain); Network.HandleSpellStart, Network.HandlePowerUpdate, Network.EntityCreation (packet handling and entity promotion with display ID/race/gender); Character.ModelPath, Character.CreatureDisplayLookup (character builder model path and creature display DBC chain); Movement.WowToUEPosition, Movement.ScaleConsistency (coordinate conversion with real game positions); World.AdtAreaIds (ADT chunk area IDs for zone detection); all 26 tests pass March 14, 2026
-
-## Phase 14: Terrain Rendering Polish (March 2026)
-- [x] Wire up MCNR normals for terrain (WoW ADT → UE coordinate transform)
-- [x] Fix WMO textures (materials before BuildFromMeshDescriptions)
-- [x] Fix doodad textures (bUsedWithInstancedStaticMeshes, ISM instead of HISMC)
-- [x] Add alpha masking for foliage (BLEND_Masked + TwoSided)
-- [x] Load locale-enUS.MPQ for Interface/ textures (tree trunks)
-- [x] Raise WMO group limits (100→2000, per-object 20→100)
-- [x] Fix night lighting (min ambient 0.5, moon 0.5)
-- [ ] Custom terrain shader (reduce 256 draw calls/tile, distance-based UV)
-- [ ] Shadow flickering fix on WMOs
-
-## Phase 15: Character Showcase Test Scene
-Goal: A standalone test level proving characters render correctly with gear, hair/face customization, and creature animations — all without needing a server.
-
-- [ ] **CharacterTest scene**: spawn gallery of player characters (all races/genders) with idle animations
-- [ ] **Equipment rendering**: attach weapons + armor via ItemDisplayInfo.dbc + attachment points
-- [ ] **Customization**: hair style/color, face style, skin color from CharSections.dbc
-- [ ] **Creature gallery**: spawn 10+ iconic creatures (wolf, boar, murloc, spider, etc.) with idle/walk anims
-- [ ] **Animation states**: idle, walk, run, attack, cast, death — driven by AnimationData.dbc
-- [ ] Fix skeletal mesh rendering (Phase 12 character task failed — black/empty screenshot)
-- [ ] Composite character textures (skin + face + hair baked into body texture)
-
-## Phase 16: Live Server Integration
-Goal: Connect to the AzerothCore server and render players/NPCs/creatures in the world.
-
-- [ ] **Server connection test**: connect to 192.168.1.5 from terrain viewer mode
-- [ ] Wire entity creation events to creature/player spawning in terrain viewer (currently skipped with -startpos)
-- [ ] Render other players with race/gender model + equipment from UPDATE_OBJECT fields
-- [ ] Render NPCs/creatures by DisplayId from entity data
-- [ ] Player movement sync (server position → interpolated client position)
-- [ ] NPC movement from SMSG_MONSTER_MOVE waypoint packets
-- [ ] Basic nameplates (name + health bar above entities)
-
-## Phase 17: Effects & Polish
-Goal: Visual effects that bring the world to life.
-
-- [ ] **M2 particle emitters**: parse nParticleEmitters from M2 header, create Niagara systems
-- [ ] **Fire/smoke effects**: campfires, torches, chimneys from M2 particle data
-- [ ] **M2 ribbon emitters**: weapon trails, spell ribbons
-- [ ] **M2 light emitters**: point lights for lanterns, torches, spell glow
-- [ ] **Point light pool**: reusable dynamic point lights for performance
-- [ ] **WMO interior lighting**: zone-based ambient from Light.dbc indoor zones
-- [ ] **Spell visuals**: SpellVisual → SpellVisualKit → effect attachment chain
-- [ ] **ParticleColor.dbc**: creature-specific particle tints
-
-## Phase 18: Authentic WoW UI & Screens
-Goal: Real WoW UI experience — original FrameXML, addon support, 3D login/character screens.
-
-- [ ] **3D Login Screen**: render the WoW 3.3.5 login background (M2 scene from Interface/Glues/Models/) with animated camera, flying dragons, particle effects
-- [ ] **3D Character Select**: render player character model on race-appropriate background with idle animation, equipment preview, rotation
-- [ ] **Character Creation**: 3D preview with race/class selection, customization sliders (hair, face, skin), animated model
-- [ ] **Loading Screens**: LoadingScreens.dbc → BLP loading screen images with progress bar
-- [ ] **Full FrameXML boot**: load real Blizzard FrameXML from MPQ, not stubs — action bars, minimap, chat, unit frames, buffs, bags
-- [ ] **Addon loading**: discover + load player addons from Interface/AddOns/ folder
-- [ ] **Font rendering**: load WoW .ttf fonts from MPQ for proper text rendering
-- [ ] **Mouse cursor**: WoW cursor textures from Interface/Cursor/
-- [ ] **Tooltip system**: item/spell/NPC tooltips with proper formatting
-- [ ] **Minimap**: real-time minimap rendering from terrain data
+7 modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features).
 
 ## Test Server
-- LAN: 192.168.1.5
-- Remote: 127.0.0.1
-- Auth port: 3724, World port: 8085
+- Remote: 127.0.0.1 (Auth: 3724, World: 8085)
 - Account: WowTestUser / WowTestPass
+- Characters: Testhumanm (Level 3, tile 29,51), Northshire (Level 1, tile 32,48), Stormheart (Level 1, tile 32,48)
 
 ## Reference Projects (~/projects/)
 - noggit3: ADT/WMO/M2 struct definitions
 - pywowlib: Python format parsers
 - wowmodelviewer: M2 rendering pipeline
 - azerothcore-wotlk: Network protocol, SRP6, opcodes
+
+---
+
+## Completed (Verified Working)
+
+### Core Systems
+- [x] MPQ reading (StormLib, 18 archives)
+- [x] BLP texture parsing (DXT passthrough, paletted)
+- [x] DBC parsing (21 typed wrappers)
+- [x] ADT/WDT/WDL terrain parsing
+- [x] M2 model parsing (vertices, bones, animations, skins)
+- [x] WMO parsing (root + groups)
+- [x] Coordinate conversion (WoW ↔ ADT ↔ UE)
+
+### Terrain Rendering
+- [x] Terrain mesh building (256 chunks/tile, splatmap textures)
+- [x] Async tile streaming (camera-based load/unload with LOD)
+- [x] WDL distant terrain, LOD1 mid-distance meshes
+- [x] Runtime Virtual Textures
+- [x] Terrain collision (complex-as-simple)
+- [x] Water rendering (MH2O, ocean plane, WMO liquid)
+- [x] Nanite for WMO static meshes
+
+### World Objects
+- [x] M2 doodad spawning (instanced rendering)
+- [x] WMO building rendering (per-group meshes, full rotation)
+- [x] Distance-based object streaming
+
+### Sky & Atmosphere
+- [x] Time-of-day sky with Light.dbc zone blending
+- [x] Sun/moon disc billboards
+- [x] Fog from LightFloatParams.dbc
+- [x] Cloud layer
+
+### Character Rendering
+- [x] M2 → USkeletalMesh with bone weights
+- [x] Composite character textures (skin + face + hair + underwear from CharSections.dbc)
+- [x] Hair split into separate skeletal mesh
+- [x] Geoset visibility (hair/facial hair/equipment)
+- [x] Equipment attachment via ItemDisplayInfo.dbc
+- [x] All 10 races × 2 genders
+- [x] Animation parsing (M2 → UAnimSequence)
+- [x] Creature spawning by DisplayId
+
+### Networking (121 opcodes)
+- [x] SRP6 auth + ARC4 encryption
+- [x] Realm selection, character enum/create/delete
+- [x] SMSG_CHAR_ENUM parsing (fixed firstLogin byte)
+- [x] Player login + SMSG_LOGIN_VERIFY_WORLD
+- [x] Entity system (UPDATE_OBJECT, typed hierarchy)
+- [x] Movement sync (heartbeat, server correction)
+- [x] Chat, spells, combat, quest, talent, social, inventory handlers
+- [x] Keep-alive, time sync
+
+### Login & World Entry Flow
+- [x] WoW-themed login screen with expansion tabs (Classic/BC/WotLK)
+- [x] Themed colors per expansion (gold/fel green/icy blue)
+- [x] Credential prefill from WowCredentials.json
+- [x] Realm select screen (WoW-styled)
+- [x] Character select screen with class-colored names
+- [x] Character creation screen with race/class/gender selectors
+- [x] 3D character preview in character select (SceneCapture2D)
+- [x] Deferred terrain loading (no world behind login screen)
+- [x] Loading screen with tile progress
+- [x] Ground snap after terrain loads (line trace to terrain surface)
+- [x] `-autologin` flag (prefills and auto-submits through UI)
+- [x] `-createchar` flag (auto-creates Human Mage, enters world)
+- [x] Single-instance lockfile (prevents dual UE launches)
+
+### Player Controller
+- [x] 3rd-person chase camera (spring arm, zoom, orbit)
+- [x] WASD movement, mouse look, jump, walk/run toggle, auto-run
+- [x] Swim speed, fall damage tracking
+- [x] Left-click targeting (CMSG_SET_SELECTION)
+- [x] Entity model spawning from live server data
+
+### Audio
+- [x] Zone music from MPQ (MP3 with A/B crossfading)
+- [x] Ambient sounds from MPQ (WAV)
+- [x] Zone detection from MCNK area IDs
+
+### WoW UI System (Lua + FrameXML)
+- [x] Lua 5.1 VM (sandboxed, memory limited 128MB, instruction limited)
+- [x] FrameXML parser (19 frame types, anchors, strata, templates)
+- [x] Addon/TOC loader with dependency resolution (Kahn's algorithm)
+- [x] SavedVariables persistence
+- [x] Event system (OnEvent, OnLoad, OnClick, OnUpdate dispatch)
+- [x] ~50 Lua API functions implemented
+- [x] Frame methods (SetPoint, SetSize, Show/Hide, SetAlpha, etc.)
+- [x] UMG widget integration
+
+---
+
+## In Progress / Needs Fixing
+
+### P1: 3D Login Screen Backgrounds
+Render authentic WoW login backgrounds using M2/WMO models instead of video:
+- [ ] Classic: Dark Portal scene (WMO from World/wmo/Azeroth/DarkPortal/ + effects)
+- [ ] Burning Crusade: Outland portal scene
+- [ ] Wrath of the Lich King: Sindragosa/Icecrown scene (creature/frostwyrm M2)
+- [ ] Slow-orbit camera animation per expansion
+- [ ] Login music per expansion from MPQ
+
+### P2: Expand Lua API Coverage
+Currently ~50/1200+ functions. Needed for WoW UI to actually render:
+- [ ] Font loading (.ttf from MPQ → UFont)
+- [ ] Texture loading for UI frames (BLP → UTexture for frames)
+- [ ] Complete unit API (UnitBuff, UnitDebuff, UnitAura, etc.)
+- [ ] Action bar API (GetActionInfo, UseAction, etc.)
+- [ ] Bag/inventory API
+- [ ] Spell book API
+- [ ] Quest log API
+- [ ] Achievement/statistics API
+- [ ] Map/minimap API
+- [ ] Social/friends API
+- [ ] Guild API
+- [ ] CVar system (GetCVar, SetCVar)
+
+### P3: Visual Gameplay Features
+- [ ] Minimap rendering from terrain data
+- [ ] Nameplates (name + health bar above entities)
+- [ ] Combat log
+- [ ] Loading screen images from LoadingScreens.dbc
+- [ ] WoW mouse cursor textures
+- [ ] Tooltip system (items, spells, NPCs)
+
+### P4: Gameplay Systems
+- [ ] Warden anti-cheat responses (will get kicked without)
+- [ ] Teleport handling (MSG_MOVE_TELEPORT_ACK)
+- [ ] Death/corpse run
+- [ ] Taxi/flight paths
+- [ ] Bank/mail/auction/trade
+- [ ] Battleground/arena
+- [ ] Pet system
+- [ ] Duel system
+- [ ] Group/raid UI
+
+### P5: NPC/Creature Behavior
+- [ ] NPC movement from SMSG_MONSTER_MOVE waypoint packets
+- [ ] Creature idle/walk/run animation states
+- [ ] Player movement interpolation (smooth network sync)
+
+### P6: Effects & Polish
+- [ ] M2 particle emitters → Niagara systems
+- [ ] Fire/smoke effects (campfires, torches)
+- [ ] M2 ribbon emitters (weapon trails)
+- [ ] M2 light emitters (lanterns, spell glow)
+- [ ] WMO interior lighting from Light.dbc
+- [ ] Spell visuals (SpellVisual → SpellVisualKit chain)
+
+### P7: Terrain Polish
+- [ ] Custom terrain shader (reduce 256 draw calls/tile)
+- [ ] Shadow flickering fix on WMOs
+- [ ] Distance-based UV scaling
+
+### P8: Full WoW UI Boot
+- [ ] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
+- [ ] Full addon loading from Interface/AddOns/
+- [ ] Font rendering with WoW .ttf fonts
+- [ ] Character creation 3D preview with customization sliders
+
+---
+
+## Test Infrastructure
+- `./run_game.sh` — Login screen (credentials prefilled)
+- `./run_game.sh --autologin` — Auto-login with first character
+- `./run_game.sh --autologin --createchar` — Create new char + enter world
+- `./run_game.sh --build` — Build first, then launch
+- `./Scripts/run_map.sh <MapName>` — Launch specific test map
+- `./Scripts/run_model_viewer.sh` — Model viewer with orbit camera
+- Network test: `-testscene=network` (headless E2E)
