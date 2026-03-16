@@ -6,6 +6,7 @@ class UCanvasPanel;
 class UWidget;
 class UUserWidget;
 class FWowEventSystem;
+class FWowFontManager;
 
 /**
  * Manages WoW UI frames, mapping them to UMG widgets.
@@ -20,6 +21,9 @@ public:
 
 	/** Set the event system for script compilation on frame creation */
 	void SetEventSystem(FWowEventSystem* InEventSystem) { EventSystem = InEventSystem; }
+
+	/** Set the font manager for font rendering */
+	void SetFontManager(FWowFontManager* InFontManager) { FontManager = InFontManager; }
 
 	/** Create a frame from a parsed definition */
 	int64 CreateFrame(const FWowFrameDef& Def);
@@ -83,6 +87,7 @@ private:
 	TMap<FString, FWowFrameDef> Templates;
 
 	FWowEventSystem* EventSystem = nullptr;
+	FWowFontManager* FontManager = nullptr;
 	TWeakObjectPtr<UCanvasPanel> RootCanvas;
 	int64 NextHandle = 1;
 
