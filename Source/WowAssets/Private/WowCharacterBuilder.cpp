@@ -381,98 +381,142 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeGeosetWithEquipment(
         GeosetModifier(Item, Result);
     };
 
-    // CHEST/SHIRT: group 8 (wristbands) = geosetGroup[0]
-    ApplyEquipmentGeoset(BodyEquipment.ChestDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
-        if (Item->GeosetGroups[0] > 0)
-        {
-            Geosets.Add(8, static_cast<uint16>(Item->GeosetGroups[0]));
-        }
-    });
-
-    ApplyEquipmentGeoset(BodyEquipment.ShirtDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
-        if (Item->GeosetGroups[0] > 0)
-        {
-            Geosets.Add(8, static_cast<uint16>(Item->GeosetGroups[0]));
-        }
-    });
-
-    // CHEST with robe flag: group 13 (trousers) = geosetGroup[2]
-    ApplyEquipmentGeoset(BodyEquipment.ChestDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
-        // Check if this is a robe (common flag check in WoW)
-        // In ItemDisplayInfo, robes typically have GeosetGroups[2] set for leg coverage
-        if (Item->GeosetGroups[2] > 0)
-        {
-            Geosets.Add(13, static_cast<uint16>(Item->GeosetGroups[2])); // trousers
-        }
-    });
-
-    // PANTS: group 9 (kneepads) = geosetGroup[1], group 13 (trousers) = geosetGroup[2]
-    ApplyEquipmentGeoset(BodyEquipment.PantsDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
-        if (Item->GeosetGroups[1] > 0)
-        {
-            Geosets.Add(9, static_cast<uint16>(Item->GeosetGroups[1])); // kneepads
-        }
-        if (Item->GeosetGroups[2] > 0)
-        {
-            Geosets.Add(13, static_cast<uint16>(Item->GeosetGroups[2])); // trousers
-        }
-    });
-
-    // GLOVES: group 4 (gloves) = geosetGroup[0]
-    ApplyEquipmentGeoset(BodyEquipment.GlovesDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
-        if (Item->GeosetGroups[0] > 0)
-        {
-            Geosets.Add(4, static_cast<uint16>(Item->GeosetGroups[0]));
-        }
-    });
-
-    // BOOTS: group 5 (boots) = geosetGroup[0]
-    ApplyEquipmentGeoset(BodyEquipment.BootsDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
-        if (Item->GeosetGroups[0] > 0)
-        {
-            Geosets.Add(5, static_cast<uint16>(Item->GeosetGroups[0]));
-        }
-    });
-
-    // TABARD: group 12 (tabard) = 1 (always show when equipped)
-    if (BodyEquipment.TabardDisplayId > 0)
-    {
-        Result.Add(12, 1);
-    }
-
-    // CAPE: group 15 (cape) = geosetGroup[0]
-    ApplyEquipmentGeoset(BodyEquipment.CapeDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
-        if (Item->GeosetGroups[0] > 0)
-        {
-            Geosets.Add(15, static_cast<uint16>(Item->GeosetGroups[0]));
-        }
-    });
-
-    // ROBE: Hide leg geosets when a robe is equipped
-    bool bShouldHideLegs = BodyEquipment.bIsRobeEquipped;
-
-    // Additional check: some chest pieces might have robe-like behavior based on geosets
-    // If GeosetGroups[2] > 1, it indicates leg coverage similar to robes
-    if (!bShouldHideLegs && BodyEquipment.ChestDisplayId > 0)
+    // Check if wearing a robe (determines if pants geosets should be skipped)
+    bool bIsWearingRobe = BodyEquipment.bIsRobeEquipped;
+    if (!bIsWearingRobe && BodyEquipment.ChestDisplayId > 0)
     {
         const FItemDisplayInfoDbcEntry* ChestItem = Dbc.ItemDisplayInfo().GetById(BodyEquipment.ChestDisplayId);
-        if (ChestItem && ChestItem->GeosetGroups[2] > 1)
+        if (ChestItem && ChestItem->GeosetGroups[2] > 0)
         {
-            bShouldHideLegs = true;
-            UE_LOG(LogWowCharacter, Log, TEXT("Chest DisplayID %d has robe-like leg coverage (GeosetGroups[2]=%d)"),
+            bIsWearingRobe = true;
+            UE_LOG(LogWowCharacter, Log, TEXT("Chest DisplayID %d detected as robe (GeosetGroups[2]=%d)"),
                 BodyEquipment.ChestDisplayId, ChestItem->GeosetGroups[2]);
         }
     }
 
-    if (bShouldHideLegs)
-    {
-        // Robes hide legs and feet by setting geoset groups to variant 0 (hidden)
-        Result.Add(5, 0);   // LegUpper - hide
-        Result.Add(6, 0);   // LegLower - hide
-        Result.Add(7, 0);   // Foot - hide
+    // CHEST: Apply chest item geosets according to WMVx formula
+    ApplyEquipmentGeoset(BodyEquipment.ChestDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        // geosetGroup[0] → CG_SLEEVES (group 8)
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(8, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+        // geosetGroup[1] → CG_CHEST (group 10)
+        if (Item->GeosetGroups[1] > 0)
+        {
+            Geosets.Add(10, static_cast<uint16>(Item->GeosetGroups[1] + 1));
+        }
+        // geosetGroup[2] → CG_TROUSERS (group 13) for robes
+        if (Item->GeosetGroups[2] > 0)
+        {
+            Geosets.Add(13, static_cast<uint16>(Item->GeosetGroups[2] + 1));
+        }
+        // geosetGroup[3] → CG_TORSO (group 22)
+        if (Item->GeosetGroups[3] > 0)
+        {
+            Geosets.Add(22, static_cast<uint16>(Item->GeosetGroups[3] + 1));
+        }
+    });
 
-        UE_LOG(LogWowCharacter, Log, TEXT("Hiding leg geosets (groups 5, 6, 7) for DisplayID %d (robe=%s)"),
-            BodyEquipment.ChestDisplayId, BodyEquipment.bIsRobeEquipped ? TEXT("true") : TEXT("detected"));
+    // SHIRT: Also affects CG_SLEEVES
+    ApplyEquipmentGeoset(BodyEquipment.ShirtDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(8, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+    });
+
+    // PANTS: Only apply if NOT wearing a robe
+    if (!bIsWearingRobe)
+    {
+        ApplyEquipmentGeoset(BodyEquipment.PantsDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+            // geosetGroup[0] → CG_PANTS (group 11)
+            if (Item->GeosetGroups[0] > 0)
+            {
+                Geosets.Add(11, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+            }
+            // geosetGroup[1] → CG_KNEEPADS (group 9)
+            if (Item->GeosetGroups[1] > 0)
+            {
+                Geosets.Add(9, static_cast<uint16>(Item->GeosetGroups[1] + 1));
+            }
+            // geosetGroup[2] → CG_TROUSERS (group 13) for pants
+            if (Item->GeosetGroups[2] > 0)
+            {
+                Geosets.Add(13, static_cast<uint16>(Item->GeosetGroups[2] + 1));
+            }
+        });
+    }
+
+    // GLOVES: CG_GLOVES (group 4)
+    ApplyEquipmentGeoset(BodyEquipment.GlovesDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(4, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+    });
+
+    // BOOTS: CG_BOOTS (group 5) and CG_FEET (group 20)
+    ApplyEquipmentGeoset(BodyEquipment.BootsDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        // geosetGroup[0] → CG_BOOTS (group 5)
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(5, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+        // geosetGroup[1] → CG_FEET (group 20)
+        if (Item->GeosetGroups[1] > 0)
+        {
+            Geosets.Add(20, static_cast<uint16>(Item->GeosetGroups[1] + 1));
+        }
+    });
+
+    // BRACERS: May have additional geosets beyond just affecting sleeves
+    ApplyEquipmentGeoset(BodyEquipment.BracersDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        // geosetGroup[0] → CG_SLEEVES (group 8) - bracers can modify sleeves
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(8, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+        // geosetGroup[1] → CG_HAND_ATTACHMENT (group 23) potentially
+        if (Item->GeosetGroups[1] > 0)
+        {
+            Geosets.Add(23, static_cast<uint16>(Item->GeosetGroups[1] + 1));
+        }
+    });
+
+    // BELT: CG_BELT (group 18)
+    ApplyEquipmentGeoset(BodyEquipment.BeltDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(18, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+    });
+
+    // TABARD: CG_TABARD (group 12) - typically variant 1 when equipped
+    ApplyEquipmentGeoset(BodyEquipment.TabardDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(12, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+        else
+        {
+            // Default to variant 1 if no specific geoset
+            Geosets.Add(12, 1);
+        }
+    });
+
+    // CAPE: CG_CLOAK (group 15)
+    ApplyEquipmentGeoset(BodyEquipment.CapeDisplayId, [](const FItemDisplayInfoDbcEntry* Item, TMap<uint16, uint16>& Geosets) {
+        if (Item->GeosetGroups[0] > 0)
+        {
+            Geosets.Add(15, static_cast<uint16>(Item->GeosetGroups[0] + 1));
+        }
+    });
+
+    if (bIsWearingRobe)
+    {
+        UE_LOG(LogWowCharacter, Log, TEXT("Robe equipped (DisplayID %d): Using robe trousers geoset, skipping pants geosets"),
+            BodyEquipment.ChestDisplayId);
     }
 
     return Result;
@@ -521,12 +565,6 @@ void FWowCharacterBuilder::ApplyGeosetVisibility(USkeletalMeshComponent* MeshCom
         else
         {
             HiddenCount++;
-            // Log geoset hiding for debugging robe issues
-            if (Info.GeosetGroup >= 5 && Info.GeosetGroup <= 7)
-            {
-                UE_LOG(LogWowCharacter, Log, TEXT("  Hiding geoset: Group=%d Variant=%d Section=%d (robe leg hide)"),
-                    Info.GeosetGroup, Info.GeosetVariant, Info.SectionIndex);
-            }
         }
     }
 
