@@ -1746,4 +1746,3 @@ void FWowPacketHandler::HandleNewWorld(FPacketReader& R)
     // Broadcast map transfer
     OnMapTransfer.Broadcast(MapId, X, Y, Z, Orientation);
 }
-}

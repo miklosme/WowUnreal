@@ -189,6 +189,24 @@ void FWowDoodadManager::SpawnDoodads(AActor* ParentActor, const TArray<FAdtDooda
             MeshComp->RegisterComponent();
         }
 
+        // Add particle effects if the M2 has particle emitters
+        if (M2Parsed->ParticleEmitters.Num() > 0)
+        {
+            FName ParticleCompName = *FString::Printf(TEXT("Particles_%d_%d"), Placement.UniqueId, i);
+            UWowM2ParticleComponent* ParticleComp = NewObject<UWowM2ParticleComponent>(ParentActor, ParticleCompName);
+            ParticleComp->SetupAttachment(ParentActor->GetRootComponent());
+            ParticleComp->SetWorldLocation(UEPos);
+            ParticleComp->SetWorldRotation(Rot);
+            ParticleComp->SetWorldScale3D(FVector(ScaleVal));
+            ParticleComp->RegisterComponent();
+
+            // Initialize particles from M2 data
+            ParticleComp->InitializeFromParsedM2Data(M2Parsed.Get());
+
+            UE_LOG(LogWowDoodad, Log, TEXT("Added %d particle emitters to doodad %s"),
+                M2Parsed->ParticleEmitters.Num(), *M2Path);
+        }
+
         ++Spawned;
     }
 

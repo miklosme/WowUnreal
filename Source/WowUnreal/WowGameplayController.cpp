@@ -891,4 +891,3 @@ void AWowGameplayController::InitializeManagers()
 
 	UE_LOG(LogWowGameplay, Log, TEXT("All managers initialized"));
 }
-}

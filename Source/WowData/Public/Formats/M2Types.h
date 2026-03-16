@@ -82,6 +82,48 @@ struct WOWDATA_API FM2Attachment
     FVector Position = FVector::ZeroVector; // Position relative to the bone
 };
 
+struct WOWDATA_API FM2ParticleEmitter
+{
+    uint32 Id = 0;                          // Particle emitter ID
+    uint32 Flags = 0;                       // Emitter flags
+    FVector Position = FVector::ZeroVector; // Position relative to bone
+    int16 Bone = -1;                        // Bone index this emitter is attached to
+    uint16 Texture = 0;                     // Texture index for particles
+    FString BlendingType;                   // Blending mode for particles
+    uint8 EmitterType = 0;                  // 1=plane, 2=sphere, 3=spline
+    uint8 ParticleType = 0;                 // 0=regular, 1=chunky, 2=both
+    uint8 HeadorTail = 0;                   // 0=head, 1=tail, 2=both
+    int16 TailLength = 0;                   // Length of particle tail
+    float MiddleTime = 0.0f;                // Time when particles are in middle phase
+    uint32 ColorStart[3] = {255, 255, 255}; // RGB start color
+    uint32 ColorMiddle[3] = {255, 255, 255}; // RGB middle color
+    uint32 ColorEnd[3] = {255, 255, 255};   // RGB end color
+    uint8 AlphaStart = 255;                 // Start alpha
+    uint8 AlphaMiddle = 255;                // Middle alpha
+    uint8 AlphaEnd = 255;                   // End alpha
+    float ScaleStart = 1.0f;                // Start scale
+    float ScaleMiddle = 1.0f;               // Middle scale
+    float ScaleEnd = 1.0f;                  // End scale
+    float ScaleVariation = 0.0f;            // Scale randomization
+    float HeadLifeStart = 1000.0f;          // Head lifetime start (ms)
+    float HeadLifeEnd = 1000.0f;            // Head lifetime end (ms)
+    float HeadLifeRepeat = 0.0f;            // Head lifetime repeat rate
+    float HeadDecay = 0.0f;                 // Head decay rate
+    float TailLifeStart = 1000.0f;          // Tail lifetime start (ms)
+    float TailLifeEnd = 1000.0f;            // Tail lifetime end (ms)
+    float TailLifeRepeat = 0.0f;            // Tail lifetime repeat rate
+    float TailDecay = 0.0f;                 // Tail decay rate
+    float EmissionRate = 10.0f;             // Particles per second
+    float EmissionAreaLength = 0.0f;        // Length of emission area
+    float EmissionAreaWidth = 0.0f;         // Width of emission area
+    float Gravity = -9.8f;                  // Gravity affecting particles
+
+    // Helper functions
+    bool IsFireEmitter() const;             // Check if this is a fire emitter
+    bool IsSmokeEmitter() const;            // Check if this is a smoke emitter
+    bool IsSparkleEmitter() const;          // Check if this is an ambient sparkle emitter
+};
+
 struct WOWDATA_API FM2Submesh
 {
     uint16 Id = 0;           // Geoset ID (used for equipment geoset swaps)
@@ -106,6 +148,7 @@ struct WOWDATA_API FM2Data
     TArray<FM2AnimSequence> Animations;
     TArray<FM2AnimationData> AnimationTracks; // parsed keyframe data per animation
     TArray<FM2Attachment> Attachments;
+    TArray<FM2ParticleEmitter> ParticleEmitters; // particle emitter data
     TArray<FM2Submesh> Submeshes;          // geoset info from skin file
     TArray<int16> AttachmentLookup;        // attachment ID → index in Attachments
     uint32 NumBones = 0;

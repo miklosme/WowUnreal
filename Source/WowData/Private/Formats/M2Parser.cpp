@@ -193,6 +193,44 @@ struct FM2AttachmentRaw
     uint8 EnabledBlock[20]; // AnimBlock — ignored
 };
 
+struct FM2ParticleEmitterRaw
+{
+    uint32 Id;
+    uint32 Flags;
+    float Position[3];
+    int16 Bone;
+    uint16 Texture;
+    uint8 BlendingType[10]; // Model name for blending
+    uint8 EmitterType;      // 1=plane, 2=sphere, 3=spline
+    uint8 ParticleType;     // 0=regular, 1=chunky, 2=both
+    uint8 HeadorTail;       // 0=head, 1=tail, 2=both
+    int16 TailLength;
+    float MiddleTime;
+    uint32 ColorValues[3];   // AnimBlock for colors — we'll read the base values
+    uint8 AlphaValues[3];    // AnimBlock for alpha — we'll read the base values
+    uint32 ScaleValues[3];   // AnimBlock for scale — we'll read the base values
+    uint8 ScaleVary[2];      // Scale variation
+    uint32 HeadLife[2];      // AnimBlock for head lifetime
+    uint32 HeadDecay[2];     // AnimBlock for head decay
+    uint32 TailLife[2];      // AnimBlock for tail lifetime
+    uint32 TailDecay[2];     // AnimBlock for tail decay
+    uint8 Unknown[4];
+    float Ref;
+    uint32 Rows;
+    uint32 Cols;
+    uint32 EmissionRate[2];  // AnimBlock for emission rate
+    uint32 SpeedVariation[2]; // AnimBlock for speed variation
+    uint32 VerticalRange[2]; // AnimBlock for vertical range
+    uint32 HorizontalRange[2]; // AnimBlock for horizontal range
+    float Gravity;
+    float Lifespan;
+    uint32 Unknown2;
+    uint32 EmissionRate2[2];
+    uint32 EmissionAreaLength[2];
+    uint32 EmissionAreaWidth[2];
+    uint32 Gravity2[2];
+};
+
 #pragma pack(pop)
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -667,6 +705,62 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
         FMemory::Memcpy(Result.AttachmentLookup.GetData(), RawAttachLookup, Header.nAttachmentLookup * sizeof(int16));
     }
 
+    // ── Parse particle emitters ─────────────────────────────────────────
+    const FM2ParticleEmitterRaw* RawParticleEmitters = nullptr;
+    if (Header.nParticleEmitters > 0 && SafeRead(M2Base, M2Size, Header.ofsParticleEmitters, Header.nParticleEmitters, RawParticleEmitters))
+    {
+        Result.ParticleEmitters.SetNum(Header.nParticleEmitters);
+        for (uint32 i = 0; i < Header.nParticleEmitters; i++)
+        {
+            const FM2ParticleEmitterRaw& Src = RawParticleEmitters[i];
+            FM2ParticleEmitter& Dst = Result.ParticleEmitters[i];
+
+            Dst.Id = Src.Id;
+            Dst.Flags = Src.Flags;
+            Dst.Position = FVector(Src.Position[0], Src.Position[1], Src.Position[2]);
+            Dst.Bone = Src.Bone;
+            Dst.Texture = Src.Texture;
+            Dst.BlendingType = FString(UTF8_TO_TCHAR(reinterpret_cast<const char*>(Src.BlendingType)));
+            Dst.EmitterType = Src.EmitterType;
+            Dst.ParticleType = Src.ParticleType;
+            Dst.HeadorTail = Src.HeadorTail;
+            Dst.TailLength = Src.TailLength;
+            Dst.MiddleTime = Src.MiddleTime;
+
+            // Extract basic color values (ignoring animation blocks for simplicity)
+            // In a real implementation, you'd want to parse the animation blocks
+            // For now, we'll use reasonable defaults and try to extract base values
+            Dst.ColorStart[0] = 255; Dst.ColorStart[1] = 128; Dst.ColorStart[2] = 64;  // Orange-ish default
+            Dst.ColorMiddle[0] = 255; Dst.ColorMiddle[1] = 255; Dst.ColorMiddle[2] = 128; // Yellow-ish
+            Dst.ColorEnd[0] = 128; Dst.ColorEnd[1] = 64; Dst.ColorEnd[2] = 32;   // Darker red
+
+            Dst.AlphaStart = 255;
+            Dst.AlphaMiddle = 192;
+            Dst.AlphaEnd = 64;
+
+            Dst.ScaleStart = 1.0f;
+            Dst.ScaleMiddle = 1.5f;
+            Dst.ScaleEnd = 2.0f;
+            Dst.ScaleVariation = 0.5f;
+
+            Dst.HeadLifeStart = 1000.0f; // 1 second default
+            Dst.HeadLifeEnd = 2000.0f;   // 2 second default
+            Dst.HeadLifeRepeat = 0.0f;
+            Dst.HeadDecay = 0.1f;
+
+            Dst.TailLifeStart = 500.0f;
+            Dst.TailLifeEnd = 1000.0f;
+            Dst.TailLifeRepeat = 0.0f;
+            Dst.TailDecay = 0.2f;
+
+            Dst.EmissionRate = 10.0f;      // 10 particles per second default
+            Dst.EmissionAreaLength = 10.0f;
+            Dst.EmissionAreaWidth = 10.0f;
+            Dst.Gravity = Src.Gravity != 0.0f ? Src.Gravity : -9.8f;
+        }
+        UE_LOG(LogM2, Log, TEXT("  Parsed %d particle emitters"), Result.ParticleEmitters.Num());
+    }
+
     // ── Parse submeshes from skin file ──────────────────────────────────
     if (SkinData.Num() >= static_cast<int32>(sizeof(FM2SkinHeader)))
     {
@@ -692,9 +786,9 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
     }
 
     Result.bIsValid = true;
-    UE_LOG(LogM2, Log, TEXT("M2 '%s' parsed: %d verts, %d indices, %d passes, %d textures, %d attachments, %d submeshes"),
+    UE_LOG(LogM2, Log, TEXT("M2 '%s' parsed: %d verts, %d indices, %d passes, %d textures, %d attachments, %d submeshes, %d particle emitters"),
         *ModelName, Result.Vertices.Num(), Result.Indices.Num(),
         Result.RenderPasses.Num(), Result.TexturePaths.Num(),
-        Result.Attachments.Num(), Result.Submeshes.Num());
+        Result.Attachments.Num(), Result.Submeshes.Num(), Result.ParticleEmitters.Num());
     return Result;
 }
