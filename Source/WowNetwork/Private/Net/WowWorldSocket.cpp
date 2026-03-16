@@ -277,9 +277,6 @@ uint32 FWowWorldSocket::Run()
             case SMSG_ADDON_INFO:
                 UE_LOG(LogWowWorld, Log, TEXT("Received SMSG_ADDON_INFO (%d bytes) -- ignored"), Payload.Num());
                 break;
-            case SMSG_WARDEN_DATA:
-                UE_LOG(LogWowWorld, Log, TEXT("Received SMSG_WARDEN_DATA (%d bytes) -- ignored"), Payload.Num());
-                break;
             default:
                 UE_LOG(LogWowWorld, Verbose, TEXT("Recv opcode=0x%04X size=%d"), Opcode, Size);
                 AsyncTask(ENamedThreads::GameThread, [this, Opcode, Payload]()

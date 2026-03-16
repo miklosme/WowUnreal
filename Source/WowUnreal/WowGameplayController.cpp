@@ -49,6 +49,14 @@ void AWowGameplayController::BindEntityEvents()
 	ConnectionManager->PacketHandler.OnLoginVerifyWorld.AddUObject(
 		this, &AWowGameplayController::OnLoginVerifyWorld);
 
+	// Listen for teleport requests from server
+	ConnectionManager->PacketHandler.OnTeleportRequest.AddUObject(
+		this, &AWowGameplayController::OnTeleportRequest);
+
+	// Listen for map transfers
+	ConnectionManager->PacketHandler.OnMapTransfer.AddUObject(
+		this, &AWowGameplayController::OnMapTransfer);
+
 	// Listen for entity updates — sync local player position from server
 	ConnectionManager->PacketHandler.EntityManager.OnEntityUpdated.AddUObject(
 		this, &AWowGameplayController::OnEntityUpdated);
@@ -388,4 +396,107 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		SpawnedActor->Tags.Add(FName(*FString::Printf(TEXT("%llu"), Entity.Guid)));
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
 	}
+}
+
+void AWowGameplayController::OnTeleportRequest(uint64 Guid, uint32 Flags, uint32 Time, FVector Position, float Orientation)
+{
+	if (!ConnectionManager) return;
+
+	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+
+	// Only handle teleports for our local player
+	if (Guid != LocalGuid)
+	{
+		UE_LOG(LogWowGameplay, Verbose, TEXT("Ignoring teleport for non-local entity GUID %llu"), Guid);
+		return;
+	}
+
+	// Convert from WoW coordinates to UE coordinates
+	FVector UEPosition = FWowCoordinate::WowToUE(Position);
+
+	// Teleport the local pawn
+	APawn* LocalPawn = GetPawn();
+	if (LocalPawn)
+	{
+		LocalPawn->SetActorLocation(UEPosition, false, nullptr, ETeleportType::TeleportPhysics);
+		LocalPawn->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+
+		if (APlayerController* PC = Cast<APlayerController>(LocalPawn->GetController()))
+		{
+			PC->SetControlRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+		}
+
+		UE_LOG(LogWowGameplay, Log, TEXT("Teleported to: WoW=(%.1f,%.1f,%.1f) UE=(%.0f,%.0f,%.0f) orient=%.2f"),
+			Position.X, Position.Y, Position.Z, UEPosition.X, UEPosition.Y, UEPosition.Z, Orientation);
+
+		// Update server position tracking
+		bHasServerPosition = true;
+		LastServerPosition = UEPosition;
+	}
+
+	// Send acknowledgment to server
+	SendTeleportAck(Guid, Flags, Time);
+}
+
+void AWowGameplayController::OnMapTransfer(uint32 MapId, float X, float Y, float Z, float Orientation)
+{
+	UE_LOG(LogWowGameplay, Log, TEXT("Map transfer to: map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
+		MapId, X, Y, Z, Orientation);
+
+	// For basic implementation, treat this like a teleport to new position
+	FVector Position(X, Y, Z);
+	FVector UEPosition = FWowCoordinate::WowToUE(Position);
+
+	// Teleport the local pawn
+	APawn* LocalPawn = GetPawn();
+	if (LocalPawn)
+	{
+		LocalPawn->SetActorLocation(UEPosition, false, nullptr, ETeleportType::TeleportPhysics);
+		LocalPawn->SetActorRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+
+		if (APlayerController* PC = Cast<APlayerController>(LocalPawn->GetController()))
+		{
+			PC->SetControlRotation(FRotator(0.0f, FMath::RadiansToDegrees(Orientation), 0.0f));
+		}
+
+		// Update server position tracking
+		bHasServerPosition = true;
+		LastServerPosition = UEPosition;
+	}
+
+	// Send worldport acknowledgment
+	SendWorldportAck();
+
+	// TODO: In a full implementation, this would:
+	// 1. Clear all existing entities
+	// 2. Load the new map's terrain and doodads
+	// 3. Wait for SMSG_LOGIN_VERIFY_WORLD for the new map
+}
+
+void AWowGameplayController::SendTeleportAck(uint64 Guid, uint32 Flags, uint32 Time)
+{
+	if (!ConnectionManager) return;
+
+	// CMSG_MOVE_TELEPORT_ACK: uint64 guid + uint32 flags + uint32 time
+	TArray<uint8> Data;
+	Data.SetNumUninitialized(16); // 8 + 4 + 4
+
+	FMemory::Memcpy(Data.GetData(), &Guid, 8);
+	FMemory::Memcpy(Data.GetData() + 8, &Flags, 4);
+	FMemory::Memcpy(Data.GetData() + 12, &Time, 4);
+
+	ConnectionManager->SendRawPacket(WowOpcode::MSG_MOVE_TELEPORT_ACK, Data);
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Sent CMSG_MOVE_TELEPORT_ACK: guid=%llu flags=0x%08X time=%u"),
+		Guid, Flags, Time);
+}
+
+void AWowGameplayController::SendWorldportAck()
+{
+	if (!ConnectionManager) return;
+
+	// MSG_MOVE_WORLDPORT_ACK has no payload
+	ConnectionManager->SendRawPacket(WowOpcode::MSG_MOVE_WORLDPORT_ACK, {});
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Sent MSG_MOVE_WORLDPORT_ACK"));
 }
