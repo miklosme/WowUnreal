@@ -572,8 +572,12 @@ void AWowPlayerCharacter::SetCharacterModelWithEquipment(UWorld* World, FMpqMana
 					Params.BodyEquipment.ShirtDisplayId = EquipItem.DisplayId;
 					break;
 				case 5:  // Chest
-				case 20: // Robe (renders same as chest)
 					Params.BodyEquipment.ChestDisplayId = EquipItem.DisplayId;
+					Params.BodyEquipment.bIsRobeEquipped = false;
+					break;
+				case 20: // Robe (hides leg geosets)
+					Params.BodyEquipment.ChestDisplayId = EquipItem.DisplayId;
+					Params.BodyEquipment.bIsRobeEquipped = true;
 					break;
 				case 6:  // Waist/Belt
 					Params.BodyEquipment.BeltDisplayId = EquipItem.DisplayId;

@@ -448,6 +448,17 @@ TMap<uint16, uint16> FWowCharacterBuilder::ComputeGeosetWithEquipment(
         }
     });
 
+    // ROBE: Hide leg geosets when a robe is equipped
+    if (BodyEquipment.bIsRobeEquipped)
+    {
+        // Robes hide legs and feet by setting geoset groups to variant 0 (hidden)
+        Result.Add(5, 0);   // LegUpper - hide
+        Result.Add(6, 0);   // LegLower - hide
+        Result.Add(7, 0);   // Foot - hide
+
+        UE_LOG(LogWowCharacter, Log, TEXT("Robe equipped: hiding leg geosets (groups 5, 6, 7)"));
+    }
+
     return Result;
 }
 

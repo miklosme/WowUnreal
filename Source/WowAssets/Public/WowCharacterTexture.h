@@ -74,6 +74,7 @@ public:
         uint32 TabardDisplayId = 0;
         uint32 BeltDisplayId = 0;
         uint32 CapeDisplayId = 0;
+        bool bIsRobeEquipped = false;  // True if chest item is a robe (InventoryType 20)
     };
 
     /**
