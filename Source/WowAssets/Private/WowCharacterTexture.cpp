@@ -376,19 +376,22 @@ struct FRegionCoords
     uint32 X, Y, W, H;
 };
 
+/** Get fallback region coordinates for WoW 3.3.5 (WotLK).
+ *  From WMVx: canvas is 512x512, coordinates at 2x scale of base 256x256 layout. */
 static TMap<uint32, FRegionCoords> GetFallbackRegions()
 {
     TMap<uint32, FRegionCoords> Regions;
-    Regions.Add(0, {0, 0, 128, 64});      // ARM_UPPER
-    Regions.Add(1, {0, 64, 128, 64});     // ARM_LOWER
-    Regions.Add(2, {0, 128, 128, 32});    // HAND
-    Regions.Add(3, {128, 0, 128, 64});    // TORSO_UPPER
-    Regions.Add(4, {128, 64, 128, 32});   // TORSO_LOWER
-    Regions.Add(5, {128, 96, 128, 64});   // LEG_UPPER
-    Regions.Add(6, {128, 160, 128, 64});  // LEG_LOWER
-    Regions.Add(7, {128, 224, 128, 32});  // FOOT
-    Regions.Add(9, {0, 160, 128, 32});    // FACE_UPPER
-    Regions.Add(10, {0, 192, 128, 64});   // FACE_LOWER
+    // Direct from WMVx LegacyCharacterComponentTextureAdaptor (512x512 canvas)
+    Regions.Add(0,  {0,   0,   256, 128});  // ARM_UPPER
+    Regions.Add(1,  {0,   128, 256, 128});  // ARM_LOWER
+    Regions.Add(2,  {0,   256, 256, 64});   // HAND
+    Regions.Add(9,  {0,   320, 256, 64});   // FACE_UPPER
+    Regions.Add(10, {0,   384, 256, 128});  // FACE_LOWER
+    Regions.Add(3,  {256, 0,   256, 128});  // TORSO_UPPER
+    Regions.Add(4,  {256, 128, 256, 64});   // TORSO_LOWER
+    Regions.Add(5,  {256, 192, 256, 128});  // LEG_UPPER
+    Regions.Add(6,  {256, 320, 256, 128});  // LEG_LOWER
+    Regions.Add(7,  {256, 448, 256, 64});   // FOOT
     return Regions;
 }
 
@@ -408,7 +411,7 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
 
     // 1. Get layout dimensions from DBC or use fallback
     uint32 LayoutId = 1; // Default layout for all character textures in 3.3.5
-    uint32 CompositeW = 256, CompositeH = 256; // Default fallback dimensions
+    uint32 CompositeW = 512, CompositeH = 512; // WMVx: 256*2 scale factor for WotLK
 
     const FDbcStore& DbcStore = FDbcStore::Get();
     const FCharComponentTextureLayoutsDbcEntry* Layout = DbcStore.CharComponentTextureLayouts().GetById(LayoutId);
@@ -484,85 +487,89 @@ UTexture2D* FWowCharacterTexture::BuildCompositeTexture(FMpqManager* Mpq, FWowAs
 
     int32 LayersComposited = 1; // Skin counts as layer 1
 
-    // 5. Load and place face texture at specific region (FACE_LOWER or FACE_UPPER)
-    FString FacePath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::Face, static_cast<int32>(Customization.FaceVariation),
-        static_cast<int32>(Customization.SkinColor));
-    if (!FacePath.IsEmpty())
+    // 5. Face textures: Textures[0] → FACE_LOWER, Textures[1] → FACE_UPPER (from WMVx)
+    for (const FCharSectionsDbcEntry& Entry : FDbcStore::Get().CharSections().GetAll())
     {
-        uint32 FaceW, FaceH;
-        TArray<uint8> FacePixels = LoadBlpAsRGBA(Mpq, FacePath, FaceW, FaceH);
-        if (FacePixels.Num() > 0)
-        {
-            // Determine target region based on texture name
-            uint32 TargetRegion = 10; // Default to FACE_LOWER
-            if (FacePath.Contains(TEXT("FaceUpper")))
-            {
-                TargetRegion = 9; // FACE_UPPER
-            }
+        if (Entry.RaceID != Customization.RaceId || Entry.SexID != Customization.Gender) continue;
+        if (Entry.Type != static_cast<uint32>(ESectionType::Face)) continue;
+        if (Entry.Variation != Customization.FaceVariation || Entry.Color != Customization.SkinColor) continue;
 
-            const FRegionCoords* Region = RegionCoords.Find(TargetRegion);
-            if (Region)
+        for (int32 TexIdx = 0; TexIdx < 2; ++TexIdx)
+        {
+            if (Entry.Textures[TexIdx].IsEmpty()) continue;
+            uint32 RegionId = (TexIdx == 0) ? 10 : 9; // [0]→FACE_LOWER, [1]→FACE_UPPER
+            const FRegionCoords* Region = RegionCoords.Find(RegionId);
+            if (!Region) continue;
+
+            uint32 TexW, TexH;
+            TArray<uint8> Pixels = LoadBlpAsRGBA(Mpq, Entry.Textures[TexIdx], TexW, TexH);
+            if (Pixels.Num() > 0)
             {
-                PasteRegionWithAlpha(Composite, FacePixels, CompositeW, CompositeH,
-                    FaceW, FaceH, Region->X, Region->Y, Region->W, Region->H);
+                PasteRegionWithAlpha(Composite, Pixels, CompositeW, CompositeH,
+                    TexW, TexH, Region->X, Region->Y, Region->W, Region->H);
                 LayersComposited++;
-                UE_LOG(LogWowCharTex, Log, TEXT("Placed face at region %d: %s (%dx%d)"), TargetRegion, *FacePath, FaceW, FaceH);
-            }
-            else
-            {
-                UE_LOG(LogWowCharTex, Warning, TEXT("No region coordinates for face region %d"), TargetRegion);
+                UE_LOG(LogWowCharTex, Log, TEXT("Placed face[%d] at region %d: %s (%dx%d)"),
+                    TexIdx, RegionId, *Entry.Textures[TexIdx], TexW, TexH);
             }
         }
+        break;
     }
 
-    // 6. Load and place hair scalp texture at FACE_UPPER region
-    FString HairPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::Hair, static_cast<int32>(Customization.HairStyle),
-        static_cast<int32>(Customization.HairColor));
-    if (!HairPath.IsEmpty())
+    // 6. Hair color textures: [0]→replaceable hair tex, [1]→FACE_LOWER, [2]→FACE_UPPER (from WMVx)
+    for (const FCharSectionsDbcEntry& Entry : FDbcStore::Get().CharSections().GetAll())
     {
-        uint32 HairW, HairH;
-        TArray<uint8> HairPixels = LoadBlpAsRGBA(Mpq, HairPath, HairW, HairH);
-        if (HairPixels.Num() > 0)
+        if (Entry.RaceID != Customization.RaceId || Entry.SexID != Customization.Gender) continue;
+        if (Entry.Type != static_cast<uint32>(ESectionType::Hair)) continue;
+        if (Entry.Variation != Customization.HairStyle || Entry.Color != Customization.HairColor) continue;
+
+        // Textures[1] → FACE_LOWER (layer 3), Textures[2] → FACE_UPPER (layer 3)
+        for (int32 TexIdx = 1; TexIdx < 3; ++TexIdx)
         {
-            const FRegionCoords* Region = RegionCoords.Find(9); // FACE_UPPER
-            if (Region)
+            if (Entry.Textures[TexIdx].IsEmpty()) continue;
+            uint32 RegionId = (TexIdx == 1) ? 10 : 9; // [1]→FACE_LOWER, [2]→FACE_UPPER
+            const FRegionCoords* Region = RegionCoords.Find(RegionId);
+            if (!Region) continue;
+
+            uint32 TexW, TexH;
+            TArray<uint8> Pixels = LoadBlpAsRGBA(Mpq, Entry.Textures[TexIdx], TexW, TexH);
+            if (Pixels.Num() > 0)
             {
-                PasteRegionWithAlpha(Composite, HairPixels, CompositeW, CompositeH,
-                    HairW, HairH, Region->X, Region->Y, Region->W, Region->H);
+                PasteRegionWithAlpha(Composite, Pixels, CompositeW, CompositeH,
+                    TexW, TexH, Region->X, Region->Y, Region->W, Region->H);
                 LayersComposited++;
-                UE_LOG(LogWowCharTex, Log, TEXT("Placed hair scalp at FACE_UPPER: %s (%dx%d)"), *HairPath, HairW, HairH);
-            }
-            else
-            {
-                UE_LOG(LogWowCharTex, Warning, TEXT("No region coordinates for FACE_UPPER region"));
+                UE_LOG(LogWowCharTex, Log, TEXT("Placed hair[%d] at region %d: %s (%dx%d)"),
+                    TexIdx, RegionId, *Entry.Textures[TexIdx], TexW, TexH);
             }
         }
+        break;
     }
 
-    // 7. Load and place facial hair texture at FACE_LOWER region
-    FString FacialHairPath = GetSectionTexture(Customization.RaceId, Customization.Gender,
-        ESectionType::FacialHair, static_cast<int32>(Customization.FacialHairStyle), INDEX_NONE);
-    if (!FacialHairPath.IsEmpty())
+    // 7. Facial hair textures: [0]→FACE_LOWER, [1]→FACE_UPPER (from WMVx)
+    for (const FCharSectionsDbcEntry& Entry : FDbcStore::Get().CharSections().GetAll())
     {
-        uint32 FacialHairW, FacialHairH;
-        TArray<uint8> FacialHairPixels = LoadBlpAsRGBA(Mpq, FacialHairPath, FacialHairW, FacialHairH);
-        if (FacialHairPixels.Num() > 0)
+        if (Entry.RaceID != Customization.RaceId || Entry.SexID != Customization.Gender) continue;
+        if (Entry.Type != static_cast<uint32>(ESectionType::FacialHair)) continue;
+        if (Entry.Variation != Customization.FacialHairStyle) continue;
+
+        for (int32 TexIdx = 0; TexIdx < 2; ++TexIdx)
         {
-            const FRegionCoords* Region = RegionCoords.Find(10); // FACE_LOWER
-            if (Region)
+            if (Entry.Textures[TexIdx].IsEmpty()) continue;
+            uint32 RegionId = (TexIdx == 0) ? 10 : 9; // [0]→FACE_LOWER, [1]→FACE_UPPER
+            const FRegionCoords* Region = RegionCoords.Find(RegionId);
+            if (!Region) continue;
+
+            uint32 TexW, TexH;
+            TArray<uint8> Pixels = LoadBlpAsRGBA(Mpq, Entry.Textures[TexIdx], TexW, TexH);
+            if (Pixels.Num() > 0)
             {
-                PasteRegionWithAlpha(Composite, FacialHairPixels, CompositeW, CompositeH,
-                    FacialHairW, FacialHairH, Region->X, Region->Y, Region->W, Region->H);
+                PasteRegionWithAlpha(Composite, Pixels, CompositeW, CompositeH,
+                    TexW, TexH, Region->X, Region->Y, Region->W, Region->H);
                 LayersComposited++;
-                UE_LOG(LogWowCharTex, Log, TEXT("Placed facial hair at FACE_LOWER: %s (%dx%d)"), *FacialHairPath, FacialHairW, FacialHairH);
-            }
-            else
-            {
-                UE_LOG(LogWowCharTex, Warning, TEXT("No region coordinates for FACE_LOWER region"));
+                UE_LOG(LogWowCharTex, Log, TEXT("Placed facial hair[%d] at region %d: %s"),
+                    TexIdx, RegionId, *Entry.Textures[TexIdx]);
             }
         }
+        break;
     }
 
     // 8. Load and place underwear textures at TORSO_UPPER and LEG_UPPER regions
