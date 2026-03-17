@@ -670,6 +670,11 @@ void FWowPacketHandler::HandleInitialSpells(FPacketReader& R)
 
 void FWowPacketHandler::HandleActionButtons(FPacketReader& R)
 {
+    // 3.3.5: first byte is packet type (0=initial, 1=update, 2=clear)
+    if (R.Remaining() < 1) return;
+    uint8 PacketType = R.ReadU8();
+    UE_LOG(LogWowPacket, Log, TEXT("ACTION_BUTTONS packet type: %d"), PacketType);
+
     // 144 action buttons × 4 bytes each = 576 bytes
     int32 ButtonCount = FMath::Min(R.Remaining() / 4, 144);
 
