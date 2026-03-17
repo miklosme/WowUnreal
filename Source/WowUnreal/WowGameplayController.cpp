@@ -1976,8 +1976,9 @@ void AWowGameplayController::CastSpellFromSlot(int32 SlotIndex)
 	// Only handle spell actions (type 0)
 	if (ActionType == 0 && ActionId > 0)
 	{
-		ConnectionManager->SendCastSpell(ActionId);
-		UE_LOG(LogWowGameplay, Log, TEXT("Cast spell %u from slot %d (key pressed)"), ActionId, SlotIndex);
+		// Pass current target for targeted spells
+		ConnectionManager->SendCastSpell(ActionId, static_cast<int64>(TargetGuid));
+		UE_LOG(LogWowGameplay, Log, TEXT("Cast spell %u from slot %d on target %llu"), ActionId, SlotIndex, TargetGuid);
 	}
 }
 
