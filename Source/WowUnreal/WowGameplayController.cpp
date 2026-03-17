@@ -25,6 +25,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
 #include "Components/WidgetComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Widgets/SViewport.h"
 #include "SWowCastBar.h"
@@ -516,38 +517,70 @@ void AWowGameplayController::TryTargetUnderCursor()
 {
 	if (!ConnectionManager) return;
 
-	// Line trace from mouse cursor into the world
+	// Get mouse position and deproject to world
+	float MouseX, MouseY;
+	if (!GetMousePosition(MouseX, MouseY))
+	{
+		UE_LOG(LogWowGameplay, Verbose, TEXT("TryTarget: no mouse position"));
+		return;
+	}
+
+	FVector WorldLoc, WorldDir;
+	if (!DeprojectScreenPositionToWorld(MouseX, MouseY, WorldLoc, WorldDir))
+	{
+		UE_LOG(LogWowGameplay, Verbose, TEXT("TryTarget: deproject failed"));
+		return;
+	}
+
+	// Line trace 10000 cm (~100 WoW yards)
+	FVector TraceEnd = WorldLoc + WorldDir * 1000000.0f;
 	FHitResult Hit;
-	FCollisionQueryParams Params;
-	Params.bTraceComplex = true;
-	if (GetHitResultUnderCursor(ECC_Visibility, true, Hit))
+	FCollisionQueryParams TraceParams;
+	TraceParams.AddIgnoredActor(GetPawn());
+	TraceParams.bTraceComplex = false; // Use simple collision (faster, more reliable)
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// Try ECC_Pawn first (entity meshes), then ECC_WorldStatic for terrain
+	bool bHit = World->LineTraceSingleByChannel(Hit, WorldLoc, TraceEnd, ECC_Pawn, TraceParams);
+	if (!bHit)
+	{
+		bHit = World->LineTraceSingleByChannel(Hit, WorldLoc, TraceEnd, ECC_Visibility, TraceParams);
+	}
+
+	if (bHit && Hit.GetActor())
 	{
 		AActor* HitActor = Hit.GetActor();
-		if (HitActor)
+
+		// Check if the hit actor has an associated entity GUID (stored as tag)
+		for (const FName& Tag : HitActor->Tags)
 		{
-			// Check if the hit actor has an associated entity GUID (stored as tag)
-			FString GuidTag = HitActor->Tags.Num() > 0 ? HitActor->Tags[0].ToString() : TEXT("");
-			if (!GuidTag.IsEmpty())
+			FString GuidTag = Tag.ToString();
+			uint64 HitGuid = FCString::Atoi64(*GuidTag);
+			if (HitGuid != 0)
 			{
-				uint64 HitGuid = FCString::Atoi64(*GuidTag);
-				if (HitGuid != 0 && HitGuid != TargetGuid)
+				if (HitGuid != TargetGuid)
 				{
 					TargetGuid = HitGuid;
 					ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
-					UE_LOG(LogWowGameplay, Log, TEXT("Targeted entity GUID: %llu"), TargetGuid);
+					UE_LOG(LogWowGameplay, Log, TEXT("Targeted entity GUID: %llu (%s)"),
+						TargetGuid, *HitActor->GetName());
 				}
+				return;
 			}
 		}
+
+		// Hit something but not an entity — could be terrain
+		UE_LOG(LogWowGameplay, Verbose, TEXT("Hit non-entity: %s"), *HitActor->GetName());
 	}
-	else
+
+	// Clicked on nothing or non-entity — clear target
+	if (TargetGuid != 0)
 	{
-		// Clicked on nothing — clear target
-		if (TargetGuid != 0)
-		{
-			TargetGuid = 0;
-			ConnectionManager->SendSetSelection(0);
-			UE_LOG(LogWowGameplay, Log, TEXT("Target cleared"));
-		}
+		TargetGuid = 0;
+		ConnectionManager->SendSetSelection(0);
+		UE_LOG(LogWowGameplay, Log, TEXT("Target cleared"));
 	}
 }
 
@@ -681,6 +714,23 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		// Tag actor with GUID for targeting
 		SpawnedActor->Tags.Add(FName(*FString::Printf(TEXT("%llu"), Entity.Guid)));
 		SpawnedEntityActors.Add(Entity.Guid, SpawnedActor);
+
+		// Add a capsule collision for click targeting (skeletal meshes have no physics asset)
+		UCapsuleComponent* TargetCapsule = NewObject<UCapsuleComponent>(SpawnedActor, TEXT("TargetCapsule"));
+		if (TargetCapsule)
+		{
+			TargetCapsule->SetupAttachment(SpawnedActor->GetRootComponent());
+			TargetCapsule->SetCapsuleSize(50.0f, 100.0f); // Roughly character-sized
+			TargetCapsule->SetRelativeLocation(FVector(0, 0, 100.0f)); // Center at waist height
+			TargetCapsule->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			TargetCapsule->SetCollisionObjectType(ECC_Pawn);
+			TargetCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+			TargetCapsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+			TargetCapsule->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+			TargetCapsule->ShapeColor = FColor::Green;
+			TargetCapsule->SetHiddenInGame(true);
+			TargetCapsule->RegisterComponent();
+		}
 
 		// Create nameplate widget component
 		UWidgetComponent* NameplateComponent = NewObject<UWidgetComponent>(SpawnedActor);
