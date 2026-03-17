@@ -178,8 +178,8 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         if (UBodySetup* BodySetup = SM->GetBodySetup())
         {
             BodySetup->CollisionTraceFlag = CTF_UseComplexAsSimple;
-            BodySetup->bMeshCollideAll = true;
-            BodySetup->CreatePhysicsMeshes();
+            // Skip CreatePhysicsMeshes — line traces work with complex-as-simple
+            // without cooked physics data, and cooking 6400 meshes freezes the game
         }
 
         // Create UStaticMeshComponent and set materials on the component
