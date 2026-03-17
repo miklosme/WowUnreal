@@ -1264,12 +1264,41 @@ void AWowGameplayController::OnSpellStart(uint64 CasterGuid, uint32 SpellId, uin
 			CastBarWidget->StartCast(SpellName, CastDuration);
 		}
 
+		// Play casting animation for local player if cast time > 0
+		if (CastTime > 0)
+		{
+			if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
+			{
+				if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
+				{
+					AnimController->PlayAnimationById(EWowAnimId::SpellCast, true);
+					UE_LOG(LogWowGameplay, Log, TEXT("Playing spell cast animation for local player"));
+				}
+			}
+		}
+
 		// Also log to combat log
 		FString Message = FString::Printf(TEXT("You cast %s"), *SpellName);
 		AddCombatMessage(Message, FLinearColor::Yellow);
 	}
 	else
 	{
+		// Other entity casting - play their cast animation if cast time > 0
+		if (CastTime > 0)
+		{
+			if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(CasterGuid))
+			{
+				if (AActor* CasterActor = FoundActor->Get())
+				{
+					if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
+					{
+						AnimController->PlayAnimationById(EWowAnimId::SpellCast, true);
+						UE_LOG(LogWowGameplay, Log, TEXT("Playing spell cast animation for entity %llu"), CasterGuid);
+					}
+				}
+			}
+		}
+
 		// Other entity casting
 		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu started casting spell %u"), CasterGuid, SpellId);
 
@@ -1301,9 +1330,32 @@ void AWowGameplayController::OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32
 		{
 			CastBarWidget->StopCast();
 		}
+
+		// Return to idle animation for local player
+		if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
+		{
+			if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
+			{
+				AnimController->PlayAnimationById(EWowAnimId::Stand, true);
+				UE_LOG(LogWowGameplay, Log, TEXT("Returning local player to idle animation"));
+			}
+		}
 	}
 	else
 	{
+		// Return other entity to idle animation
+		if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(CasterGuid))
+		{
+			if (AActor* CasterActor = FoundActor->Get())
+			{
+				if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
+				{
+					AnimController->PlayAnimationById(EWowAnimId::Stand, true);
+					UE_LOG(LogWowGameplay, Log, TEXT("Returning entity %llu to idle animation"), CasterGuid);
+				}
+			}
+		}
+
 		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu completed spell %u"), CasterGuid, SpellId);
 	}
 }
@@ -1447,7 +1499,12 @@ void AWowGameplayController::UpdatePlayerAnimations()
 		// If the player has an animation controller, update it
 		if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
 		{
-			AnimController->UpdateLocalPlayerState(PlayerChar);
+			// Don't override casting animations with movement animations
+			// The casting animation will be explicitly set/unset in spell handlers
+			if (!bIsCasting)
+			{
+				AnimController->UpdateLocalPlayerState(PlayerChar);
+			}
 		}
 	}
 }
@@ -2016,10 +2073,33 @@ void AWowGameplayController::OnSpellFailure(uint64 CasterGuid, uint32 SpellId, u
 			CastBarWidget->StopCast();
 		}
 
+		// Return to idle animation for local player
+		if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
+		{
+			if (UWowAnimationController* AnimController = PlayerChar->AnimationController)
+			{
+				AnimController->PlayAnimationById(EWowAnimId::Stand, true);
+				UE_LOG(LogWowGameplay, Log, TEXT("Returning local player to idle animation after spell failure"));
+			}
+		}
+
 		// TODO: Show error message based on failure reason
 	}
 	else
 	{
+		// Return other entity to idle animation
+		if (TObjectPtr<AActor>* FoundActor = SpawnedEntityActors.Find(CasterGuid))
+		{
+			if (AActor* CasterActor = FoundActor->Get())
+			{
+				if (UWowAnimationController* AnimController = FWowCharacterBuilder::GetAnimationController(CasterActor))
+				{
+					AnimController->PlayAnimationById(EWowAnimId::Stand, true);
+					UE_LOG(LogWowGameplay, Log, TEXT("Returning entity %llu to idle animation after spell failure"), CasterGuid);
+				}
+			}
+		}
+
 		UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu spell %u failed"), CasterGuid, SpellId);
 	}
 }
