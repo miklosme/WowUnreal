@@ -150,6 +150,15 @@ public:
     /** Create and show the chat window */
     void CreateChatWindow();
 
+    /** Create target frame widget */
+    void CreateTargetFrame();
+
+    /** Update target frame display */
+    void UpdateTargetFrame();
+
+    /** Set target and update UI highlighting */
+    void SetTarget(uint64 NewTargetGuid);
+
     /** Handle keyboard input for action bar slots */
     void HandleActionBarInput();
 
@@ -213,6 +222,9 @@ private:
 
     // Cast bar widget
     TSharedPtr<SWowCastBar> CastBarWidget;
+
+    /** Target frame widget for displaying current target info */
+    TSharedPtr<class STextBlock> TargetFrameText;
 
     // Combat state
     bool bIsAutoAttacking = false;

@@ -37,6 +37,7 @@
 #include "Widgets/SWeakWidget.h"
 #include "Widgets/SCanvas.h"
 #include "Widgets/SOverlay.h"
+#include "Widgets/Text/STextBlock.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -327,6 +328,9 @@ void AWowGameplayController::ApplyDeferredSpawn_Internal(const FVector& SpawnPos
 
 	// Create minimap widget
 	CreateMinimapWidget();
+
+	// Create target frame widget
+	CreateTargetFrame();
 }
 
 void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
@@ -462,6 +466,9 @@ void AWowGameplayController::Tick(float DeltaTime)
 		float Progress = FMath::Clamp(ElapsedTime / CastDuration, 0.0f, 1.0f);
 		CastBarWidget->UpdateProgress(Progress);
 	}
+
+	// Update target frame display
+	UpdateTargetFrame();
 }
 
 void AWowGameplayController::SendMovementUpdate()
@@ -583,10 +590,7 @@ void AWowGameplayController::TryTargetUnderCursor()
 				uint64 HitGuid = Pair.Key;
 				if (HitGuid != TargetGuid)
 				{
-					TargetGuid = HitGuid;
-					ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
-					UE_LOG(LogWowGameplay, Log, TEXT("Targeted entity GUID: %llu (%s)"),
-						TargetGuid, *HitActor->GetName());
+					SetTarget(HitGuid);
 				}
 				return;
 			}
@@ -603,10 +607,7 @@ void AWowGameplayController::TryTargetUnderCursor()
 					uint64 HitGuid = Pair.Key;
 					if (HitGuid != TargetGuid)
 					{
-						TargetGuid = HitGuid;
-						ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
-						UE_LOG(LogWowGameplay, Log, TEXT("Targeted entity GUID: %llu (via owner %s)"),
-							TargetGuid, *Owner->GetName());
+						SetTarget(HitGuid);
 					}
 					return;
 				}
@@ -619,9 +620,7 @@ void AWowGameplayController::TryTargetUnderCursor()
 	// Clicked on nothing or non-entity — clear target
 	if (TargetGuid != 0)
 	{
-		TargetGuid = 0;
-		ConnectionManager->SendSetSelection(0);
-		UE_LOG(LogWowGameplay, Log, TEXT("Target cleared"));
+		SetTarget(0);
 	}
 }
 
@@ -1118,6 +1117,32 @@ void AWowGameplayController::StartAutoAttack()
 		AutoAttackTargetGuid = TargetGuid;
 		ConnectionManager->SendAttackSwing(static_cast<int64>(TargetGuid));
 		UE_LOG(LogWowGameplay, Log, TEXT("Started auto-attack on target %llu"), TargetGuid);
+
+		// Get target name for combat message
+		FString TargetName = TEXT("Unknown");
+		const FWowEntity* TargetEntity = ConnectionManager->PacketHandler.EntityManager.Find(TargetGuid);
+		if (TargetEntity)
+		{
+			if (TargetEntity->IsPlayer())
+			{
+				TargetName = FString::Printf(TEXT("Player %llu"), TargetGuid);
+			}
+			else if (TargetEntity->IsUnit())
+			{
+				TargetName = FString::Printf(TEXT("Creature %u"), TargetEntity->Entry);
+
+				const FDbcStore& DbcStore = FDbcStore::Get();
+				if (DbcStore.IsLoaded())
+				{
+					// Try to get creature name from DBC if available
+					TargetName = FString::Printf(TEXT("Creature %u"), TargetEntity->Entry);
+				}
+			}
+		}
+
+		// Add combat message
+		FString Message = FString::Printf(TEXT("You begin attacking %s"), *TargetName);
+		AddCombatMessage(Message, FLinearColor::Red);
 	}
 }
 
@@ -1197,17 +1222,12 @@ void AWowGameplayController::OnTabTarget()
 
 	if (ClosestGuid != 0)
 	{
-		TargetGuid = ClosestGuid;
-		ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
-		UE_LOG(LogWowGameplay, Log, TEXT("Tab-targeted entity GUID: %llu (dist=%.0f)"),
-			TargetGuid, ClosestDist);
+		SetTarget(ClosestGuid);
 	}
 	else if (TargetGuid != 0)
 	{
 		// No other targets — clear
-		TargetGuid = 0;
-		ConnectionManager->SendSetSelection(0);
-		UE_LOG(LogWowGameplay, Log, TEXT("Tab target: no valid targets, cleared"));
+		SetTarget(0);
 	}
 }
 
@@ -1566,6 +1586,168 @@ void AWowGameplayController::CreateMinimapWidget()
 	}
 
 	UE_LOG(LogWowGameplay, Log, TEXT("Created minimap widget"));
+}
+
+void AWowGameplayController::CreateTargetFrame()
+{
+	if (!ConnectionManager || TargetFrameText.IsValid())
+	{
+		return;
+	}
+
+	// Create target frame text widget
+	TargetFrameText = SNew(STextBlock)
+		.Text(FText::GetEmpty())
+		.ColorAndOpacity(FLinearColor::White)
+		.Visibility(EVisibility::Collapsed); // Start hidden
+
+	if (TargetFrameText.IsValid() && GEngine && GEngine->GameViewport)
+	{
+		// Create container for positioning at top center
+		TSharedRef<SWidget> TargetFrameContainer =
+			SNew(SOverlay)
+			.Visibility(EVisibility::SelfHitTestInvisible)
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Center)  // Top center positioning
+			.VAlign(VAlign_Top)
+			.Padding(0, 50, 0, 0)  // 50px margin from top edge
+			[
+				TargetFrameText.ToSharedRef()
+			];
+
+		GEngine->GameViewport->AddViewportWidgetContent(
+			TargetFrameContainer,
+			80 // Z-order (above minimap and action bar)
+		);
+
+		UE_LOG(LogWowGameplay, Log, TEXT("Created target frame widget"));
+	}
+}
+
+void AWowGameplayController::UpdateTargetFrame()
+{
+	if (!TargetFrameText.IsValid() || !ConnectionManager)
+	{
+		return;
+	}
+
+	// If no target, hide the frame
+	if (TargetGuid == 0)
+	{
+		TargetFrameText->SetVisibility(EVisibility::Collapsed);
+		return;
+	}
+
+	// Find the target entity
+	const FWowEntity* TargetEntity = ConnectionManager->PacketHandler.EntityManager.Find(TargetGuid);
+	if (!TargetEntity)
+	{
+		TargetFrameText->SetVisibility(EVisibility::Collapsed);
+		return;
+	}
+
+	// Get target name
+	FString TargetName = TEXT("Unknown");
+	if (TargetEntity->IsPlayer())
+	{
+		// For players, try to get name from cache (would need proper name resolution)
+		TargetName = FString::Printf(TEXT("Player %llu"), TargetGuid);
+	}
+	else if (TargetEntity->IsUnit())
+	{
+		// For creatures, try to get name from DBC
+		TargetName = FString::Printf(TEXT("Creature %u"), TargetEntity->Entry);
+
+		const FDbcStore& DbcStore = FDbcStore::Get();
+		if (DbcStore.IsLoaded())
+		{
+			// Try to get creature name from DBC if available
+			// Note: This assumes there's a CreatureTemplate DBC, adjust as needed
+			TargetName = FString::Printf(TEXT("Creature %u"), TargetEntity->Entry);
+		}
+	}
+
+	// Get health info
+	int32 Health = TargetEntity->GetHealth();
+	int32 MaxHealth = TargetEntity->GetMaxHealth();
+	int32 Level = TargetEntity->GetLevel();
+
+	// Create target display text
+	FString TargetText = FString::Printf(TEXT("Target: %s Level %d HP: %d/%d"),
+		*TargetName, Level, Health, MaxHealth);
+
+	// Update the widget
+	TargetFrameText->SetText(FText::FromString(TargetText));
+	TargetFrameText->SetVisibility(EVisibility::SelfHitTestInvisible);
+
+	// Color code based on target type
+	FLinearColor TargetColor = FLinearColor::White;
+	if (TargetEntity->IsPlayer())
+	{
+		TargetColor = FLinearColor::Green; // Friendly player
+	}
+	else if (TargetEntity->IsUnit())
+	{
+		// Simplified hostility check - assume creatures are hostile
+		TargetColor = FLinearColor::Red; // Hostile creature
+	}
+
+	TargetFrameText->SetColorAndOpacity(TargetColor);
+}
+
+void AWowGameplayController::SetTarget(uint64 NewTargetGuid)
+{
+	uint64 OldTargetGuid = TargetGuid;
+	TargetGuid = NewTargetGuid;
+
+	// Update nameplate highlighting
+
+	// Unhighlight previous target's nameplate
+	if (OldTargetGuid != 0)
+	{
+		TObjectPtr<UWidgetComponent>* OldNameplatePtr = EntityNameplates.Find(OldTargetGuid);
+		if (OldNameplatePtr && *OldNameplatePtr)
+		{
+			UWidgetComponent* NameplateComponent = *OldNameplatePtr;
+			if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
+			{
+				// Reset nameplate to normal state (would need to add this method to nameplate)
+				// For now, just change the scale back to normal
+				NameplateComponent->SetWorldScale3D(FVector(1.0f, 1.0f, 1.0f));
+			}
+		}
+	}
+
+	// Highlight new target's nameplate
+	if (NewTargetGuid != 0)
+	{
+		TObjectPtr<UWidgetComponent>* NewNameplatePtr = EntityNameplates.Find(NewTargetGuid);
+		if (NewNameplatePtr && *NewNameplatePtr)
+		{
+			UWidgetComponent* NameplateComponent = *NewNameplatePtr;
+			if (UWowNameplateWidget* NameplateWidget = Cast<UWowNameplateWidget>(NameplateComponent->GetUserWidgetObject()))
+			{
+				// Highlight the nameplate (simple approach: scale it up slightly)
+				NameplateComponent->SetWorldScale3D(FVector(1.2f, 1.2f, 1.2f));
+			}
+		}
+	}
+
+	// Send to server
+	if (ConnectionManager)
+	{
+		ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
+	}
+
+	// Log the change
+	if (NewTargetGuid != 0)
+	{
+		UE_LOG(LogWowGameplay, Log, TEXT("Targeted entity GUID: %llu"), NewTargetGuid);
+	}
+	else
+	{
+		UE_LOG(LogWowGameplay, Log, TEXT("Target cleared"));
+	}
 }
 
 void AWowGameplayController::CreatePartyFrame()
