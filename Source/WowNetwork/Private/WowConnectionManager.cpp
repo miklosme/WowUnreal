@@ -339,9 +339,12 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
     TArray<uint8> Data;
     Data.Reserve(32);
 
-    // castCount (uint8) — 0 for first cast
-    uint8 CastCount = 0;
-    Data.Add(CastCount);
+    // castCount (uint8) — increments per cast, wraps at 255
+    static uint8 CastCounter = 0;
+    Data.Add(CastCounter++);
+
+    UE_LOG(LogWowNet, Log, TEXT("SendCastSpell: spell=%d target=%lld castCount=%d"),
+        SpellId, InTargetGuid, CastCounter - 1);
 
     // spellId (uint32)
     uint32 Spell = static_cast<uint32>(SpellId);
