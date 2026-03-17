@@ -547,16 +547,11 @@ void AWowLoginController::FinalizeWorldEntry()
                 Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y, Pawn->GetActorLocation().Z);
         }
 
-        // WoW-style: cursor always visible, clicks go to both game and UI
+        // Game gets ALL input (keyboard + mouse). Cursor stays visible.
         GPC->bShowMouseCursor = true;
         GPC->bEnableClickEvents = true;
         GPC->bEnableMouseOverEvents = true;
-
-        // GameAndUI with NO widget to focus — this keeps mouse free
-        FInputModeGameAndUI InputMode;
-        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-        InputMode.SetHideCursorDuringCapture(false);
-        GPC->SetInputMode(InputMode);
+        GPC->SetInputMode(FInputModeGameOnly());
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));
