@@ -2148,9 +2148,9 @@ void AWowGameplayController::CastSpellFromSlot(int32 SlotIndex)
 	// Only handle spell actions (type 0)
 	if (ActionType == 0 && ActionId > 0)
 	{
-		// Pass current target for targeted spells
+		UE_LOG(LogWowGameplay, Log, TEXT("CastSpellFromSlot: spell=%u slot=%d TargetGuid=%llu (as int64=%lld)"),
+			ActionId, SlotIndex, TargetGuid, static_cast<int64>(TargetGuid));
 		ConnectionManager->SendCastSpell(ActionId, static_cast<int64>(TargetGuid));
-		UE_LOG(LogWowGameplay, Log, TEXT("Cast spell %u from slot %d on target %llu"), ActionId, SlotIndex, TargetGuid);
 	}
 }
 
