@@ -508,6 +508,7 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 
 void AWowGameplayController::OnLeftClick()
 {
+	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick fired"));
 	TryTargetUnderCursor();
 }
 
