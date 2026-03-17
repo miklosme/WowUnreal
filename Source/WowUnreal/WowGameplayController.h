@@ -111,7 +111,7 @@ private:
     void SendMovementUpdate();
     FVector LastSentPosition = FVector::ZeroVector;
     float MovementSyncTimer = 0.0f;
-    float MovementSyncInterval = 0.5f; // 500ms heartbeat
+    float MovementSyncInterval = 0.2f; // 200ms heartbeat // 500ms heartbeat
 
     // Keep-alive
     float KeepAliveTimer = 0.0f;

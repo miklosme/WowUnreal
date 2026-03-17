@@ -369,27 +369,12 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			}
 		}
 
-		// Server position correction: if server position diverges too much, teleport back
-		// Skip while spawn is deferred (loading screen) or using -startpos
-		if (bHasServerPosition && !bDeferSpawnTeleport
-			&& Entity.Movement.Position != FVector::ZeroVector
-			&& !FString(FCommandLine::Get()).Contains(TEXT("startpos")))
+		// Server position tracking (correction disabled — causes rubber-banding)
+		// The client is authoritative for movement; server corrections only
+		// needed for teleports which are handled via OnTeleportRequest
+		if (Entity.Movement.Position != FVector::ZeroVector)
 		{
-			FVector ServerUEPos = FWowCoordinate::WowToUE(Entity.Movement.Position);
-
-			APawn* P = GetPawn();
-			if (P)
-			{
-				const float Dist = FVector::Dist(P->GetActorLocation(), ServerUEPos);
-				if (Dist > ServerCorrectionThreshold)
-				{
-					UE_LOG(LogWowGameplay, Warning, TEXT("Server correction: client diverged %.0f cm from server, teleporting"),
-						Dist);
-					P->SetActorLocation(ServerUEPos, false, nullptr, ETeleportType::TeleportPhysics);
-				}
-			}
-
-			LastServerPosition = ServerUEPos;
+			LastServerPosition = FWowCoordinate::WowToUE(Entity.Movement.Position);
 		}
 	}
 	else
