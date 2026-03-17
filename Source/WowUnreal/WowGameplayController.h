@@ -223,8 +223,15 @@ private:
     // Cast bar widget
     TSharedPtr<SWowCastBar> CastBarWidget;
 
-    /** Target frame widget for displaying current target info */
+    /** Target frame widgets */
     TSharedPtr<class STextBlock> TargetFrameText;
+    TSharedPtr<class SProgressBar> TargetHealthBar;
+    TSharedPtr<class STextBlock> TargetHealthText;
+
+    /** Player frame widgets */
+    TSharedPtr<class SProgressBar> PlayerHealthBar;
+    TSharedPtr<class STextBlock> PlayerHealthText;
+    TSharedPtr<class STextBlock> PlayerNameText;
 
     // Combat state
     bool bIsAutoAttacking = false;

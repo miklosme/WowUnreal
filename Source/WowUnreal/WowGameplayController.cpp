@@ -37,6 +37,7 @@
 #include "Widgets/SWeakWidget.h"
 #include "Widgets/SCanvas.h"
 #include "Widgets/SOverlay.h"
+#include "Widgets/Notifications/SProgressBar.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
@@ -1652,55 +1653,169 @@ void AWowGameplayController::CreateTargetFrame()
 		return;
 	}
 
-	// Create target frame text widget
+	// Target name text
 	TargetFrameText = SNew(STextBlock)
 		.Text(FText::GetEmpty())
-		.ColorAndOpacity(FLinearColor::White)
-		.Visibility(EVisibility::Collapsed); // Start hidden
+		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+		.ColorAndOpacity(FLinearColor::White);
 
-	if (TargetFrameText.IsValid() && GEngine && GEngine->GameViewport)
+	// Target health bar
+	TargetHealthBar = SNew(SProgressBar)
+		.Percent(1.0f)
+		.FillColorAndOpacity(FLinearColor::Red)
+		.BackgroundImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"));
+
+	// Target health text
+	TargetHealthText = SNew(STextBlock)
+		.Text(FText::GetEmpty())
+		.Font(FCoreStyle::GetDefaultFontStyle("Regular", 11))
+		.ColorAndOpacity(FLinearColor::White)
+		.Justification(ETextJustify::Center);
+
+	// Player health bar
+	PlayerHealthBar = SNew(SProgressBar)
+		.Percent(1.0f)
+		.FillColorAndOpacity(FLinearColor::Green)
+		.BackgroundImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"));
+
+	PlayerHealthText = SNew(STextBlock)
+		.Text(FText::GetEmpty())
+		.Font(FCoreStyle::GetDefaultFontStyle("Regular", 11))
+		.ColorAndOpacity(FLinearColor::White)
+		.Justification(ETextJustify::Center);
+
+	PlayerNameText = SNew(STextBlock)
+		.Text(FText::FromString(TEXT("Player")))
+		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+		.ColorAndOpacity(FLinearColor(0.5f, 1.0f, 0.5f));
+
+	if (GEngine && GEngine->GameViewport)
 	{
-		// Create container for positioning at top center
-		TSharedRef<SWidget> TargetFrameContainer =
+		// Target frame — top center
+		TSharedRef<SWidget> TargetContainer =
 			SNew(SOverlay)
 			.Visibility(EVisibility::SelfHitTestInvisible)
 			+ SOverlay::Slot()
-			.HAlign(HAlign_Center)  // Top center positioning
+			.HAlign(HAlign_Center)
 			.VAlign(VAlign_Top)
-			.Padding(0, 50, 0, 0)  // 50px margin from top edge
+			.Padding(0, 20, 0, 0)
 			[
-				TargetFrameText.ToSharedRef()
+				SNew(SBorder)
+				.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.7f))
+				.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+				.Padding(FMargin(8, 4))
+				.Visibility_Lambda([this]() { return TargetGuid != 0 ? EVisibility::SelfHitTestInvisible : EVisibility::Collapsed; })
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 2)
+					[
+						TargetFrameText.ToSharedRef()
+					]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SBox).WidthOverride(200).HeightOverride(16)
+						[
+							SNew(SOverlay)
+							+ SOverlay::Slot()
+							[
+								TargetHealthBar.ToSharedRef()
+							]
+							+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+							[
+								TargetHealthText.ToSharedRef()
+							]
+						]
+					]
+				]
 			];
 
-		GEngine->GameViewport->AddViewportWidgetContent(
-			TargetFrameContainer,
-			80 // Z-order (above minimap and action bar)
-		);
+		GEngine->GameViewport->AddViewportWidgetContent(TargetContainer, 80);
 
-		UE_LOG(LogWowGameplay, Log, TEXT("Created target frame widget"));
+		// Player frame — top left
+		TSharedRef<SWidget> PlayerContainer =
+			SNew(SOverlay)
+			.Visibility(EVisibility::SelfHitTestInvisible)
+			+ SOverlay::Slot()
+			.HAlign(HAlign_Left)
+			.VAlign(VAlign_Top)
+			.Padding(20, 20, 0, 0)
+			[
+				SNew(SBorder)
+				.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.7f))
+				.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+				.Padding(FMargin(8, 4))
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 2)
+					[
+						PlayerNameText.ToSharedRef()
+					]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SBox).WidthOverride(200).HeightOverride(16)
+						[
+							SNew(SOverlay)
+							+ SOverlay::Slot()
+							[
+								PlayerHealthBar.ToSharedRef()
+							]
+							+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+							[
+								PlayerHealthText.ToSharedRef()
+							]
+						]
+					]
+				]
+			];
+
+		GEngine->GameViewport->AddViewportWidgetContent(PlayerContainer, 80);
+
+		UE_LOG(LogWowGameplay, Log, TEXT("Created player and target frame widgets"));
 	}
 }
 
 void AWowGameplayController::UpdateTargetFrame()
 {
-	if (!TargetFrameText.IsValid() || !ConnectionManager)
+	if (!ConnectionManager) return;
+
+	// Update player health bar
+	if (PlayerHealthBar.IsValid())
 	{
-		return;
+		const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+		const FWowEntity* LocalEntity = ConnectionManager->PacketHandler.EntityManager.Find(LocalGuid);
+		if (LocalEntity)
+		{
+			int32 HP = LocalEntity->GetHealth();
+			int32 MaxHP = LocalEntity->GetMaxHealth();
+			float Pct = (MaxHP > 0) ? FMath::Clamp((float)HP / (float)MaxHP, 0.0f, 1.0f) : 1.0f;
+			PlayerHealthBar->SetPercent(Pct);
+			if (PlayerHealthText.IsValid())
+			{
+				PlayerHealthText->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"), HP, MaxHP)));
+			}
+		}
 	}
 
-	// If no target, hide the frame
-	if (TargetGuid == 0)
-	{
-		TargetFrameText->SetVisibility(EVisibility::Collapsed);
-		return;
-	}
+	if (!TargetFrameText.IsValid()) return;
+
+	// If no target, bars remain but target section hides via visibility lambda
+	if (TargetGuid == 0) return;
 
 	// Find the target entity
 	const FWowEntity* TargetEntity = ConnectionManager->PacketHandler.EntityManager.Find(TargetGuid);
-	if (!TargetEntity)
+	if (!TargetEntity) return;
+
+	// Update target health bar
+	if (TargetHealthBar.IsValid())
 	{
-		TargetFrameText->SetVisibility(EVisibility::Collapsed);
-		return;
+		int32 HP = TargetEntity->GetHealth();
+		int32 MaxHP = TargetEntity->GetMaxHealth();
+		float Pct = (MaxHP > 0) ? FMath::Clamp((float)HP / (float)MaxHP, 0.0f, 1.0f) : 1.0f;
+		TargetHealthBar->SetPercent(Pct);
+		if (TargetHealthText.IsValid())
+		{
+			TargetHealthText->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"), HP, MaxHP)));
+		}
 	}
 
 	// Get target name
