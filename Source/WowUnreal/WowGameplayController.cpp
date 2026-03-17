@@ -22,6 +22,7 @@
 #include "UI/SWowActionBar.h"
 #include "UI/SWowMinimap.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/PlayerInput.h"
 #include "Kismet/GameplayStatics.h"
 #include "Coord/WowCoordinate.h"
 #include "Components/WidgetComponent.h"
@@ -493,6 +494,39 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 	{
 		EventSystem->FireEvent(EventName);
 	}
+}
+
+bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
+{
+	// Handle game input directly — bypasses Slate focus issues
+	if (Params.Event == IE_Pressed)
+	{
+		if (Params.Key == EKeys::LeftMouseButton)
+		{
+			OnLeftClick();
+		}
+		else if (Params.Key == EKeys::RightMouseButton)
+		{
+			OnRightClick();
+		}
+		else if (Params.Key == EKeys::Tab)
+		{
+			OnTabTarget();
+		}
+		else if (Params.Key == EKeys::One) { CastSpellFromSlot(0); }
+		else if (Params.Key == EKeys::Two) { CastSpellFromSlot(1); }
+		else if (Params.Key == EKeys::Three) { CastSpellFromSlot(2); }
+		else if (Params.Key == EKeys::Four) { CastSpellFromSlot(3); }
+		else if (Params.Key == EKeys::Five) { CastSpellFromSlot(4); }
+		else if (Params.Key == EKeys::Six) { CastSpellFromSlot(5); }
+		else if (Params.Key == EKeys::Seven) { CastSpellFromSlot(6); }
+		else if (Params.Key == EKeys::Eight) { CastSpellFromSlot(7); }
+		else if (Params.Key == EKeys::Nine) { CastSpellFromSlot(8); }
+		else if (Params.Key == EKeys::Zero) { CastSpellFromSlot(9); }
+	}
+
+	// Let parent handle the input too (for movement etc.)
+	return Super::InputKey(Params);
 }
 
 void AWowGameplayController::OnLeftClick()

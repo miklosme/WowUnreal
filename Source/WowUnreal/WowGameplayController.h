@@ -34,6 +34,9 @@ public:
     virtual void Tick(float DeltaTime) override;
     virtual void SetupInputComponent() override;
 
+    /** Override to catch all input regardless of input mode */
+    virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+
     /** Connection manager for sending movement packets */
     UPROPERTY()
     TObjectPtr<UWowConnectionManager> ConnectionManager;
