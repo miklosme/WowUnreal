@@ -794,46 +794,74 @@ void FWowCharacterTexture::ApplyEquipmentOverlays(TArray<uint8>& Composite, uint
         }
     };
 
-    // CHEST: Check if it's a robe first, then apply appropriate regions
-    if (Equipment.ChestDisplayId > 0)
+    // WoW texture layering order (bottom to top):
+    // 1. Skin (already applied as base)
+    // 2. Underwear (already applied)
+    // 3. Shirt
+    // 4. Pants (skip if wearing robe)
+    // 5. Boots
+    // 6. Bracers
+    // 7. Gloves
+    // 8. Chest/Robe (on TOP — covers everything underneath)
+
+    bool bIsWearingRobe = Equipment.bIsRobeEquipped;
+    if (!bIsWearingRobe && Equipment.ChestDisplayId > 0)
     {
         const FItemDisplayInfoDbcEntry* ChestItem = Dbc.ItemDisplayInfo().GetById(Equipment.ChestDisplayId);
-        if (ChestItem && ChestItem->GeosetGroups[2] > 0) // Robe indicator
+        if (ChestItem && ChestItem->GeosetGroups[2] > 0)
+            bIsWearingRobe = true;
+    }
+
+    // SHIRT: arms only when wearing robe (robe covers torso), full when no robe
+    if (Equipment.ShirtDisplayId > 0)
+    {
+        if (bIsWearingRobe)
         {
-            // Robes include arms, torso, and legs
-            TArray<uint32> RobeRegions = {0, 1, 3, 4, 5, 6}; // ARM_UPPER, ARM_LOWER, TORSO_UPPER, TORSO_LOWER, LEG_UPPER, LEG_LOWER
+            // Only shirt sleeves show under a sleeveless robe
+            TArray<uint32> ShirtRegions = {0, 1}; // ARM_UPPER, ARM_LOWER only
+            ApplyItemOverlays(Equipment.ShirtDisplayId, ShirtRegions);
+        }
+        else
+        {
+            TArray<uint32> ShirtRegions = {0, 1, 3, 4};
+            ApplyItemOverlays(Equipment.ShirtDisplayId, ShirtRegions);
+        }
+    }
+
+    // PANTS: skip entirely when wearing robe (robe covers legs)
+    if (!bIsWearingRobe)
+    {
+        TArray<uint32> PantsRegions = {5, 6};
+        ApplyItemOverlays(Equipment.PantsDisplayId, PantsRegions);
+    }
+
+    // BOOTS
+    TArray<uint32> BootsRegions = {6, 7};
+    ApplyItemOverlays(Equipment.BootsDisplayId, BootsRegions);
+
+    // BRACERS
+    TArray<uint32> BracersRegions = {1};
+    ApplyItemOverlays(Equipment.BracersDisplayId, BracersRegions);
+
+    // GLOVES
+    TArray<uint32> GlovesRegions = {1, 2};
+    ApplyItemOverlays(Equipment.GlovesDisplayId, GlovesRegions);
+
+    // CHEST/ROBE: applied LAST so it covers everything underneath
+    if (Equipment.ChestDisplayId > 0)
+    {
+        if (bIsWearingRobe)
+        {
+            // Robe covers torso + legs (arms only if robe has sleeve textures)
+            TArray<uint32> RobeRegions = {0, 1, 3, 4, 5, 6};
             ApplyItemOverlays(Equipment.ChestDisplayId, RobeRegions);
         }
         else
         {
-            // Regular chest armor: arms and torso only
-            TArray<uint32> ChestRegions = {0, 1, 3, 4}; // ARM_UPPER, ARM_LOWER, TORSO_UPPER, TORSO_LOWER
+            TArray<uint32> ChestRegions = {0, 1, 3, 4};
             ApplyItemOverlays(Equipment.ChestDisplayId, ChestRegions);
         }
     }
-
-    // SHIRT: always just arms and torso
-    if (Equipment.ShirtDisplayId > 0)
-    {
-        TArray<uint32> ShirtRegions = {0, 1, 3, 4}; // ARM_UPPER, ARM_LOWER, TORSO_UPPER, TORSO_LOWER
-        ApplyItemOverlays(Equipment.ShirtDisplayId, ShirtRegions);
-    }
-
-    // PANTS: overlays [5]=LEG_UPPER, [6]=LEG_LOWER
-    TArray<uint32> PantsRegions = {5, 6};
-    ApplyItemOverlays(Equipment.PantsDisplayId, PantsRegions);
-
-    // GLOVES: overlays [2]=HAND, [1]=ARM_LOWER
-    TArray<uint32> GlovesRegions = {1, 2};
-    ApplyItemOverlays(Equipment.GlovesDisplayId, GlovesRegions);
-
-    // BOOTS: overlays [6]=LEG_LOWER, [7]=FOOT
-    TArray<uint32> BootsRegions = {6, 7};
-    ApplyItemOverlays(Equipment.BootsDisplayId, BootsRegions);
-
-    // BRACERS: overlays [1]=ARM_LOWER
-    TArray<uint32> BracersRegions = {1};
-    ApplyItemOverlays(Equipment.BracersDisplayId, BracersRegions);
 
     // BELT: overlays [4]=TORSO_LOWER, [5]=LEG_UPPER
     TArray<uint32> BeltRegions = {4, 5};
