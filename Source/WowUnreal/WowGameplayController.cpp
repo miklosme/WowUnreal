@@ -115,6 +115,9 @@ void AWowGameplayController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &AWowGameplayController::OnActionSlotMinus);
 	InputComponent->BindKey(EKeys::Equals, IE_Pressed, this, &AWowGameplayController::OnActionSlotEquals);
 
+	// Tab targeting — select closest enemy
+	InputComponent->BindKey(EKeys::Tab, IE_Pressed, this, &AWowGameplayController::OnTabTarget);
+
 	// Minimap toggle
 	InputComponent->BindKey(EKeys::M, IE_Pressed, this, &AWowGameplayController::OnToggleMap);
 
@@ -553,13 +556,12 @@ void AWowGameplayController::TryTargetUnderCursor()
 	{
 		AActor* HitActor = Hit.GetActor();
 
-		// Check if the hit actor has an associated entity GUID (stored as tag)
-		for (const FName& Tag : HitActor->Tags)
+		// Find GUID from spawned entity actors map (reverse lookup — more reliable than tag parsing)
+		for (const auto& Pair : SpawnedEntityActors)
 		{
-			FString GuidTag = Tag.ToString();
-			uint64 HitGuid = FCString::Atoi64(*GuidTag);
-			if (HitGuid != 0)
+			if (Pair.Value == HitActor)
 			{
+				uint64 HitGuid = Pair.Key;
 				if (HitGuid != TargetGuid)
 				{
 					TargetGuid = HitGuid;
@@ -571,7 +573,27 @@ void AWowGameplayController::TryTargetUnderCursor()
 			}
 		}
 
-		// Hit something but not an entity — could be terrain
+		// Also check if we hit a child component (capsule) of an entity actor
+		AActor* Owner = HitActor->GetOwner();
+		if (Owner)
+		{
+			for (const auto& Pair : SpawnedEntityActors)
+			{
+				if (Pair.Value == Owner)
+				{
+					uint64 HitGuid = Pair.Key;
+					if (HitGuid != TargetGuid)
+					{
+						TargetGuid = HitGuid;
+						ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
+						UE_LOG(LogWowGameplay, Log, TEXT("Targeted entity GUID: %llu (via owner %s)"),
+							TargetGuid, *Owner->GetName());
+					}
+					return;
+				}
+			}
+		}
+
 		UE_LOG(LogWowGameplay, Verbose, TEXT("Hit non-entity: %s"), *HitActor->GetName());
 	}
 
@@ -1120,6 +1142,53 @@ void AWowGameplayController::OnRightClick()
 		{
 			OnRightClick(); // Recursive call to handle the new target
 		}
+	}
+}
+
+void AWowGameplayController::OnTabTarget()
+{
+	if (!ConnectionManager) return;
+
+	APawn* MyPawn = GetPawn();
+	if (!MyPawn) return;
+
+	FVector MyPos = MyPawn->GetActorLocation();
+	float ClosestDist = MAX_FLT;
+	uint64 ClosestGuid = 0;
+	AActor* ClosestActor = nullptr;
+
+	// Find closest NPC/hostile entity (skip current target to cycle)
+	for (const auto& Pair : SpawnedEntityActors)
+	{
+		if (!Pair.Value || !IsValid(Pair.Value)) continue;
+		if (Pair.Key == TargetGuid) continue; // Skip current target to cycle
+
+		// Only target units (not players for tab target)
+		const FWowEntity* Entity = ConnectionManager->PacketHandler.EntityManager.Find(Pair.Key);
+		if (!Entity || !Entity->IsUnit() || Entity->IsPlayer()) continue;
+
+		float Dist = FVector::Dist(MyPos, Pair.Value->GetActorLocation());
+		if (Dist < ClosestDist && Dist < 4000000.0f) // ~400 yards max range
+		{
+			ClosestDist = Dist;
+			ClosestGuid = Pair.Key;
+			ClosestActor = Pair.Value;
+		}
+	}
+
+	if (ClosestGuid != 0)
+	{
+		TargetGuid = ClosestGuid;
+		ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
+		UE_LOG(LogWowGameplay, Log, TEXT("Tab-targeted entity GUID: %llu (dist=%.0f)"),
+			TargetGuid, ClosestDist);
+	}
+	else if (TargetGuid != 0)
+	{
+		// No other targets — clear
+		TargetGuid = 0;
+		ConnectionManager->SendSetSelection(0);
+		UE_LOG(LogWowGameplay, Log, TEXT("Tab target: no valid targets, cleared"));
 	}
 }
 

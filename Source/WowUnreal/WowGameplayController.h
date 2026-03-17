@@ -259,6 +259,7 @@ private:
 
 
     void OnRightClick();
+    void OnTabTarget();
 
     // Minimap input
     void OnToggleMap(); // 'M' key handler
