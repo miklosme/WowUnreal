@@ -1,5 +1,7 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "Styling/SlateBrush.h"
+#include "UObject/StrongObjectPtr.h"
 #include "Widgets/SCompoundWidget.h"
 
 class UTexture2D;
@@ -27,4 +29,6 @@ public:
 private:
     TSharedPtr<class SImage> BackgroundImage;
     TSharedPtr<class STextBlock> ProgressText;
+    TStrongObjectPtr<UTexture2D> BackgroundTexture;
+    FSlateBrush BackgroundBrush;
 };

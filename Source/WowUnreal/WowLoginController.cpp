@@ -23,6 +23,7 @@
 #include "Components/CanvasPanel.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SOverlay.h"
+#include "Widgets/SViewport.h"
 // SOverlay.h already included above
 #include "Formats/Dbc/DbcStore.h"
 #include "WowAssetCache.h"
@@ -34,7 +35,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowLogin, Log, All);
 
 namespace
 {
-void ApplyWowUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
+void ApplyWowLoginUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
 {
     if (!PlayerController)
     {
@@ -90,7 +91,9 @@ void AWowLoginController::StartLoginFlow()
     if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
     {
         PC->bShowMouseCursor = true;
-        ApplyWowUiInputMode(PC, GEngine && GEngine->GameViewport ? GEngine->GameViewport->GetGameViewportWidget() : nullptr);
+        ApplyWowLoginUiInputMode(PC, GEngine && GEngine->GameViewport
+            ? StaticCastSharedPtr<SWidget>(GEngine->GameViewport->GetGameViewportWidget())
+            : nullptr);
     }
 }
 
@@ -348,7 +351,7 @@ void AWowLoginController::InitializeWorldSystems()
                     UIManager->SetRootCanvas(UIRootCanvas);
                     if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
                     {
-                        ApplyWowUiInputMode(PC, CanvasWidget);
+                        ApplyWowLoginUiInputMode(PC, CanvasWidget);
                     }
                     UE_LOG(LogWowLogin, Log, TEXT("Created WoW UI root canvas at z-order 50"));
                 }
@@ -569,7 +572,9 @@ void AWowLoginController::FinalizeWorldEntry()
         GPC->bShowMouseCursor = true;
         GPC->bEnableClickEvents = true;
         GPC->bEnableMouseOverEvents = true;
-        ApplyWowUiInputMode(GPC, GEngine && GEngine->GameViewport ? GEngine->GameViewport->GetGameViewportWidget() : nullptr);
+        ApplyWowLoginUiInputMode(GPC, GEngine && GEngine->GameViewport
+            ? StaticCastSharedPtr<SWidget>(GEngine->GameViewport->GetGameViewportWidget())
+            : nullptr);
         if (FSlateApplication::IsInitialized())
         {
             FSlateApplication::Get().SetAllUserFocusToGameViewport(EFocusCause::SetDirectly);
@@ -598,6 +603,11 @@ void AWowLoginController::HandleExpansionChanged(uint8 ExpansionIndex)
 
 void AWowLoginController::ClearCurrentScreen()
 {
+    if (LoadingScreenWidget.IsValid())
+    {
+        LoadingScreenWidget->SetBackgroundImage(nullptr);
+    }
+
     if (CurrentWidget.IsValid())
     {
         if (GEngine && GEngine->GameViewport)

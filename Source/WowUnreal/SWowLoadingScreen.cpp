@@ -5,7 +5,7 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SOverlay.h"
 #include "Engine/Texture2D.h"
-#include "Brushes/SlateImageBrush.h"
+#include "Styling/SlateBrush.h"
 
 void SWowLoadingScreen::Construct(const FArguments& InArgs)
 {
@@ -50,17 +50,17 @@ void SWowLoadingScreen::SetBackgroundImage(UTexture2D* Texture)
 
     if (Texture)
     {
-        // Create a brush from the texture
-        FSlateBrush* Brush = new FSlateBrush();
-        Brush->SetResourceObject(Texture);
-        Brush->ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
-        Brush->DrawAs = ESlateBrushDrawType::Image;
-
-        BackgroundImage->SetImage(Brush);
+        BackgroundTexture.Reset(Texture);
+        BackgroundBrush = FSlateBrush();
+        BackgroundBrush.SetResourceObject(BackgroundTexture.Get());
+        BackgroundBrush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
+        BackgroundBrush.DrawAs = ESlateBrushDrawType::Image;
+        BackgroundImage->SetImage(&BackgroundBrush);
     }
     else
     {
-        // Fall back to black background
+        BackgroundTexture.Reset();
+        BackgroundBrush = FSlateBrush();
         BackgroundImage->SetImage(FCoreStyle::Get().GetBrush("Black"));
     }
 }

@@ -80,6 +80,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] 3D character preview in character select (SceneCapture2D)
 - [x] Deferred terrain loading (no world behind login screen)
 - [x] Loading screen with tile progress
+- [?] Long-lived loading screen Slate texture/brush lifetime stability (retain background resources while visible, release them before rebuilding the loading screen)
 - [x] Ground snap after terrain loads (line trace to terrain surface)
 - [x] `-autologin` flag (prefills and auto-submits through UI)
 - [x] `-createchar` flag (auto-creates Human Mage, enters world)
@@ -225,7 +226,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Full addon loading from Interface/AddOns/
 - [x] Font rendering with WoW .ttf fonts (in progress — P7 agent)
 - [x] FrameXML child `OnLoad` bootstrap stability (preserve frame Lua objects across creation/compile, seed parent IDs before child `OnLoad`, keep RuneFrame bootstrap alive without reintroducing Lua heap blowups)
-- [?] Secure attribute delegate dispatch for Blizzard dropdown bootstrap (`SetAttribute` now drives `OnAttributeChanged` so `UIDROPDOWNMENU_INIT_MENU`/unit popup dropdowns initialize)
+- [x] Secure attribute delegate dispatch for Blizzard dropdown bootstrap (`SetAttribute` now drives `OnAttributeChanged` so `UIDROPDOWNMENU_INIT_MENU`/unit popup dropdowns initialize)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
