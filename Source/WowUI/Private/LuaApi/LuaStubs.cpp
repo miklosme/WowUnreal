@@ -4693,6 +4693,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     });
     lua_register(L, "GetArenaTeam", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetNumArenaTeams", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetNumArenaOpponents", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "IsInArenaTeam", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
     lua_register(L, "GetDodgeChance", L_GetDodgeChance);
     lua_register(L, "GetParryChance", L_GetParryChance);
