@@ -5413,6 +5413,32 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         if (lua_isnil(L2, -1)) { lua_pop(L2, 1); lua_pushstring(L2, key); }
         return 1;
     });
+    lua_register(L, "IsReferAFriendLinked", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "GetOptOutOfLoot", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "HasLFGRestrictions", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "CanChangePlayerDifficulty", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "GetInstanceInfo", [](lua_State* L2) -> int {
+        lua_pushnil(L2);             // name
+        lua_pushstring(L2, "none");  // instanceType
+        lua_pushnumber(L2, 1);       // difficulty
+        lua_pushstring(L2, "");      // difficultyName
+        lua_pushnumber(L2, 0);       // maxPlayers
+        lua_pushnumber(L2, 0);       // playerDifficulty
+        lua_pushboolean(L2, false);  // isDynamicInstance
+        return 7;
+    });
 
     // Missing functions from error logs
     lua_register(L, "UnitInBattleground", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
