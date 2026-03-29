@@ -17,6 +17,79 @@ extern "C" {
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowEvent, Log, All);
 
+#if HAS_LUA
+namespace
+{
+	constexpr int32 MaxLegacyLuaArgs = 9;
+	const char* LegacyArgNames[MaxLegacyLuaArgs] = {
+		"arg1", "arg2", "arg3", "arg4", "arg5", "arg6", "arg7", "arg8", "arg9"
+	};
+
+	struct FLuaSavedGlobal
+	{
+		const char* Name = nullptr;
+		int32 Ref = LUA_NOREF;
+	};
+
+	static void SaveAndSetLuaGlobal(lua_State* L, const char* Name, int32 StackIndex, TArray<FLuaSavedGlobal>& SavedGlobals)
+	{
+		lua_getglobal(L, Name);
+		FLuaSavedGlobal& Saved = SavedGlobals.AddDefaulted_GetRef();
+		Saved.Name = Name;
+		Saved.Ref = luaL_ref(L, LUA_REGISTRYINDEX);
+
+		if (StackIndex != 0)
+		{
+			lua_pushvalue(L, StackIndex);
+		}
+		else
+		{
+			lua_pushnil(L);
+		}
+		lua_setglobal(L, Name);
+	}
+
+	static int32 GetLuaAbsIndex(lua_State* L, int32 StackIndex)
+	{
+		return StackIndex > 0 || StackIndex <= LUA_REGISTRYINDEX
+			? StackIndex
+			: lua_gettop(L) + StackIndex + 1;
+	}
+
+	static void RestoreLuaGlobals(lua_State* L, TArray<FLuaSavedGlobal>& SavedGlobals)
+	{
+		for (int32 Index = SavedGlobals.Num() - 1; Index >= 0; --Index)
+		{
+			const FLuaSavedGlobal& Saved = SavedGlobals[Index];
+			lua_rawgeti(L, LUA_REGISTRYINDEX, Saved.Ref);
+			lua_setglobal(L, Saved.Name);
+			luaL_unref(L, LUA_REGISTRYINDEX, Saved.Ref);
+		}
+		SavedGlobals.Reset();
+	}
+
+	static void SetWowHandlerGlobals(lua_State* L, int32 SelfIndex, int32 EventIndex, const TArray<int32>& ArgIndices, TArray<FLuaSavedGlobal>& SavedGlobals)
+	{
+		SavedGlobals.Reset();
+		SavedGlobals.Reserve(2 + MaxLegacyLuaArgs);
+
+		const int32 AbsSelfIndex = SelfIndex != 0 ? GetLuaAbsIndex(L, SelfIndex) : 0;
+		const int32 AbsEventIndex = EventIndex != 0 ? GetLuaAbsIndex(L, EventIndex) : 0;
+
+		SaveAndSetLuaGlobal(L, "this", AbsSelfIndex, SavedGlobals);
+		SaveAndSetLuaGlobal(L, "event", AbsEventIndex, SavedGlobals);
+
+		for (int32 ArgIndex = 0; ArgIndex < MaxLegacyLuaArgs; ++ArgIndex)
+		{
+			const int32 StackIndex = ArgIndex < ArgIndices.Num() && ArgIndices[ArgIndex] != 0
+				? GetLuaAbsIndex(L, ArgIndices[ArgIndex])
+				: 0;
+			SaveAndSetLuaGlobal(L, LegacyArgNames[ArgIndex], StackIndex, SavedGlobals);
+		}
+	}
+}
+#endif
+
 void FWowEventSystem::RegisterEvent(int64 FrameHandle, const FString& EventName)
 {
 	EventRegistrations.FindOrAdd(EventName).Add(FrameHandle);
@@ -124,11 +197,28 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 
 		// Call: func(self, event, arg1, arg2, ...)
 		int32 NumArgs = 2 + Args.Num();
+		const int32 FunctionIndex = lua_gettop(L) - NumArgs;
+		const int32 SelfIndex = FunctionIndex + 1;
+		const int32 EventIndex = FunctionIndex + 2;
+		TArray<int32> LegacyArgIndices;
+		LegacyArgIndices.Reserve(FMath::Min(Args.Num(), MaxLegacyLuaArgs));
+		for (int32 ArgIndex = 0; ArgIndex < Args.Num() && ArgIndex < MaxLegacyLuaArgs; ++ArgIndex)
+		{
+			LegacyArgIndices.Add(FunctionIndex + 3 + ArgIndex);
+		}
+
+		TArray<FLuaSavedGlobal> SavedGlobals;
+		SetWowHandlerGlobals(L, SelfIndex, EventIndex, LegacyArgIndices, SavedGlobals);
 		if (lua_pcall(L, NumArgs, 0, 0) != 0)
 		{
+			RestoreLuaGlobals(L, SavedGlobals);
 			UE_LOG(LogWowEvent, Error, TEXT("OnEvent error [frame %lld] %s: %s"),
 				Handle, *EventName, UTF8_TO_TCHAR(lua_tostring(L, -1)));
 			lua_pop(L, 1);
+		}
+		else
+		{
+			RestoreLuaGlobals(L, SavedGlobals);
 		}
 	}
 #endif
@@ -251,7 +341,7 @@ void FWowEventSystem::SetFrameScriptRef(int64 Handle, const FString& ScriptName,
 #endif
 }
 
-void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName)
+void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName, int32 FrameID)
 {
 #if HAS_LUA
 	if (!LuaVM) return;
@@ -259,40 +349,67 @@ void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName)
 	lua_State* L = LuaVM->GetState();
 	if (!L) return;
 
-	// Create a Lua table to represent this frame
+	const auto PopulateFrameTable = [&](int32 TableIndex)
+	{
+		const int32 AbsTableIndex = GetLuaAbsIndex(L, TableIndex);
+
+		lua_pushinteger(L, Handle);
+		lua_setfield(L, AbsTableIndex, "__handle");
+
+		if (!FrameName.IsEmpty())
+		{
+			FTCHARToUTF8 UTF8Name(*FrameName);
+			lua_pushstring(L, UTF8Name.Get());
+			lua_setfield(L, AbsTableIndex, "__name");
+		}
+
+		if (FrameID != 0)
+		{
+			lua_pushnumber(L, FrameID);
+			lua_setfield(L, AbsTableIndex, "__id");
+		}
+
+		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
+		if (!lua_isnil(L, -1))
+		{
+			lua_setmetatable(L, AbsTableIndex);
+		}
+		else
+		{
+			lua_pop(L, 1);
+		}
+	};
+
+	if (int32* ExistingRef = FrameObjectRefs.Find(Handle))
+	{
+		lua_rawgeti(L, LUA_REGISTRYINDEX, *ExistingRef);
+		if (lua_istable(L, -1))
+		{
+			PopulateFrameTable(-1);
+
+			if (!FrameName.IsEmpty())
+			{
+				lua_pushvalue(L, -1);
+				FTCHARToUTF8 UTF8Name(*FrameName);
+				lua_setglobal(L, UTF8Name.Get());
+			}
+
+			lua_pop(L, 1);
+			UE_LOG(LogWowEvent, Verbose, TEXT("Updated frame object [%lld] %s"), Handle, *FrameName);
+			return;
+		}
+
+		lua_pop(L, 1);
+		luaL_unref(L, LUA_REGISTRYINDEX, *ExistingRef);
+		FrameObjectRefs.Remove(Handle);
+	}
+
 	lua_newtable(L);
-
-	// Store the handle
-	lua_pushinteger(L, Handle);
-	lua_setfield(L, -2, "__handle");
-
-	// Store the name
-	if (!FrameName.IsEmpty())
-	{
-		FTCHARToUTF8 UTF8Name(*FrameName);
-		lua_pushstring(L, UTF8Name.Get());
-		lua_setfield(L, -2, "__name");
-	}
-
-	// Set the frame metatable so frame:Method() calls work
-	luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
-	if (!lua_isnil(L, -1))
-	{
-		lua_setmetatable(L, -2);
-	}
-	else
-	{
-		lua_pop(L, 1); // pop nil if metatable not registered yet
-	}
+	PopulateFrameTable(-1);
 
 	// Store as registry ref
 	int32 Ref = luaL_ref(L, LUA_REGISTRYINDEX);
 
-	// Clean up old ref
-	if (int32* OldRef = FrameObjectRefs.Find(Handle))
-	{
-		luaL_unref(L, LUA_REGISTRYINDEX, *OldRef);
-	}
 	FrameObjectRefs.Add(Handle, Ref);
 
 	// Also register as a global variable if the frame has a name
@@ -307,7 +424,7 @@ void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName)
 #endif
 }
 
-void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName)
+void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle, const FString& ObjectType)
 {
 #if HAS_LUA
 	if (!LuaVM || RegionName.IsEmpty()) return;
@@ -322,6 +439,19 @@ void FWowEventSystem::CreateTextureRegionGlobal(const FString& RegionName)
 	FTCHARToUTF8 UTF8Name(*RegionName);
 	lua_pushstring(L, UTF8Name.Get());
 	lua_setfield(L, -2, "__name");
+
+	if (ParentHandle >= 0)
+	{
+		lua_pushinteger(L, ParentHandle);
+		lua_setfield(L, -2, "__parentHandle");
+	}
+
+	if (!ObjectType.IsEmpty())
+	{
+		FTCHARToUTF8 UTF8ObjectType(*ObjectType);
+		lua_pushstring(L, UTF8ObjectType.Get());
+		lua_setfield(L, -2, "__objectType");
+	}
 
 	// Set the frame metatable so region:SetTexture() etc work
 	luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
@@ -409,14 +539,27 @@ bool FWowEventSystem::RunFrameScript(int64 Handle, const FString& ScriptName, co
 
 	// Call: func(self, arg1, arg2, ...)
 	int32 NumArgs = 1 + StringArgs.Num();
+	const int32 FunctionIndex = lua_gettop(L) - NumArgs;
+	const int32 SelfIndex = FunctionIndex + 1;
+	TArray<int32> LegacyArgIndices;
+	LegacyArgIndices.Reserve(FMath::Min(StringArgs.Num(), MaxLegacyLuaArgs));
+	for (int32 ArgIndex = 0; ArgIndex < StringArgs.Num() && ArgIndex < MaxLegacyLuaArgs; ++ArgIndex)
+	{
+		LegacyArgIndices.Add(FunctionIndex + 2 + ArgIndex);
+	}
+
+	TArray<FLuaSavedGlobal> SavedGlobals;
+	SetWowHandlerGlobals(L, SelfIndex, 0, LegacyArgIndices, SavedGlobals);
 	if (lua_pcall(L, NumArgs, 0, 0) != 0)
 	{
+		RestoreLuaGlobals(L, SavedGlobals);
 		const char* Err = lua_tostring(L, -1);
 		UE_LOG(LogWowEvent, Error, TEXT("RunFrameScript error [%lld] %s: %s"),
 			Handle, *ScriptName, Err ? UTF8_TO_TCHAR(Err) : TEXT("unknown"));
 		lua_pop(L, 1);
 		return false;
 	}
+	RestoreLuaGlobals(L, SavedGlobals);
 	return true;
 #else
 	return false;
@@ -435,10 +578,65 @@ static FString GetChildFieldKey(const FString& ChildName, const FString& ParentN
 	return Suffix;
 }
 
+static FString MakeChildGlobalName(const FString& ParentName, const FString& FieldKey)
+{
+	if (ParentName.IsEmpty() || FieldKey.IsEmpty())
+	{
+		return FString();
+	}
+
+	FString Suffix = FieldKey;
+	Suffix[0] = FChar::ToUpper(Suffix[0]);
+	return ParentName + Suffix;
+}
+
+static FString BuildFunctionHandlerWrapper(const FString& FunctionName)
+{
+	if (FunctionName.IsEmpty())
+	{
+		return FString();
+	}
+
+	FString EscapedName = FunctionName;
+	EscapedName.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
+	EscapedName.ReplaceInline(TEXT("\""), TEXT("\\\""));
+
+	return FString::Printf(
+		TEXT("local fn = _G[\"%s\"]; if type(fn) == \"function\" then return fn(self, ...) end"),
+		*EscapedName);
+}
+
+static bool ShouldCompileOnLoadFunctionHandler(const FString& FunctionName)
+{
+	// Keep this intentionally narrow. A broad function="..." implementation
+	// wakes up Blizzard bootstrap paths that currently explode our Lua heap.
+	return FunctionName == TEXT("RuneFrame_OnLoad");
+}
+
+#if HAS_LUA
+static bool BindDirectGlobalField(lua_State* L, const FString& GlobalName, const char* FieldName)
+{
+	if (GlobalName.IsEmpty() || !FieldName)
+	{
+		return false;
+	}
+
+	lua_getglobal(L, TCHAR_TO_UTF8(*GlobalName));
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		return false;
+	}
+
+	lua_setfield(L, -2, FieldName);
+	return true;
+}
+#endif
+
 void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 {
 	// Create the Lua frame object first
-	CreateFrameObject(Handle, Def.Name);
+	CreateFrameObject(Handle, Def.Name, Def.FrameID);
 
 #if HAS_LUA
 	// Set child element references on the parent frame table.
@@ -452,15 +650,139 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 		{
 			lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef); // push frame table
 
-			// Set the frame ID from XML "id" attribute
-			if (Def.FrameID != 0)
+			auto GetPreferredFieldKey = [&](const FString& ParentKey, const FString& ChildName) -> FString
 			{
-				lua_pushnumber(L, Def.FrameID);
-				lua_setfield(L, -2, "__id");
-			}
+				if (!ParentKey.IsEmpty())
+				{
+					return ParentKey;
+				}
 
-			// Map named textures and fontstrings from layers
-			int32 MappedCount = 0, MissedCount = 0;
+				return GetChildFieldKey(ChildName, Def.Name);
+			};
+
+			auto BindRegionField = [&](const FString& ParentKey, const FString& RegionName, const FString& ObjectType)
+			{
+				const FString FieldKey = GetPreferredFieldKey(ParentKey, RegionName);
+				if (FieldKey.IsEmpty())
+				{
+					return;
+				}
+
+				FString GlobalName = RegionName;
+				if (GlobalName.IsEmpty())
+				{
+					GlobalName = MakeChildGlobalName(Def.Name, FieldKey);
+				}
+				if (GlobalName.IsEmpty())
+				{
+					return;
+				}
+
+				lua_getglobal(L, TCHAR_TO_UTF8(*GlobalName));
+				if (lua_isnil(L, -1))
+				{
+					lua_pop(L, 1);
+					CreateTextureRegionGlobal(GlobalName, Handle, ObjectType);
+					lua_getglobal(L, TCHAR_TO_UTF8(*GlobalName));
+				}
+
+				if (!lua_isnil(L, -1))
+				{
+					lua_setfield(L, -2, TCHAR_TO_UTF8(*FieldKey));
+				}
+				else
+				{
+					lua_pop(L, 1);
+				}
+			};
+
+				auto BindFrameField = [&](const FString& ParentKey, const FString& ChildName)
+				{
+					const FString FieldKey = GetPreferredFieldKey(ParentKey, ChildName);
+					if (FieldKey.IsEmpty() || ChildName.IsEmpty())
+					{
+					return;
+				}
+
+				lua_getglobal(L, TCHAR_TO_UTF8(*ChildName));
+				if (!lua_isnil(L, -1))
+				{
+					lua_setfield(L, -2, TCHAR_TO_UTF8(*FieldKey));
+				}
+				else
+				{
+						lua_pop(L, 1);
+					}
+				};
+
+				TFunction<void(const FWowFrameDef&)> BindDescendantFields;
+				BindDescendantFields = [&](const FWowFrameDef& CurrentDef)
+				{
+					for (const FWowLayer& CurrentLayer : CurrentDef.Layers)
+					{
+						for (const FWowTextureElement& CurrentTex : CurrentLayer.Textures)
+						{
+							BindRegionField(CurrentTex.ParentKey, CurrentTex.Name, TEXT("Texture"));
+						}
+
+						for (const FWowFontStringElement& CurrentFontString : CurrentLayer.FontStrings)
+						{
+							BindRegionField(CurrentFontString.ParentKey, CurrentFontString.Name, TEXT("FontString"));
+						}
+					}
+
+					for (const FWowFrameDef& CurrentChild : CurrentDef.Children)
+					{
+						BindFrameField(CurrentChild.ParentKey, CurrentChild.Name);
+						BindDescendantFields(CurrentChild);
+					}
+				};
+
+				auto BindButtonTextureField = [&](const FString& TextureName, const FString& ParentKey, const TCHAR* DefaultField)
+				{
+					FString FieldKey = ParentKey;
+					if (FieldKey.IsEmpty())
+				{
+					FieldKey = GetChildFieldKey(TextureName, Def.Name);
+				}
+				if (FieldKey.IsEmpty() && DefaultField)
+				{
+					FieldKey = DefaultField;
+				}
+				if (FieldKey.IsEmpty())
+				{
+					return;
+				}
+
+				FString GlobalName = TextureName;
+				if (GlobalName.IsEmpty())
+				{
+					GlobalName = MakeChildGlobalName(Def.Name, FieldKey);
+				}
+
+				if (GlobalName.IsEmpty())
+				{
+					return;
+				}
+
+				lua_getglobal(L, TCHAR_TO_UTF8(*GlobalName));
+				if (lua_isnil(L, -1))
+				{
+					lua_pop(L, 1);
+					CreateTextureRegionGlobal(GlobalName, Handle, TEXT("Texture"));
+					lua_getglobal(L, TCHAR_TO_UTF8(*GlobalName));
+				}
+
+				if (!lua_isnil(L, -1))
+				{
+					lua_setfield(L, -2, TCHAR_TO_UTF8(*FieldKey));
+				}
+				else
+				{
+					lua_pop(L, 1);
+				}
+			};
+
 			bool bDebugThisFrame = Def.Name.Contains(TEXT("OptionsFrameTemplateCategoryFrameButton1")) ||
 			                        Def.Name.Contains(TEXT("TargetFrame")) ||
 			                        Def.Name.Contains(TEXT("PartyMemberFrame1"));
@@ -468,77 +790,42 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 			{
 				UE_LOG(LogWowEvent, Warning, TEXT("CHILDMAP: %s has %d layers, %d children"), *Def.Name, Def.Layers.Num(), Def.Children.Num());
 				for (const FWowLayer& DL : Def.Layers) {
-					for (const FWowTextureElement& DT : DL.Textures) UE_LOG(LogWowEvent, Warning, TEXT("  TEX: '%s'"), *DT.Name);
-					for (const FWowFontStringElement& DFS : DL.FontStrings) UE_LOG(LogWowEvent, Warning, TEXT("  FS: '%s'"), *DFS.Name);
+					for (const FWowTextureElement& DT : DL.Textures) UE_LOG(LogWowEvent, Warning, TEXT("  TEX: '%s' parentKey='%s'"), *DT.Name, *DT.ParentKey);
+					for (const FWowFontStringElement& DFS : DL.FontStrings) UE_LOG(LogWowEvent, Warning, TEXT("  FS: '%s' parentKey='%s'"), *DFS.Name, *DFS.ParentKey);
 				}
-				for (const FWowFrameDef& DC : Def.Children) UE_LOG(LogWowEvent, Warning, TEXT("  CHILD: '%s'"), *DC.Name);
+				for (const FWowFrameDef& DC : Def.Children) UE_LOG(LogWowEvent, Warning, TEXT("  CHILD: '%s' parentKey='%s'"), *DC.Name, *DC.ParentKey);
 			}
-			for (const FWowLayer& Layer : Def.Layers)
-			{
-				for (const FWowTextureElement& Tex : Layer.Textures)
+				for (const FWowLayer& Layer : Def.Layers)
 				{
-					if (Tex.Name.IsEmpty()) continue;
-					FString Key = GetChildFieldKey(Tex.Name, Def.Name);
-					if (Key.IsEmpty()) continue;
-					lua_getglobal(L, TCHAR_TO_UTF8(*Tex.Name));
-					if (!lua_isnil(L, -1))
+					for (const FWowTextureElement& Tex : Layer.Textures)
 					{
-						lua_setfield(L, -2, TCHAR_TO_UTF8(*Key));
-					}
-					else
-					{
-						lua_pop(L, 1);
-					}
+						BindRegionField(Tex.ParentKey, Tex.Name, TEXT("Texture"));
 				}
 				for (const FWowFontStringElement& FS : Layer.FontStrings)
 				{
-					if (FS.Name.IsEmpty()) continue;
-					FString Key = GetChildFieldKey(FS.Name, Def.Name);
-					if (Key.IsEmpty()) continue;
-					lua_getglobal(L, TCHAR_TO_UTF8(*FS.Name));
-					if (!lua_isnil(L, -1))
-					{
-						lua_setfield(L, -2, TCHAR_TO_UTF8(*Key));
-					}
-					else
-					{
-						lua_pop(L, 1);
-					}
+					BindRegionField(FS.ParentKey, FS.Name, TEXT("FontString"));
 				}
 			}
 
-			// Map named child frames
-			for (const FWowFrameDef& Child : Def.Children)
-			{
-				if (Child.Name.IsEmpty()) continue;
-				FString Key = GetChildFieldKey(Child.Name, Def.Name);
-				if (Key.IsEmpty()) continue;
-				lua_getglobal(L, TCHAR_TO_UTF8(*Child.Name));
-				if (!lua_isnil(L, -1))
+				// Map named child frames
+				for (const FWowFrameDef& Child : Def.Children)
 				{
-					lua_setfield(L, -2, TCHAR_TO_UTF8(*Key));
+					BindFrameField(Child.ParentKey, Child.Name);
 				}
-				else
-				{
-					lua_pop(L, 1);
-				}
-			}
 
-			// Map button texture names
-			auto SetButtonTexRef = [&](const FString& TexName) {
-				if (TexName.IsEmpty()) return;
-				FString Key = GetChildFieldKey(TexName, Def.Name);
-				if (Key.IsEmpty()) return;
-				lua_getglobal(L, TCHAR_TO_UTF8(*TexName));
-				if (!lua_isnil(L, -1))
-					lua_setfield(L, -2, TCHAR_TO_UTF8(*Key));
-				else
-					lua_pop(L, 1);
-			};
-			SetButtonTexRef(Def.NormalTextureName);
-			SetButtonTexRef(Def.PushedTextureName);
-			SetButtonTexRef(Def.HighlightTextureName);
-			SetButtonTexRef(Def.DisabledTextureName);
+				// Named descendants can live under anonymous wrapper frames.
+				// Walk the full subtree so globals like $parentName or nested regions
+				// are surfaced to the owning named frame before OnLoad fires.
+				for (const FWowFrameDef& Child : Def.Children)
+				{
+					BindDescendantFields(Child);
+				}
+
+				// Map button texture names
+				BindButtonTextureField(Def.NormalTextureName, Def.NormalTextureParentKey, TEXT("normalTexture"));
+				BindButtonTextureField(Def.PushedTextureName, Def.PushedTextureParentKey, TEXT("pushedTexture"));
+				BindButtonTextureField(Def.HighlightTextureName, Def.HighlightTextureParentKey, TEXT("highlightTexture"));
+			BindButtonTextureField(Def.DisabledTextureName, Def.DisabledTextureParentKey, TEXT("disabledTexture"));
 
 			// NOTE: Do NOT set self.name = self:GetName() here.
 			// In WoW, self.name refers to the child FontString (FrameNameName),
@@ -556,7 +843,7 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 				{
 					lua_pop(L, 1);
 					// Create a stub FontString table for FrameNameText and set as global + field
-					CreateTextureRegionGlobal(TextGlobalName);
+					CreateTextureRegionGlobal(TextGlobalName, Handle, TEXT("FontString"));
 					lua_getglobal(L, TCHAR_TO_UTF8(*TextGlobalName));
 				}
 				if (!lua_isnil(L, -1))
@@ -631,11 +918,11 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 					}
 				};
 				EnsureChildField("overflowButton");
-				EnsureChildField("buttonFrame");
-				EnsureChildField("scrollBar");
-				EnsureChildField("scrollBarBackground");
-				EnsureChildField("scrollBarArtTop");
-				EnsureChildField("scrollBarArtBottom");
+					EnsureChildField("buttonFrame");
+					EnsureChildField("scrollBar");
+					EnsureChildField("scrollBarBackground");
+					EnsureChildField("scrollBarArtTop");
+					EnsureChildField("scrollBarArtBottom");
 				// UnitFrame-critical: name, portrait, healthbar, manabar, etc.
 				EnsureChildField("name");
 				// Create alias globals for FrameName+Suffix patterns.
@@ -644,86 +931,120 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 				// But the actual FontString might be nested deeper (e.g.,
 				// Boss1TargetFrameTextureFrameName instead of Boss1TargetFrameName).
 				// Create an alias or stub if the direct global doesn't exist.
-				auto EnsureGlobalOrAlias = [&](const char* suffix) {
-					FString DirectName = Def.Name + UTF8_TO_TCHAR(suffix);
-					lua_getglobal(L, TCHAR_TO_UTF8(*DirectName));
-					if (!lua_isnil(L, -1))
-					{
+					auto EnsureGlobalOrAlias = [&](const char* suffix) {
+						FString DirectName = Def.Name + UTF8_TO_TCHAR(suffix);
+						lua_getglobal(L, TCHAR_TO_UTF8(*DirectName));
+						if (!lua_isnil(L, -1))
+						{
 						lua_pop(L, 1);
 						return; // Direct global exists
 					}
-					lua_pop(L, 1);
-
-					// Search for a nested child global that ends with the suffix
-					// e.g., Boss1TargetFrameTextureFrameName for suffix "Name"
-					bool bFound = false;
-					for (const FWowFrameDef& Child : Def.Children)
-					{
-						if (Child.Name.IsEmpty()) continue;
-						FString ChildGlobal = Child.Name + UTF8_TO_TCHAR(suffix);
-						lua_getglobal(L, TCHAR_TO_UTF8(*ChildGlobal));
-						if (!lua_isnil(L, -1))
-						{
-							// Found nested child global — create alias
-							lua_setglobal(L, TCHAR_TO_UTF8(*DirectName));
-							bFound = true;
-							break;
-						}
 						lua_pop(L, 1);
-					}
 
-					if (!bFound)
-					{
-						CreateTextureRegionGlobal(DirectName);
-					}
-				};
-				EnsureGlobalOrAlias("Name");
-				EnsureGlobalOrAlias("HealthBar");
-				EnsureGlobalOrAlias("ManaBar");
-				EnsureGlobalOrAlias("Portrait");
-				EnsureGlobalOrAlias("NumericalThreat");
-				EnsureGlobalOrAlias("NormalText");
-				EnsureGlobalOrAlias("HighlightText");
-				EnsureGlobalOrAlias("DisabledText");
-				EnsureGlobalOrAlias("Text");
-				EnsureGlobalOrAlias("DropDown");
-				EnsureChildField("portrait");
-				EnsureChildField("deadText");
-				EnsureChildField("unconsciousText");
-				EnsureChildField("threatIndicator");
-				EnsureChildField("leaderIcon");
-				EnsureChildField("raidTargetIcon");
-				EnsureChildField("readyCheckIcon");
-				// ChatFrame/DockManager
-				EnsureChildField("list");
-				EnsureChildField("editBox");
-				// LFD/LFR role buttons
-				EnsureChildField("checkButton");
-				// Dropdown menu
-				EnsureChildField("normalText");
-				EnsureChildField("highlightText");
-				EnsureChildField("disabledText");
-				// Unit popup / dropdown
-				EnsureChildField("dropdownMenu");
-				EnsureChildField("dropDown");
-				// ScrollFrame child
-				EnsureChildField("scrollFrame");
-				// Class color legend
-				EnsureChildField("firstClass");
-				// Chat config class color legend
-				EnsureChildField("header");
-				// ChatFrame selected textures (FloatingChatFrame.lua)
-				EnsureChildField("leftSelectedTexture");
-				EnsureChildField("middleSelectedTexture");
-				EnsureChildField("rightSelectedTexture");
-				EnsureChildField("leftHighlightTexture");
-				EnsureChildField("middleHighlightTexture");
-				EnsureChildField("rightHighlightTexture");
+						// Search the full descendant tree for a nested named child
+						// global that ends with the suffix, e.g.
+						// Boss1TargetFrameTextureFrameName for suffix "Name".
+						bool bFound = false;
+						TFunction<bool(const FWowFrameDef&)> TryAliasDescendant = [&](const FWowFrameDef& CurrentDef) -> bool
+						{
+							if (!CurrentDef.Name.IsEmpty())
+							{
+								FString ChildGlobal = CurrentDef.Name + UTF8_TO_TCHAR(suffix);
+								lua_getglobal(L, TCHAR_TO_UTF8(*ChildGlobal));
+								if (!lua_isnil(L, -1))
+								{
+									lua_setglobal(L, TCHAR_TO_UTF8(*DirectName));
+									return true;
+								}
+								lua_pop(L, 1);
+							}
+
+							for (const FWowFrameDef& NestedChild : CurrentDef.Children)
+							{
+								if (TryAliasDescendant(NestedChild))
+								{
+									return true;
+								}
+							}
+
+							return false;
+						};
+
+						for (const FWowFrameDef& Child : Def.Children)
+						{
+							if (TryAliasDescendant(Child))
+							{
+								bFound = true;
+								break;
+							}
+						}
+
+						if (!bFound)
+						{
+							CreateTextureRegionGlobal(DirectName);
+						}
+					};
+					EnsureGlobalOrAlias("Name");
+					EnsureGlobalOrAlias("HealthBar");
+					EnsureGlobalOrAlias("ManaBar");
+					EnsureGlobalOrAlias("Portrait");
+					EnsureGlobalOrAlias("NumericalThreat");
+					EnsureGlobalOrAlias("NormalText");
+					EnsureGlobalOrAlias("HighlightText");
+					EnsureGlobalOrAlias("DisabledText");
+					EnsureGlobalOrAlias("Text");
+					EnsureGlobalOrAlias("DropDown");
+
+					// Alias creation happens after the initial direct child binding.
+					// Re-bind the common fields now that direct globals may exist.
+					TrySetChildField("Name");
+					TrySetChildField("HealthBar");
+					TrySetChildField("ManaBar");
+					TrySetChildField("Portrait");
+					TrySetChildField("NormalText");
+					TrySetChildField("HighlightText");
+					TrySetChildField("DisabledText");
+					TrySetChildField("Text");
+					TrySetChildField("DropDown");
+					BindDirectGlobalField(L, Def.Name + TEXT("DropDown"), "dropdownMenu");
+
+					EnsureChildField("portrait");
+					EnsureChildField("deadText");
+					EnsureChildField("unconsciousText");
+					EnsureChildField("threatIndicator");
+					EnsureChildField("leaderIcon");
+					EnsureChildField("raidTargetIcon");
+					EnsureChildField("readyCheckIcon");
+					// ChatFrame/DockManager
+					EnsureChildField("list");
+					EnsureChildField("editBox");
+					// LFD/LFR role buttons
+					EnsureChildField("checkButton");
+					// Dropdown menu
+					EnsureChildField("normalText");
+					EnsureChildField("highlightText");
+					EnsureChildField("disabledText");
+					// Unit popup / dropdown
+					EnsureChildField("dropdownMenu");
+					EnsureChildField("dropDown");
+					// ScrollFrame child
+					EnsureChildField("scrollFrame");
+					// Class color legend
+					EnsureChildField("firstClass");
+					// Chat config class color legend
+					EnsureChildField("header");
+					// ChatFrame selected textures (FloatingChatFrame.lua)
+					EnsureChildField("leftSelectedTexture");
+					EnsureChildField("middleSelectedTexture");
+					EnsureChildField("rightSelectedTexture");
+					EnsureChildField("leftHighlightTexture");
+					EnsureChildField("middleHighlightTexture");
+					EnsureChildField("rightHighlightTexture");
+				}
+
+				lua_pop(L, 1); // pop frame table
 			}
-
-			lua_pop(L, 1); // pop frame table
 		}
-	}
 #endif
 
 	// Compile each script handler from the frame definition
@@ -732,6 +1053,14 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 		if (!Script.Code.IsEmpty())
 		{
 			SetFrameScript(Handle, Script.Event, Script.Code);
+		}
+		else if (Script.Event == TEXT("OnLoad") && !Script.File.IsEmpty() &&
+			ShouldCompileOnLoadFunctionHandler(Script.File))
+		{
+			// Narrow support for function="..." handlers. RuneFrame needs this
+			// bootstrap path, but broader OnLoad coverage currently triggers
+			// runaway Blizzard UI initialization and exhausts the Lua heap.
+			SetFrameScript(Handle, Script.Event, BuildFunctionHandlerWrapper(Script.File));
 		}
 	}
 
@@ -758,8 +1087,12 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 					else
 						lua_newtable(L);
 
+					TArray<FLuaSavedGlobal> SavedGlobals;
+					SetWowHandlerGlobals(L, lua_gettop(L), 0, TArray<int32>(), SavedGlobals);
+
 					if (lua_pcall(L, 1, 0, 0) != 0)
 					{
+						RestoreLuaGlobals(L, SavedGlobals);
 						UE_LOG(LogWowEvent, Error, TEXT("OnLoad error [%lld] %s: %hs"),
 							Handle, *Def.Name, lua_tostring(L, -1));
 						lua_pop(L, 1);
@@ -769,6 +1102,10 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 						{
 							FrameManager->SetFrameVisible(Handle, false);
 						}
+					}
+					else
+					{
+						RestoreLuaGlobals(L, SavedGlobals);
 					}
 				}
 				else
@@ -801,6 +1138,11 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 		int32* ScriptRef = FrameScripts->Find(TEXT("OnUpdate"));
 		if (!ScriptRef) continue;
 
+		if (FrameManager && !FrameManager->IsFrameVisible(Handle))
+		{
+			continue;
+		}
+
 		// Push the compiled OnUpdate function
 		lua_rawgeti(L, LUA_REGISTRYINDEX, *ScriptRef);
 		if (!lua_isfunction(L, -1))
@@ -824,14 +1166,24 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 		lua_pushnumber(L, static_cast<double>(DeltaTime));
 
 		// Call: func(self, elapsed)
+		TArray<int32> LegacyArgIndices;
+		LegacyArgIndices.Add(lua_gettop(L));
+		TArray<FLuaSavedGlobal> SavedGlobals;
+		SetWowHandlerGlobals(L, lua_gettop(L) - 1, 0, LegacyArgIndices, SavedGlobals);
+
 		if (lua_pcall(L, 2, 0, 0) != 0)
 		{
+			RestoreLuaGlobals(L, SavedGlobals);
 			UE_LOG(LogWowEvent, Warning, TEXT("OnUpdate error [frame %lld]: %s — disabling OnUpdate for this frame"),
 				Handle, UTF8_TO_TCHAR(lua_tostring(L, -1)));
 			lua_pop(L, 1);
 			// Disable further OnUpdate calls for this erroring frame to prevent spam
 			OnUpdateFrames.Remove(Handle);
 			break; // Iterator invalidated
+		}
+		else
+		{
+			RestoreLuaGlobals(L, SavedGlobals);
 		}
 	}
 #endif

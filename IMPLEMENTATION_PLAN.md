@@ -224,6 +224,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
 - [x] Full addon loading from Interface/AddOns/
 - [x] Font rendering with WoW .ttf fonts (in progress — P7 agent)
+- [?] FrameXML child `OnLoad` bootstrap stability (preserve frame Lua objects across creation/compile, seed parent IDs before child `OnLoad`, keep RuneFrame bootstrap alive without reintroducing Lua heap blowups)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds

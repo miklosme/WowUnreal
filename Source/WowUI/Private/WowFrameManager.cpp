@@ -329,6 +329,78 @@ UWidget* FWowFrameManager::GetWidgetForHandle(int64 Handle) const
 	return Entry && Entry->Widget.IsValid() ? Entry->Widget.Get() : nullptr;
 }
 
+UButton* FWowFrameManager::GetButtonWidget(int64 Handle) const
+{
+	const TWeakObjectPtr<UButton>* Found = ButtonWidgets.Find(Handle);
+	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
+}
+
+UEditableTextBox* FWowFrameManager::GetEditBoxWidget(int64 Handle) const
+{
+	const TWeakObjectPtr<UEditableTextBox>* Found = EditBoxWidgets.Find(Handle);
+	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
+}
+
+USlider* FWowFrameManager::GetSliderWidget(int64 Handle) const
+{
+	const TWeakObjectPtr<USlider>* Found = SliderWidgets.Find(Handle);
+	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
+}
+
+UTextBlock* FWowFrameManager::GetPrimaryTextWidget(int64 Handle) const
+{
+	const TWeakObjectPtr<UTextBlock>* Found = PrimaryTextWidgets.Find(Handle);
+	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
+}
+
+UTextBlock* FWowFrameManager::GetNamedFontString(const FString& Name) const
+{
+	const TWeakObjectPtr<UTextBlock>* Found = NamedFontStringWidgets.Find(Name);
+	return (Found && Found->IsValid()) ? Found->Get() : nullptr;
+}
+
+void FWowFrameManager::SetFrameMouseEnabled(int64 Handle, bool bEnabled)
+{
+	if (FFrameEntry* Entry = Frames.Find(Handle))
+	{
+		Entry->bMouseEnabled = bEnabled;
+	}
+}
+
+void FWowFrameManager::SetFrameKeyboardEnabled(int64 Handle, bool bEnabled)
+{
+	if (FFrameEntry* Entry = Frames.Find(Handle))
+	{
+		Entry->bKeyboardEnabled = bEnabled;
+	}
+}
+
+void FWowFrameManager::SetFrameMouseWheelEnabled(int64 Handle, bool bEnabled)
+{
+	if (FFrameEntry* Entry = Frames.Find(Handle))
+	{
+		Entry->bMouseWheelEnabled = bEnabled;
+	}
+}
+
+bool FWowFrameManager::IsFrameMouseEnabled(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? Entry->bMouseEnabled : false;
+}
+
+bool FWowFrameManager::IsFrameKeyboardEnabled(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? Entry->bKeyboardEnabled : false;
+}
+
+bool FWowFrameManager::IsFrameMouseWheelEnabled(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry ? Entry->bMouseWheelEnabled : false;
+}
+
 // ── Template Inheritance ──────────────────────────────────────────────────────
 
 void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& Template)
@@ -348,6 +420,7 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// Hidden — template hidden overrides unless target explicitly sets visible
 	if (Template.bHidden && !Target.bHidden) Target.bHidden = Template.bHidden;
+	if (Target.ParentKey.IsEmpty()) Target.ParentKey = Template.ParentKey;
 
 	// SetAllPoints
 	if (Template.bSetAllPoints && !Target.bSetAllPoints) Target.bSetAllPoints = Template.bSetAllPoints;
@@ -402,10 +475,10 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// Type-specific properties — use template values if target is empty
 	if (Target.ButtonText.IsEmpty()) Target.ButtonText = Template.ButtonText;
-	if (Target.NormalTexture.IsEmpty()) { Target.NormalTexture = Template.NormalTexture; Target.NormalTextureName = Template.NormalTextureName; }
-	if (Target.PushedTexture.IsEmpty()) { Target.PushedTexture = Template.PushedTexture; Target.PushedTextureName = Template.PushedTextureName; }
-	if (Target.HighlightTexture.IsEmpty()) { Target.HighlightTexture = Template.HighlightTexture; Target.HighlightTextureName = Template.HighlightTextureName; }
-	if (Target.DisabledTexture.IsEmpty()) { Target.DisabledTexture = Template.DisabledTexture; Target.DisabledTextureName = Template.DisabledTextureName; }
+	if (Target.NormalTexture.IsEmpty()) { Target.NormalTexture = Template.NormalTexture; Target.NormalTextureName = Template.NormalTextureName; Target.NormalTextureParentKey = Template.NormalTextureParentKey; }
+	if (Target.PushedTexture.IsEmpty()) { Target.PushedTexture = Template.PushedTexture; Target.PushedTextureName = Template.PushedTextureName; Target.PushedTextureParentKey = Template.PushedTextureParentKey; }
+	if (Target.HighlightTexture.IsEmpty()) { Target.HighlightTexture = Template.HighlightTexture; Target.HighlightTextureName = Template.HighlightTextureName; Target.HighlightTextureParentKey = Template.HighlightTextureParentKey; }
+	if (Target.DisabledTexture.IsEmpty()) { Target.DisabledTexture = Template.DisabledTexture; Target.DisabledTextureName = Template.DisabledTextureName; Target.DisabledTextureParentKey = Template.DisabledTextureParentKey; }
 	if (Target.Orientation.IsEmpty()) Target.Orientation = Template.Orientation;
 }
 
@@ -805,7 +878,7 @@ void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent
 	}
 }
 
-void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def)
+void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def, int64 OwnerHandle)
 {
 	if (!Container) return;
 
@@ -866,7 +939,7 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				// MainMenuBarLeftEndCap:SetTexture("Interface\\...")
 				if (EventSystem)
 				{
-					EventSystem->CreateTextureRegionGlobal(Tex.Name);
+					EventSystem->CreateTextureRegionGlobal(Tex.Name, OwnerHandle, TEXT("Texture"));
 					UE_LOG(LogWowFrame, Verbose, TEXT("    Registered texture region global: %s"), *Tex.Name);
 				}
 				else
@@ -1060,12 +1133,18 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				// Create a Lua global for this fontstring so scripts can access it
 				if (EventSystem)
 				{
-					EventSystem->CreateTextureRegionGlobal(FS.Name);
+					EventSystem->CreateTextureRegionGlobal(FS.Name, OwnerHandle, TEXT("FontString"));
 				}
+				NamedFontStringWidgets.Add(FS.Name, TextWidget);
 				// Warn if fontstring name still contains unresolved $parent
 				if (FS.Name.Contains(TEXT("$parent")))
 				{
 					UE_LOG(LogWowFrame, Warning, TEXT("  UNRESOLVED $parent in fontstring: %s (frame: %s)"), *FS.Name, *Def.Name);
+				}
+
+				if (!Def.Name.IsEmpty() && FS.Name == (Def.Name + TEXT("Text")))
+				{
+					PrimaryTextWidgets.Add(OwnerHandle, TextWidget);
 				}
 
 				// Register fontstring rect so other frames can anchor to it
@@ -1217,6 +1296,67 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		return nullptr;
 	}
 
+	UCanvasPanel* ContainerWidget = Cast<UCanvasPanel>(Widget);
+	if (ContainerWidget)
+	{
+		auto AddFillChild = [this, ContainerWidget](UWidget* Child, int32 ZOrder, ESlateVisibility Visibility)
+		{
+			if (!Child) return;
+			Child->SetVisibility(Visibility);
+			if (UCanvasPanelSlot* ChildSlot = ContainerWidget->AddChildToCanvas(Child))
+			{
+				ChildSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+				ChildSlot->SetOffsets(FMargin(0.f));
+				ChildSlot->SetZOrder(ZOrder);
+			}
+		};
+
+		if (Def.Type == EWowFrameType::Button || Def.Type == EWowFrameType::CheckButton)
+		{
+			UButton* Button = NewObject<UButton>(ContainerWidget);
+			AddFillChild(Button, -100, ESlateVisibility::SelfHitTestInvisible);
+			ButtonWidgets.Add(Handle, Button);
+
+			if (!Def.ButtonText.IsEmpty())
+			{
+				UTextBlock* ButtonText = NewObject<UTextBlock>(ContainerWidget);
+				ButtonText->SetText(FText::FromString(Def.ButtonText));
+				ButtonText->SetJustification(ETextJustify::Center);
+				FSlateFontInfo FontInfo = ButtonText->GetFont();
+				FontInfo.Size = FMath::RoundToInt(12.f * UIScale);
+				ButtonText->SetFont(FontInfo);
+				AddFillChild(ButtonText, 250, ESlateVisibility::SelfHitTestInvisible);
+				PrimaryTextWidgets.Add(Handle, ButtonText);
+
+				if (!Def.Name.IsEmpty())
+				{
+					const FString ButtonTextName = Def.Name + TEXT("Text");
+					NamedFontStringWidgets.Add(ButtonTextName, ButtonText);
+					if (EventSystem)
+					{
+						EventSystem->CreateTextureRegionGlobal(ButtonTextName, Handle, TEXT("FontString"));
+					}
+				}
+			}
+		}
+		else if (Def.Type == EWowFrameType::EditBox)
+		{
+			UEditableTextBox* EditBox = NewObject<UEditableTextBox>(ContainerWidget);
+			AddFillChild(EditBox, 50, ESlateVisibility::Visible);
+			EditBoxWidgets.Add(Handle, EditBox);
+		}
+		else if (Def.Type == EWowFrameType::Slider)
+		{
+			USlider* Slider = NewObject<USlider>(ContainerWidget);
+			if (Def.Orientation.Equals(TEXT("VERTICAL"), ESearchCase::IgnoreCase))
+			{
+				Slider->SetOrientation(EOrientation::Orient_Vertical);
+			}
+			AddFillChild(Slider, 50, ESlateVisibility::SelfHitTestInvisible);
+			SliderWidgets.Add(Handle, Slider);
+		}
+	}
+
 	// Walk the full parent chain to check if ANY ancestor is hidden
 	bool bParentHidden = false;
 	{
@@ -1347,7 +1487,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		// to avoid dumping textures onto the root canvas where they'd fill the screen
 		if (Container)
 		{
-			CreateLayerContent(Container, Def);
+			CreateLayerContent(Container, Def, Handle);
 		}
 	}
 
@@ -1470,6 +1610,12 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	int64 Handle = NextHandle++;
 	FFrameEntry Entry;
 	Entry.Def = Resolved;
+	Entry.bMouseEnabled = (Resolved.Type == EWowFrameType::Button ||
+		Resolved.Type == EWowFrameType::CheckButton ||
+		Resolved.Type == EWowFrameType::EditBox ||
+		Resolved.Type == EWowFrameType::Slider);
+	Entry.bKeyboardEnabled = (Resolved.Type == EWowFrameType::EditBox);
+	Entry.bMouseWheelEnabled = false;
 
 	// Resolve parent handle
 	if (!Resolved.Parent.IsEmpty())
@@ -1511,18 +1657,18 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	// Register frame as Lua global FIRST (so children and scripts can find it)
 	if (EventSystem && !Resolved.Name.IsEmpty())
 	{
-		EventSystem->CreateFrameObject(Handle, Resolved.Name);
+		EventSystem->CreateFrameObject(Handle, Resolved.Name, Resolved.FrameID);
 
 		// Create Lua globals for button texture names (e.g., ActionButton1NormalTexture)
 		// These are needed by GetNormalTexture() etc.
 		if (!Resolved.NormalTextureName.IsEmpty())
-			EventSystem->CreateTextureRegionGlobal(Resolved.NormalTextureName);
+			EventSystem->CreateTextureRegionGlobal(Resolved.NormalTextureName, Handle, TEXT("Texture"));
 		if (!Resolved.PushedTextureName.IsEmpty())
-			EventSystem->CreateTextureRegionGlobal(Resolved.PushedTextureName);
+			EventSystem->CreateTextureRegionGlobal(Resolved.PushedTextureName, Handle, TEXT("Texture"));
 		if (!Resolved.HighlightTextureName.IsEmpty())
-			EventSystem->CreateTextureRegionGlobal(Resolved.HighlightTextureName);
+			EventSystem->CreateTextureRegionGlobal(Resolved.HighlightTextureName, Handle, TEXT("Texture"));
 		if (!Resolved.DisabledTextureName.IsEmpty())
-			EventSystem->CreateTextureRegionGlobal(Resolved.DisabledTextureName);
+			EventSystem->CreateTextureRegionGlobal(Resolved.DisabledTextureName, Handle, TEXT("Texture"));
 	}
 
 	// Create child frames BEFORE firing OnLoad (WoW creates children first,
@@ -1867,11 +2013,7 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
 		if (!Entry.Widget.IsValid()) continue;
 		if (Entry.Widget->GetVisibility() == ESlateVisibility::Collapsed) continue;
 
-		// Only hit-test interactive frame types
-		if (Entry.Def.Type != EWowFrameType::Button &&
-			Entry.Def.Type != EWowFrameType::CheckButton &&
-			Entry.Def.Type != EWowFrameType::EditBox &&
-			Entry.Def.Type != EWowFrameType::Slider)
+		if (!Entry.bMouseEnabled)
 		{
 			continue;
 		}
