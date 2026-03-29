@@ -360,6 +360,17 @@ void AWowGameplayController::BindEntityEvents()
 			}
 		});
 
+	ConnectionManager->PacketHandler.OnBankOpened.AddLambda(
+		[this](uint64 BankerGuid)
+		{
+			if (UIManager)
+			{
+				UIManager->ShowBankWindow();
+			}
+
+			UE_LOG(LogWowGameplay, Log, TEXT("Opened bank window for banker %llu"), BankerGuid);
+		});
+
 	ConnectionManager->PacketHandler.OnQuestDialog.AddLambda(
 		[this](const FWowQuestDetails& QuestDetails)
 		{
@@ -1668,7 +1679,12 @@ void AWowGameplayController::OnRightClick()
 	uint32 NpcFlags = TargetEntity->GetField(UnitField::NPC_FLAGS);
 	UE_LOG(LogWowGameplay, Log, TEXT("Right-click NPC %llu: NpcFlags=0x%08X"), TargetGuid, NpcFlags);
 
-	if (NpcFlags & WowNpcFlags::INTERACTABLE)
+	if (NpcFlags & WowNpcFlags::BANKER)
+	{
+		UE_LOG(LogWowGameplay, Log, TEXT("  -> Sending banker activate"));
+		ConnectionManager->SendBankerActivate(static_cast<int64>(TargetGuid));
+	}
+	else if (NpcFlags & WowNpcFlags::INTERACTABLE)
 	{
 		// This NPC has interactable flags — send gossip/questgiver hello
 		UE_LOG(LogWowGameplay, Log, TEXT("  -> Sending gossip hello (interactable NPC)"));

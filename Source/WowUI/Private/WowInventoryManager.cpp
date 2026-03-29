@@ -1,42 +1,77 @@
 #include "WowInventoryManager.h"
+#include "WowEntityManager.h"
 
 FWowInventoryManager::FWowInventoryManager()
 {
     BackpackItems.SetNum(16); // Backpack has 16 slots
+    BankItems.SetNum(28); // Bank has 28 base slots
+    BankBagSlots.SetNum(7); // Up to 7 purchased bank bag slots
     EquippedItems.SetNum(EQUIP_SLOT_COUNT); // 19 equipment slots
 }
 
 void FWowInventoryManager::UpdateFromPlayerEntity(const FWowPlayerEntity& Player, FWowEntityManager& EntityManager)
 {
-    // Simple demo implementation - add fake items for demonstration
-    static bool bInitialized = false;
-    if (!bInitialized)
+    // Equipment and worn bags live in the player's inventory block.
+    for (uint8 SlotIndex = 0; SlotIndex < EQUIP_SLOT_COUNT; ++SlotIndex)
     {
-        // Add some fake items to demonstrate the UI
-        BackpackItems[0].ItemGuid = 12345;
-        BackpackItems[0].ItemEntry = 1000;
-        BackpackItems[0].StackCount = 5;
-        BackpackItems[0].Quality = 2; // Green
-
-        BackpackItems[5].ItemGuid = 23456;
-        BackpackItems[5].ItemEntry = 2000;
-        BackpackItems[5].StackCount = 1;
-        BackpackItems[5].Quality = 3; // Blue
-
-        // Add fake equipped item
-        EquippedItems[EQUIP_SLOT_CHEST].ItemGuid = 34567;
-        EquippedItems[EQUIP_SLOT_CHEST].ItemEntry = 3000;
-        EquippedItems[EQUIP_SLOT_CHEST].StackCount = 1;
-        EquippedItems[EQUIP_SLOT_CHEST].Quality = 4; // Purple
-
-        bInitialized = true;
-        OnInventoryChanged.Broadcast();
+        UpdateItemSlot(
+            EquippedItems[SlotIndex],
+            Player.GetEquipmentItemGuid(SlotIndex),
+            EntityManager,
+            255,
+            SlotIndex);
     }
+
+    for (uint8 SlotIndex = 0; SlotIndex < 16; ++SlotIndex)
+    {
+        // AzerothCore uses bag 255 and slots 23-38 for the backpack.
+        UpdateItemSlot(
+            BackpackItems[SlotIndex],
+            Player.GetBackpackItemGuid(SlotIndex),
+            EntityManager,
+            255,
+            static_cast<uint8>(23 + SlotIndex));
+    }
+
+    for (uint8 SlotIndex = 0; SlotIndex < 28; ++SlotIndex)
+    {
+        // Bank base slots are bag 255, slots 39-66.
+        UpdateItemSlot(
+            BankItems[SlotIndex],
+            Player.GetBankItemGuid(SlotIndex),
+            EntityManager,
+            255,
+            static_cast<uint8>(39 + SlotIndex));
+    }
+
+    for (uint8 SlotIndex = 0; SlotIndex < 7; ++SlotIndex)
+    {
+        // Bank bag slots are bag 255, slots 67-73.
+        UpdateItemSlot(
+            BankBagSlots[SlotIndex],
+            Player.GetBankBagGuid(SlotIndex),
+            EntityManager,
+            255,
+            static_cast<uint8>(67 + SlotIndex));
+    }
+
+    PurchasedBankBagSlots = Player.GetBankBagSlotCount();
+    OnInventoryChanged.Broadcast();
 }
 
 const FWowItemSlot* FWowInventoryManager::GetBackpackItem(uint8 Slot) const
 {
     return (Slot < 16) ? &BackpackItems[Slot] : nullptr;
+}
+
+const FWowItemSlot* FWowInventoryManager::GetBankItem(uint8 Slot) const
+{
+    return (Slot < 28) ? &BankItems[Slot] : nullptr;
+}
+
+const FWowItemSlot* FWowInventoryManager::GetBankBagSlot(uint8 Slot) const
+{
+    return (Slot < 7) ? &BankBagSlots[Slot] : nullptr;
 }
 
 const FWowItemSlot* FWowInventoryManager::GetEquippedItem(uint8 Slot) const
@@ -93,7 +128,6 @@ FLinearColor FWowInventoryManager::GetQualityColor(uint8 Quality)
 
 void FWowInventoryManager::UpdateItemSlot(FWowItemSlot& Slot, uint64 ItemGuid, FWowEntityManager& EntityManager, uint8 Bag, uint8 SlotIndex)
 {
-    // Simple placeholder implementation
     Slot.ItemGuid = ItemGuid;
     Slot.Bag = Bag;
     Slot.Slot = SlotIndex;
@@ -107,9 +141,17 @@ void FWowInventoryManager::UpdateItemSlot(FWowItemSlot& Slot, uint64 ItemGuid, F
     }
     else
     {
-        // Placeholder values for demonstration
-        Slot.ItemEntry = ItemGuid % 10000; // Simple mapping from GUID
-        Slot.StackCount = 1;
-        Slot.Quality = (ItemGuid % 6); // Placeholder quality
+        FWowItemEntity* Item = EntityManager.FindItem(ItemGuid);
+        Slot.ItemEntry = Item ? Item->GetField(ObjectField::ENTRY) : 0;
+        Slot.StackCount = Item ? FMath::Max(Item->GetStackCount(), 1) : 1;
+
+        // Quality is not part of update fields in this client yet, so keep a stable visible default.
+        Slot.Quality = Slot.ItemEntry != 0 ? 1 : 0;
+
+        if (Slot.ItemEntry == 0)
+        {
+            // Fall back to a deterministic placeholder so the UI still surfaces the slot content.
+            Slot.ItemEntry = static_cast<uint32>(ItemGuid & 0xFFFFFFFFu);
+        }
     }
 }

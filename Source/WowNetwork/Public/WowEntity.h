@@ -404,9 +404,11 @@ struct WOWNETWORK_API FWowPlayerEntity : public FWowUnitEntity
 
     uint32 GetPlayerFlags() const { return GetField(PlayerField::FLAGS); }
     uint32 GetPlayerBytes() const { return GetField(PlayerField::BYTES); }
+    uint32 GetPlayerBytes2() const { return GetField(PlayerField::BYTES_2); }
     uint32 GetXp() const { return GetField(PlayerField::XP); }
     uint32 GetNextLevelXp() const { return GetField(PlayerField::NEXT_LEVEL_XP); }
     uint32 GetCoinage() const { return GetField(PlayerField::COINAGE); }
+    uint8 GetBankBagSlotCount() const { return GetFieldByte(PlayerField::BYTES_2, 2); }
 
     // Equipment and inventory accessors
     uint64 GetEquipmentItemGuid(uint8 SlotIndex) const
@@ -422,7 +424,19 @@ struct WOWNETWORK_API FWowPlayerEntity : public FWowUnitEntity
     uint64 GetBagGuid(uint8 BagIndex) const
     {
         if (BagIndex >= 1 && BagIndex <= 4)
-            return GetField64(PlayerField::PACK_SLOT_1 + (BagIndex - 1) * 2);
+            return GetField64(PlayerField::INV_SLOT_BAG_1 + (BagIndex - 1) * 2);
+        return 0;
+    }
+
+    uint64 GetBankItemGuid(uint8 SlotIndex) const
+    {
+        return (SlotIndex < 28) ? GetField64(PlayerField::BANK_SLOT_START + SlotIndex * 2) : 0;
+    }
+
+    uint64 GetBankBagGuid(uint8 BagIndex) const
+    {
+        if (BagIndex < 7)
+            return GetField64(PlayerField::BANKBAG_SLOT_1 + BagIndex * 2);
         return 0;
     }
 

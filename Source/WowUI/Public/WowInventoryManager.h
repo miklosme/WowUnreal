@@ -35,8 +35,23 @@ public:
     /** Get all backpack items */
     const TArray<FWowItemSlot>& GetBackpackItems() const { return BackpackItems; }
 
+    /** Get bank base slot item by slot (0-27) */
+    const FWowItemSlot* GetBankItem(uint8 Slot) const;
+
+    /** Get bank bag slot item by slot (0-6) */
+    const FWowItemSlot* GetBankBagSlot(uint8 Slot) const;
+
+    /** Get all bank base slot items */
+    const TArray<FWowItemSlot>& GetBankItems() const { return BankItems; }
+
+    /** Get all bank bag slot items */
+    const TArray<FWowItemSlot>& GetBankBagSlots() const { return BankBagSlots; }
+
     /** Get all equipped items */
     const TArray<FWowItemSlot>& GetEquippedItems() const { return EquippedItems; }
+
+    /** Number of purchased bank bag slots */
+    int32 GetPurchasedBankBagSlots() const { return PurchasedBankBagSlots; }
 
     /** Send autoequip item packet */
     void AutoEquipItem(uint8 SrcBag, uint8 SrcSlot);
@@ -74,7 +89,10 @@ public:
 
 private:
     TArray<FWowItemSlot> BackpackItems; // 16 slots
+    TArray<FWowItemSlot> BankItems; // 28 base bank slots
+    TArray<FWowItemSlot> BankBagSlots; // 7 purchasable bank bag slots
     TArray<FWowItemSlot> EquippedItems; // 19 equipment slots
+    int32 PurchasedBankBagSlots = 0;
 
     void UpdateItemSlot(FWowItemSlot& Slot, uint64 ItemGuid, class FWowEntityManager& EntityManager, uint8 Bag, uint8 SlotIndex);
 };

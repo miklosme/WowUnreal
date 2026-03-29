@@ -270,6 +270,15 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 			BagWindow.ToSharedRef()
 		];
 
+		BankWindow = SNew(SWowBankWindow, InventoryManager);
+		UIOverlay->AddSlot()
+		.HAlign(HAlign_Right)
+		.VAlign(VAlign_Center)
+		.Padding(0, 0, 220, 0)
+		[
+			BankWindow.ToSharedRef()
+		];
+
 		// Create character panel (left side, padded from edge)
 		// ConnectionManager is set later via SetConnectionManager, for now pass nullptr
 		CharacterPanel = SNew(SWowCharacterPanel, InventoryManager, nullptr);
@@ -307,16 +316,37 @@ void UWowUIManager::ToggleCharacterPanel()
 	}
 }
 
+void UWowUIManager::ShowBankWindow()
+{
+	UpdateInventory();
+
+	if (BankWindow.IsValid())
+	{
+		BankWindow->Show();
+	}
+}
+
+void UWowUIManager::HideBankWindow()
+{
+	if (BankWindow.IsValid())
+	{
+		BankWindow->Hide();
+	}
+}
+
 void UWowUIManager::UpdateInventory()
 {
-	if (!InventoryManager.IsValid())
+	if (!InventoryManager.IsValid() || !ConnectionManager)
 		return;
 
-	// For demo purposes, create a dummy player entity and entity manager
-	FWowPlayerEntity DummyPlayer;
-	FWowEntityManager DummyEntityManager;
+	FWowPlayerEntity* LocalPlayer = ConnectionManager->PacketHandler.EntityManager.GetLocalPlayer();
+	if (!LocalPlayer)
+	{
+		UE_LOG(LogWowUIManager, Verbose, TEXT("UpdateInventory skipped: local player entity not ready"));
+		return;
+	}
 
-	InventoryManager->UpdateFromPlayerEntity(DummyPlayer, DummyEntityManager);
+	InventoryManager->UpdateFromPlayerEntity(*LocalPlayer, ConnectionManager->PacketHandler.EntityManager);
 }
 
 void UWowUIManager::SetConnectionManager(UWowConnectionManager* InConnectionManager)
@@ -332,6 +362,8 @@ void UWowUIManager::SetConnectionManager(UWowConnectionManager* InConnectionMana
 		UE_LOG(LogWowUIManager, Log, TEXT("Updated Lua context with ConnectionManager and EntityManager"));
 	}
 
-	// Character panel connection manager is set when the panel is created
-	// in WowGameplayController, not here.
+	if (CharacterPanel.IsValid())
+	{
+		CharacterPanel->SetConnectionManager(ConnectionManager);
+	}
 }

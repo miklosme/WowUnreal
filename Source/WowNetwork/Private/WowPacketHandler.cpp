@@ -549,8 +549,11 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
 
                 // Check if this is a player inventory field update
                 if (Entity.IsPlayer() &&
-                    ((FieldIndex >= PlayerField::INV_SLOT_HEAD && FieldIndex <= PlayerField::PACK_SLOT_END) ||
-                     (FieldIndex >= PlayerField::PACK_SLOT_1 && FieldIndex <= PlayerField::PACK_SLOT_LAST + 1)))
+                    ((FieldIndex >= PlayerField::INV_SLOT_HEAD && FieldIndex <= PlayerField::INV_SLOT_LAST + 1) ||
+                     (FieldIndex >= PlayerField::PACK_SLOT_START && FieldIndex <= PlayerField::PACK_SLOT_END) ||
+                     (FieldIndex >= PlayerField::BANK_SLOT_START && FieldIndex <= PlayerField::BANK_SLOT_END) ||
+                     (FieldIndex >= PlayerField::BANKBAG_SLOT_1 && FieldIndex <= PlayerField::BANKBAG_SLOT_END) ||
+                     FieldIndex == PlayerField::BYTES_2))
                 {
                     bInventoryFieldUpdated = true;
                 }
@@ -2755,7 +2758,5 @@ void FWowPacketHandler::HandleShowBank(FPacketReader& R)
     uint64 BankerGuid = R.ReadU64();
 
     UE_LOG(LogWowPacket, Log, TEXT("SHOW_BANK: Bank opened by banker GUID %llu"), BankerGuid);
-
-    // For stub implementation, just log that bank was opened
-    // In a full implementation, this would trigger showing bank UI
+    OnBankOpened.Broadcast(BankerGuid);
 }

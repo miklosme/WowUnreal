@@ -7,6 +7,7 @@
 #include "WowFontManager.h"
 #include "WowInventoryManager.h"
 #include "SWowBagWindow.h"
+#include "SWowBankWindow.h"
 #include "SWowCharacterPanel.h"
 #include "WowUIManager.generated.h"
 
@@ -53,6 +54,8 @@ public:
 	/** UI Window Management */
 	void ToggleBagWindow();
 	void ToggleCharacterPanel();
+	void ShowBankWindow();
+	void HideBankWindow();
 
 	/** Update inventory from player entity */
 	void UpdateInventory();
@@ -70,6 +73,7 @@ private:
 
 	// UI Windows
 	TSharedPtr<SWowBagWindow> BagWindow;
+	TSharedPtr<SWowBankWindow> BankWindow;
 	TSharedPtr<SWowCharacterPanel> CharacterPanel;
 	TSharedPtr<class SOverlay> UIOverlay;
 };

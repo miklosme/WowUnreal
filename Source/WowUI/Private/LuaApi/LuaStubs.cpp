@@ -5908,9 +5908,18 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
     // Bank slot functions
     lua_register(L, "GetNumBankSlots", [](lua_State* L2) -> int {
-        // Bank data isn't tracked yet, return defaults
-        lua_pushnumber(L2, 0); // numSlots
-        lua_pushboolean(L2, false); // full
+        int32 PurchasedSlots = 0;
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager)
+        {
+            if (const FWowPlayerEntity* Player = Ctx->ConnectionManager->PacketHandler.EntityManager.GetLocalPlayer())
+            {
+                PurchasedSlots = Player->GetBankBagSlotCount();
+            }
+        }
+
+        lua_pushnumber(L2, PurchasedSlots);
+        lua_pushboolean(L2, PurchasedSlots >= 7);
         return 2;
     });
 

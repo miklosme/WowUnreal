@@ -672,6 +672,19 @@ void UWowConnectionManager::SendGossipHello(int64 NpcGuid)
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_GOSSIP_HELLO for NPC %llu"), Guid);
 }
 
+void UWowConnectionManager::SendBankerActivate(int64 BankerGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    uint64 Guid = static_cast<uint64>(BankerGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_BANKER_ACTIVATE, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_BANKER_ACTIVATE for NPC %llu"), Guid);
+}
+
 void UWowConnectionManager::SendQuestAccept(int64 QuestGiverGuid, int32 QuestId)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;

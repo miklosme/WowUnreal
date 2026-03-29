@@ -15,6 +15,7 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case SMSG_AUTH_RESPONSE:            return TEXT("SMSG_AUTH_RESPONSE");
     case SMSG_CHAR_ENUM:                return TEXT("SMSG_CHAR_ENUM");
     case SMSG_MOTD:                     return TEXT("SMSG_MOTD");
+    case SMSG_SHOW_BANK:                return TEXT("SMSG_SHOW_BANK");
     case SMSG_TIME_SYNC_REQ:            return TEXT("SMSG_TIME_SYNC_REQ");
     case SMSG_TUTORIAL_FLAGS:           return TEXT("SMSG_TUTORIAL_FLAGS");
     case SMSG_ACCOUNT_DATA_TIMES:       return TEXT("SMSG_ACCOUNT_DATA_TIMES");
@@ -30,6 +31,7 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case CMSG_PLAYER_LOGIN:             return TEXT("CMSG_PLAYER_LOGIN");
     case CMSG_CHAR_ENUM:                return TEXT("CMSG_CHAR_ENUM");
     case CMSG_KEEP_ALIVE:               return TEXT("CMSG_KEEP_ALIVE");
+    case CMSG_BANKER_ACTIVATE:          return TEXT("CMSG_BANKER_ACTIVATE");
     case CMSG_SET_ACTION_BUTTON:        return TEXT("CMSG_SET_ACTION_BUTTON");
 
     // Social / Guild / Friends

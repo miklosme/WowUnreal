@@ -63,7 +63,7 @@ FReply SWowItemSlot::OnMouseButtonDown(const FGeometry& MyGeometry, const FPoint
             const FWowItemSlot* ItemSlot = InventoryManager->GetBackpackItem(SlotIndex);
             if (ItemSlot && !ItemSlot->IsEmpty())
             {
-                InventoryManager->AutoEquipItem(255, SlotIndex); // 255 = backpack
+                InventoryManager->AutoEquipItem(ItemSlot->Bag, ItemSlot->Slot);
                 return FReply::Handled();
             }
         }

@@ -316,6 +316,64 @@ bool FActionCursorMovesExistingAction::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerInventoryFieldAccessors, "WowUnreal.Entity.PlayerInventoryFieldAccessors",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPlayerInventoryFieldAccessors::RunTest(const FString& Parameters)
+{
+    FWowPlayerEntity Player;
+    Player.TypeMask = WowTypeMask::UNIT | WowTypeMask::PLAYER;
+
+    const uint64 BackpackGuid = 0x0000000200000001ULL;
+    const uint64 BankGuid = 0x0000000300000002ULL;
+    const uint64 BankBagGuid = 0x0000000400000003ULL;
+    const uint64 WornBagGuid = 0x0000000500000004ULL;
+
+    Player.SetField(PlayerField::PACK_SLOT_START, static_cast<uint32>(BackpackGuid & 0xFFFFFFFFu));
+    Player.SetField(PlayerField::PACK_SLOT_START + 1, static_cast<uint32>(BackpackGuid >> 32));
+    Player.SetField(PlayerField::BANK_SLOT_START, static_cast<uint32>(BankGuid & 0xFFFFFFFFu));
+    Player.SetField(PlayerField::BANK_SLOT_START + 1, static_cast<uint32>(BankGuid >> 32));
+    Player.SetField(PlayerField::BANKBAG_SLOT_1, static_cast<uint32>(BankBagGuid & 0xFFFFFFFFu));
+    Player.SetField(PlayerField::BANKBAG_SLOT_1 + 1, static_cast<uint32>(BankBagGuid >> 32));
+    Player.SetField(PlayerField::INV_SLOT_BAG_1, static_cast<uint32>(WornBagGuid & 0xFFFFFFFFu));
+    Player.SetField(PlayerField::INV_SLOT_BAG_1 + 1, static_cast<uint32>(WornBagGuid >> 32));
+    Player.SetField(PlayerField::BYTES_2, 2u << 16);
+
+    TestEqual(TEXT("Backpack slot accessor uses corrected pack-slot range"), Player.GetBackpackItemGuid(0), BackpackGuid);
+    TestEqual(TEXT("Bank slot accessor uses corrected bank-slot range"), Player.GetBankItemGuid(0), BankGuid);
+    TestEqual(TEXT("Bank bag accessor uses corrected bank-bag range"), Player.GetBankBagGuid(0), BankBagGuid);
+    TestEqual(TEXT("Worn bag accessor uses inventory slot bag range"), Player.GetBagGuid(1), WornBagGuid);
+    TestEqual(TEXT("Purchased bank bag slot count comes from PLAYER_BYTES_2 byte 2"), Player.GetBankBagSlotCount(), static_cast<uint8>(2));
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShowBankPacketBroadcastsEvent, "WowUnreal.Network.ShowBankPacketBroadcastsEvent",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FShowBankPacketBroadcastsEvent::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    bool bCalled = false;
+    uint64 OpenedBankerGuid = 0;
+    PacketHandler.OnBankOpened.AddLambda([&bCalled, &OpenedBankerGuid](uint64 BankerGuid)
+    {
+        bCalled = true;
+        OpenedBankerGuid = BankerGuid;
+    });
+
+    const uint64 BankerGuid = 0x1122334455667788ULL;
+    TArray<uint8> PacketData;
+    PacketData.SetNumUninitialized(8);
+    FMemory::Memcpy(PacketData.GetData(), &BankerGuid, sizeof(BankerGuid));
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_SHOW_BANK, PacketData);
+
+    TestTrue(TEXT("SMSG_SHOW_BANK fires the bank-open delegate"), bCalled);
+    TestEqual(TEXT("Delegate receives the banker guid from the packet"), OpenedBankerGuid, BankerGuid);
+
+    return true;
+}
+
 // ====================================================================
 // DBC Parser Tests (require MPQ data)
 // ====================================================================

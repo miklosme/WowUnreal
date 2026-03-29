@@ -14,6 +14,7 @@ DECLARE_MULTICAST_DELEGATE_FourParams(FOnAttackerStateUpdate, uint64 /*AttackerG
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnLootOpened, uint64 /*LootGuid*/, uint8 /*LootType*/, uint32 /*Gold*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, const TArray<FWowVendorItem>& /*Items*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnBankOpened, uint64 /*BankerGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestDialog, const FWowQuestDetails& /*QuestDetails*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestRewardDialog, const FWowQuestDetails& /*QuestDetails*/);
 DECLARE_DELEGATE_TwoParams(FOnSendPacket, uint32 /*Opcode*/, const TArray<uint8>& /*Data*/);
@@ -190,6 +191,7 @@ public:
     FOnLootOpened OnLootOpened;
     FOnLootClosed OnLootClosed;
     FOnVendorOpened OnVendorOpened;
+    FOnBankOpened OnBankOpened;
     FOnQuestDialog OnQuestDialog;
     FOnQuestRewardDialog OnQuestRewardDialog;
     FOnQuestAccepted OnQuestAccepted;

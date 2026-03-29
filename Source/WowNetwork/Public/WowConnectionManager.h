@@ -79,6 +79,9 @@ public:
     /** Send gossip/questgiver hello to initiate NPC interaction */
     UFUNCTION(BlueprintCallable) void SendGossipHello(int64 NpcGuid);
 
+    /** Send banker activate to open the bank window */
+    UFUNCTION(BlueprintCallable) void SendBankerActivate(int64 BankerGuid);
+
     /** Send quest accept command */
     UFUNCTION(BlueprintCallable) void SendQuestAccept(int64 QuestGiverGuid, int32 QuestId);
 

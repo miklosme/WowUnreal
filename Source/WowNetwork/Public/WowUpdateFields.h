@@ -167,6 +167,7 @@ namespace PlayerField
 
     inline constexpr uint16 FLAGS         = BASE + 0x0002;
     inline constexpr uint16 BYTES         = BASE + 0x0005;
+    inline constexpr uint16 BYTES_2       = BASE + 0x0006;
     inline constexpr uint16 XP            = BASE + 0x01E6;
     inline constexpr uint16 NEXT_LEVEL_XP = BASE + 0x01E7;
     inline constexpr uint16 COINAGE       = BASE + 0x03FE;
@@ -175,7 +176,7 @@ namespace PlayerField
     inline constexpr uint16 COMBAT_RATING_1 = BASE + 0x043B;
 
     // Equipment slots - visible items
-    inline constexpr uint16 VISIBLE_ITEM_BASE = BASE + 0x0006; // Each slot = 2 GUIDs (item + enchant display)
+    inline constexpr uint16 VISIBLE_ITEM_BASE = BASE + 0x0087; // Entry/enchant pairs for 19 slots
 
     // Equipment slot indices for VISIBLE_ITEM_BASE
     inline constexpr uint8 EQUIPMENT_SLOT_HEAD = 0;
@@ -198,37 +199,41 @@ namespace PlayerField
     inline constexpr uint8 EQUIPMENT_SLOT_RANGED = 17;
     inline constexpr uint8 EQUIPMENT_SLOT_TABARD = 18;
 
-    // Inventory slots - item GUIDs
-    inline constexpr uint16 INV_SLOT_HEAD = BASE + 0x010A; // 2 uint32s
-    inline constexpr uint16 INV_SLOT_NECK = BASE + 0x010C;
-    inline constexpr uint16 INV_SLOT_SHOULDERS = BASE + 0x010E;
-    inline constexpr uint16 INV_SLOT_SHIRT = BASE + 0x0110;
-    inline constexpr uint16 INV_SLOT_CHEST = BASE + 0x0112;
-    inline constexpr uint16 INV_SLOT_WAIST = BASE + 0x0114;
-    inline constexpr uint16 INV_SLOT_LEGS = BASE + 0x0116;
-    inline constexpr uint16 INV_SLOT_FEET = BASE + 0x0118;
-    inline constexpr uint16 INV_SLOT_WRISTS = BASE + 0x011A;
-    inline constexpr uint16 INV_SLOT_HANDS = BASE + 0x011C;
-    inline constexpr uint16 INV_SLOT_FINGER1 = BASE + 0x011E;
-    inline constexpr uint16 INV_SLOT_FINGER2 = BASE + 0x0120;
-    inline constexpr uint16 INV_SLOT_TRINKET1 = BASE + 0x0122;
-    inline constexpr uint16 INV_SLOT_TRINKET2 = BASE + 0x0124;
-    inline constexpr uint16 INV_SLOT_BACK = BASE + 0x0126;
-    inline constexpr uint16 INV_SLOT_MAINHAND = BASE + 0x0128;
-    inline constexpr uint16 INV_SLOT_OFFHAND = BASE + 0x012A;
-    inline constexpr uint16 INV_SLOT_RANGED = BASE + 0x012C;
-    inline constexpr uint16 INV_SLOT_TABARD = BASE + 0x012E;
+    // Inventory slots - item GUIDs. This block covers equipment (0-18) and the 4 worn bag slots.
+    inline constexpr uint16 INV_SLOT_HEAD = BASE + 0x00B0; // 23 GUIDs total (46 uint32 fields)
+    inline constexpr uint16 INV_SLOT_NECK = BASE + 0x00B2;
+    inline constexpr uint16 INV_SLOT_SHOULDERS = BASE + 0x00B4;
+    inline constexpr uint16 INV_SLOT_SHIRT = BASE + 0x00B6;
+    inline constexpr uint16 INV_SLOT_CHEST = BASE + 0x00B8;
+    inline constexpr uint16 INV_SLOT_WAIST = BASE + 0x00BA;
+    inline constexpr uint16 INV_SLOT_LEGS = BASE + 0x00BC;
+    inline constexpr uint16 INV_SLOT_FEET = BASE + 0x00BE;
+    inline constexpr uint16 INV_SLOT_WRISTS = BASE + 0x00C0;
+    inline constexpr uint16 INV_SLOT_HANDS = BASE + 0x00C2;
+    inline constexpr uint16 INV_SLOT_FINGER1 = BASE + 0x00C4;
+    inline constexpr uint16 INV_SLOT_FINGER2 = BASE + 0x00C6;
+    inline constexpr uint16 INV_SLOT_TRINKET1 = BASE + 0x00C8;
+    inline constexpr uint16 INV_SLOT_TRINKET2 = BASE + 0x00CA;
+    inline constexpr uint16 INV_SLOT_BACK = BASE + 0x00CC;
+    inline constexpr uint16 INV_SLOT_MAINHAND = BASE + 0x00CE;
+    inline constexpr uint16 INV_SLOT_OFFHAND = BASE + 0x00D0;
+    inline constexpr uint16 INV_SLOT_RANGED = BASE + 0x00D2;
+    inline constexpr uint16 INV_SLOT_TABARD = BASE + 0x00D4;
+    inline constexpr uint16 INV_SLOT_BAG_1 = BASE + 0x00D6;
+    inline constexpr uint16 INV_SLOT_BAG_2 = BASE + 0x00D8;
+    inline constexpr uint16 INV_SLOT_BAG_3 = BASE + 0x00DA;
+    inline constexpr uint16 INV_SLOT_BAG_4 = BASE + 0x00DC;
+    inline constexpr uint16 INV_SLOT_LAST = INV_SLOT_BAG_4;
 
-    // Bag slots (bag GUIDs)
-    inline constexpr uint16 PACK_SLOT_1 = BASE + 0x0130; // Bag 1
-    inline constexpr uint16 PACK_SLOT_2 = BASE + 0x0132; // Bag 2
-    inline constexpr uint16 PACK_SLOT_3 = BASE + 0x0134; // Bag 3
-    inline constexpr uint16 PACK_SLOT_4 = BASE + 0x0136; // Bag 4
-    inline constexpr uint16 PACK_SLOT_LAST = PACK_SLOT_4;
-
-    // Backpack slots (item GUIDs in slot 0-15 of backpack)
-    inline constexpr uint16 PACK_SLOT_START = BASE + 0x0138; // 32 uint32s (16 GUIDs)
+    // Backpack slots (item GUIDs in the backpack's 16 positions)
+    inline constexpr uint16 PACK_SLOT_START = BASE + 0x00DE; // 32 uint32s (16 GUIDs)
     inline constexpr uint16 PACK_SLOT_END = PACK_SLOT_START + 31;
+
+    // Bank base slots (28 item GUIDs) and bank bag slots (7 bag GUIDs)
+    inline constexpr uint16 BANK_SLOT_START = BASE + 0x00FE; // 56 uint32s (28 GUIDs)
+    inline constexpr uint16 BANK_SLOT_END = BANK_SLOT_START + 55;
+    inline constexpr uint16 BANKBAG_SLOT_1 = BASE + 0x0136; // 14 uint32s (7 GUIDs)
+    inline constexpr uint16 BANKBAG_SLOT_END = BANKBAG_SLOT_1 + 13;
 
     inline constexpr uint16 END = BASE + 0x0474;
 }
