@@ -17,6 +17,7 @@
 #include "WowTextureFactory.h"
 #include "Styling/CoreStyle.h"
 #include "Slate/WidgetTransform.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Engine/UserInterfaceSettings.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowFrame, Log, All);
@@ -2067,6 +2068,41 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
 	}
 
 	return BestHandle;
+}
+
+bool FWowFrameManager::IsMouseOverFrame(int64 Handle, float TopOffset, float BottomOffset, float LeftOffset, float RightOffset) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry || !Entry->Widget.IsValid())
+	{
+		return false;
+	}
+
+	if (Entry->Widget->GetVisibility() == ESlateVisibility::Collapsed)
+	{
+		return false;
+	}
+
+	const FFrameRect* Rect = FrameRects.Find(Entry->Def.Name);
+	if (!Rect || Rect->W <= 0.f || Rect->H <= 0.f || RawViewportScale <= 0.f)
+	{
+		return false;
+	}
+
+	if (!FSlateApplication::IsInitialized())
+	{
+		return false;
+	}
+
+	const FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
+	const float WowX = CursorPos.X / RawViewportScale;
+	const float WowY = CursorPos.Y / RawViewportScale;
+
+	const float Left = Rect->X + LeftOffset;
+	const float Right = Rect->X + Rect->W + RightOffset;
+	const float Top = Rect->Y - TopOffset;
+	const float Bottom = Rect->Y + Rect->H - BottomOffset;
+	return WowX >= Left && WowX <= Right && WowY >= Top && WowY <= Bottom;
 }
 
 void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)

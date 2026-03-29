@@ -48,6 +48,25 @@ static int64 GetOptionalFrameHandle(lua_State* L, int ArgIdx = 1)
 	return Handle;
 }
 
+static int64 GetMouseQueryHandle(lua_State* L, int ArgIdx = 1)
+{
+	luaL_checktype(L, ArgIdx, LUA_TTABLE);
+
+	lua_getfield(L, ArgIdx, "__handle");
+	if (lua_isnumber(L, -1))
+	{
+		const int64 Handle = static_cast<int64>(lua_tointeger(L, -1));
+		lua_pop(L, 1);
+		return Handle;
+	}
+	lua_pop(L, 1);
+
+	lua_getfield(L, ArgIdx, "__parentHandle");
+	const int64 ParentHandle = lua_isnumber(L, -1) ? static_cast<int64>(lua_tointeger(L, -1)) : -1;
+	lua_pop(L, 1);
+	return ParentHandle;
+}
+
 static UButton* GetButtonWidgetForTable(lua_State* L, int Idx = 1)
 {
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -170,6 +189,31 @@ static int LF_IsObjectPlaying(lua_State* L)
 	const bool bPlaying = lua_toboolean(L, -1) != 0;
 	lua_pop(L, 1);
 	lua_pushboolean(L, bPlaying ? 1 : 0);
+	return 1;
+}
+
+static int LF_IsMouseOver(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager)
+	{
+		lua_pushboolean(L, 0);
+		return 1;
+	}
+
+	const int64 Handle = GetMouseQueryHandle(L, 1);
+	if (Handle < 0)
+	{
+		lua_pushboolean(L, 0);
+		return 1;
+	}
+
+	const float TopOffset = static_cast<float>(luaL_optnumber(L, 2, 0.0));
+	const float BottomOffset = static_cast<float>(luaL_optnumber(L, 3, 0.0));
+	const float LeftOffset = static_cast<float>(luaL_optnumber(L, 4, 0.0));
+	const float RightOffset = static_cast<float>(luaL_optnumber(L, 5, 0.0));
+
+	lua_pushboolean(L, Ctx->FrameManager->IsMouseOverFrame(Handle, TopOffset, BottomOffset, LeftOffset, RightOffset) ? 1 : 0);
 	return 1;
 }
 
@@ -2992,6 +3036,7 @@ static const luaL_Reg FrameMethods[] =
 	{"Play", LF_PlayObject},
 	{"Stop", LF_StopObject},
 	{"IsPlaying", LF_IsObjectPlaying},
+	{"IsMouseOver", LF_IsMouseOver},
 
 	// Positioning
 	{"SetPoint", LF_SetPoint},

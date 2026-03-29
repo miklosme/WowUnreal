@@ -134,6 +134,7 @@ public:
 	/** Find the topmost interactive frame under a screen position (pixels).
 	 *  Returns frame handle or -1 if no interactive frame found. */
 	int64 HitTestFrames(float ScreenX, float ScreenY) const;
+	bool IsMouseOverFrame(int64 Handle, float TopOffset = 0.f, float BottomOffset = 0.f, float LeftOffset = 0.f, float RightOffset = 0.f) const;
 
 	/** Dispatch a mouse click event to a frame's Lua scripts.
 	 *  Button: "LeftButton", "RightButton", "MiddleButton" */
