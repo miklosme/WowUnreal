@@ -5439,6 +5439,21 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushboolean(L2, false);  // isDynamicInstance
         return 7;
     });
+    lua_register(L, "GetSummonFriendCooldown", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        return 2;
+    });
+    lua_register(L, "CanSummonFriend", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "CanGrantLevel", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "SummonFriend", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "GrantLevel", [](lua_State* L2) -> int { return 0; });
 
     // Missing functions from error logs
     lua_register(L, "UnitInBattleground", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
