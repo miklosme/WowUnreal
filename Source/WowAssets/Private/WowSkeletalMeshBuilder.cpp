@@ -486,27 +486,6 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		}
 	}
 
-	// UE 5.7: Use mesh description and MeshBuilderModule instead of the removed Build() pipeline
-	// Configure build settings to preserve our M2 per-vertex normals (smooth shading)
-	if (FSkeletalMeshLODInfo* LOD0Info = SkelMesh->GetLODInfo(0))
-	{
-		LOD0Info->BuildSettings.bRecomputeNormals = false;
-		LOD0Info->BuildSettings.bRecomputeTangents = true;
-		LOD0Info->BuildSettings.bUseMikkTSpace = false;
-	}
-
-	// Ensure LODModel exists BEFORE CommitMeshDescription is called.
-	// CommitMeshDescription accesses LODModels[InLODIndex] to store bulk data IDs.
-	FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel();
-	if (ImportedModel && !ImportedModel->LODModels.IsValidIndex(0))
-	{
-		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
-	}
-
-	// Store the mesh description in the skeletal mesh, then commit it for LOD 0
-	SkelMesh->CreateMeshDescription(0, MoveTemp(MeshDesc));
-	SkelMesh->CommitMeshDescription(0);
-
 	// Set bounds BEFORE Build() so the build pipeline has valid bounds data.
 	// M2 vertex transform convention: UE = (WoW.Y, WoW.X, WoW.Z) * SCALE
 	const FVector& BMin = Data.BoundingBox.Min;
@@ -522,13 +501,34 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	FBoxSphereBounds Bounds(MeshBox);
 	SkelMesh->SetImportedBounds(Bounds);
 
-	// CalculateInvRefMatrices must run before Build() so the build has valid inverse reference matrices.
-	SkelMesh->CalculateInvRefMatrices();
+#if WITH_EDITOR
+	// UE 5.7: Use mesh description and editor build pipeline to generate runtime render data.
+	if (FSkeletalMeshLODInfo* LOD0Info = SkelMesh->GetLODInfo(0))
+	{
+		LOD0Info->BuildSettings.bRecomputeNormals = false;
+		LOD0Info->BuildSettings.bRecomputeTangents = true;
+		LOD0Info->BuildSettings.bUseMikkTSpace = false;
+	}
+
+	// CommitMeshDescription expects an imported-model slot for the target LOD.
+	FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel();
+	if (ImportedModel && !ImportedModel->LODModels.IsValidIndex(0))
+	{
+		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
+	}
+
+	SkelMesh->CreateMeshDescription(0, MoveTemp(MeshDesc));
+	SkelMesh->CommitMeshDescription(0);
 
 	// Build() converts mesh description to render data and initializes GPU resources.
-	// Requires: mesh description stored via CreateMeshDescription(), InvRefMatrices calculated,
-	// bounds set, and LODInfo configured.
+	SkelMesh->CalculateInvRefMatrices();
 	SkelMesh->Build();
+#else
+	// Non-editor game targets in UE 5.7 do not expose the skeletal mesh import/build APIs.
+	// The verified runtime path uses the editor target (`UnrealEditor -game`), where the
+	// full mesh build above is available.
+	UE_LOG(LogWowSkelMesh, Warning, TEXT("Skipping skeletal mesh build for non-editor target '%s'"), *ModelName);
+#endif
 
 	UE_LOG(LogWowSkelMesh, Log, TEXT("Created skeletal mesh '%s' with %d verts, %d tris, %d bones"),
 		*ModelName, NumVerts, NumTris, NumBones);

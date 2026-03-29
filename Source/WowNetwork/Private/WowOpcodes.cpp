@@ -30,6 +30,7 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case CMSG_PLAYER_LOGIN:             return TEXT("CMSG_PLAYER_LOGIN");
     case CMSG_CHAR_ENUM:                return TEXT("CMSG_CHAR_ENUM");
     case CMSG_KEEP_ALIVE:               return TEXT("CMSG_KEEP_ALIVE");
+    case CMSG_SET_ACTION_BUTTON:        return TEXT("CMSG_SET_ACTION_BUTTON");
 
     // Social / Guild / Friends
     case SMSG_FRIEND_LIST:              return TEXT("SMSG_FRIEND_LIST");

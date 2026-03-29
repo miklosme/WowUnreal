@@ -42,6 +42,19 @@ public:
     /** Cast a spell on the current target (or self if no target) */
     UFUNCTION(BlueprintCallable) void SendCastSpell(int32 SpellId, int64 TargetGuid = 0);
 
+    /** Assign or clear an action bar slot */
+    void SendSetActionButton(int32 SlotIndex, uint32 ActionId, uint8 ActionType = 0);
+    void SendClearActionButton(int32 SlotIndex);
+
+    /** Cursor payload helpers for spell/action pickup flows */
+    void PickupSpellCursor(int32 SpellId, const FString& BookType = TEXT("spell"));
+    void PickupActionCursor(int32 SlotIndex);
+    void ClearCursorPayload();
+    bool HasCursorPayload() const;
+    bool HasCursorSpellPayload() const;
+    bool GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const;
+    bool PlaceCursorIntoActionSlot(int32 SlotIndex);
+
     /** Start melee attack on target */
     UFUNCTION(BlueprintCallable) void SendAttackSwing(int64 TargetGuid);
 
@@ -116,8 +129,26 @@ public:
     UPROPERTY(BlueprintAssignable) FOnWowError OnError;
     UPROPERTY(BlueprintAssignable) FOnCharCreateResult OnCharCreateResult;
 private:
+    enum class ECursorPayloadType : uint8
+    {
+        None,
+        Spell,
+        Action,
+    };
+
+    struct FCursorPayloadState
+    {
+        ECursorPayloadType Type = ECursorPayloadType::None;
+        int32 PrimaryId = 0;
+        FString Detail;
+        uint8 ActionType = 0;
+        int32 SourceActionSlot = -1;
+    };
+
     EWowSessionState State = EWowSessionState::Disconnected;
     void SetState(EWowSessionState S);
+    void BroadcastActionButtonsChanged();
+    void EnsureActionButtonCapacity(int32 SlotIndex);
 
     void OnAuthResultReceived(bool bSuccess);
     void OnRealmListReceived(const TArray<FWowRealmInfo>& Realms);
@@ -131,4 +162,5 @@ private:
     TArray<FWowRealmInfo> CachedRealms;
     TArray<FWowCharacterInfo> CachedCharacters;
     int64 TargetGuid = 0;
+    FCursorPayloadState CursorPayload;
 };

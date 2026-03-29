@@ -68,6 +68,12 @@ TSharedRef<SWidget> SWowActionBar::CreateActionSlotWidget(int32 SlotIndex)
         {
             if (Event.GetEffectingButton() == EKeys::LeftMouseButton)
             {
+                if (ConnectionManager.IsValid() && ConnectionManager->PlaceCursorIntoActionSlot(SlotIndex))
+                {
+                    RefreshActionButtons();
+                    return FReply::Handled();
+                }
+
                 return OnActionSlotClicked(SlotIndex);
             }
             return FReply::Unhandled();

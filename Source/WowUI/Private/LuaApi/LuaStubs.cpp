@@ -1169,6 +1169,165 @@ static int32 SafeActionSlot(lua_State* L)
     return static_cast<int32>(lua_tonumber(L, 1)) - 1; // Convert 1-based to 0-based
 }
 
+static bool ResolveSpellBookSpellId(lua_State* L, int32 SpellIndexOrId, const char* BookType, uint32& OutSpellId)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (!Ctx || !Ctx->ConnectionManager || strcmp(BookType, "spell") != 0)
+    {
+        return false;
+    }
+
+    const TSet<uint32>& KnownSpells = Ctx->ConnectionManager->PacketHandler.KnownSpells;
+    if (KnownSpells.Contains(static_cast<uint32>(SpellIndexOrId)))
+    {
+        OutSpellId = static_cast<uint32>(SpellIndexOrId);
+        return true;
+    }
+
+    if (SpellIndexOrId <= 0 || SpellIndexOrId > KnownSpells.Num())
+    {
+        return false;
+    }
+
+    TArray<uint32> SpellArray = KnownSpells.Array();
+    SpellArray.Sort();
+    OutSpellId = SpellArray[SpellIndexOrId - 1];
+    return true;
+}
+
+static int L_PickupAction(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    const int32 Slot = SafeActionSlot(L);
+    if (Ctx && Ctx->ConnectionManager && Slot >= 0)
+    {
+        Ctx->ConnectionManager->PickupActionCursor(Slot);
+    }
+    return 0;
+}
+
+static int L_PlaceAction(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    const int32 Slot = SafeActionSlot(L);
+    if (Ctx && Ctx->ConnectionManager && Slot >= 0)
+    {
+        Ctx->ConnectionManager->PlaceCursorIntoActionSlot(Slot);
+    }
+    return 0;
+}
+
+static int L_PickupSpell(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    const int32 SpellIndexOrId = static_cast<int32>(luaL_checknumber(L, 1));
+    const char* BookType = luaL_optstring(L, 2, "spell");
+    uint32 SpellId = 0;
+
+    if (Ctx && Ctx->ConnectionManager && ResolveSpellBookSpellId(L, SpellIndexOrId, BookType, SpellId))
+    {
+        Ctx->ConnectionManager->PickupSpellCursor(static_cast<int32>(SpellId), UTF8_TO_TCHAR(BookType));
+    }
+
+    return 0;
+}
+
+static int L_GetCursorInfo(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    FString Type;
+    FString Detail;
+    int32 Id = 0;
+
+    if (Ctx && Ctx->ConnectionManager && Ctx->ConnectionManager->GetCursorInfo(Type, Id, Detail))
+    {
+        lua_pushstring(L, TCHAR_TO_UTF8(*Type));
+        lua_pushnumber(L, Id);
+        if (!Detail.IsEmpty())
+        {
+            lua_pushstring(L, TCHAR_TO_UTF8(*Detail));
+            return 3;
+        }
+        return 2;
+    }
+
+    return 0;
+}
+
+static int L_ClearCursor(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        Ctx->ConnectionManager->ClearCursorPayload();
+    }
+    return 0;
+}
+
+static int L_CursorHasSpell(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    const bool bHasSpell = Ctx && Ctx->ConnectionManager && Ctx->ConnectionManager->HasCursorSpellPayload();
+    lua_pushboolean(L, bHasSpell);
+    return 1;
+}
+
+static FString GetModifiedClickBindingName(const char* Action)
+{
+    if (strcmp(Action, "CHATLINK") == 0) return TEXT("SHIFT");
+    if (strcmp(Action, "SELFCAST") == 0) return TEXT("ALT");
+    if (strcmp(Action, "FOCUSCAST") == 0) return TEXT("CTRL");
+    if (strcmp(Action, "AUTOLOOTTOGGLE") == 0) return TEXT("SHIFT");
+    if (strcmp(Action, "COMPAREITEMS") == 0) return TEXT("SHIFT");
+    if (strcmp(Action, "OPENALLBAGS") == 0) return TEXT("SHIFT");
+    if (strcmp(Action, "QUESTWATCHTOGGLE") == 0) return TEXT("SHIFT");
+    if (strcmp(Action, "DRESSUP") == 0) return TEXT("CTRL");
+    if (strcmp(Action, "PICKUPACTION") == 0) return TEXT("SHIFT");
+    return TEXT("NONE");
+}
+
+static bool IsModifierBindingPressed(const FString& BindingName)
+{
+    if (!FSlateApplication::IsInitialized())
+    {
+        return false;
+    }
+
+    const FModifierKeysState Modifiers = FSlateApplication::Get().GetModifierKeys();
+    if (BindingName == TEXT("SHIFT")) return Modifiers.IsShiftDown();
+    if (BindingName == TEXT("CTRL")) return Modifiers.IsControlDown();
+    if (BindingName == TEXT("ALT")) return Modifiers.IsAltDown();
+    return false;
+}
+
+static int L_GetModifiedClick(lua_State* L)
+{
+    const char* Action = luaL_optstring(L, 1, "");
+    const FString BindingName = GetModifiedClickBindingName(Action);
+    lua_pushstring(L, TCHAR_TO_UTF8(*BindingName));
+    return 1;
+}
+
+static int L_IsModifiedClick(lua_State* L)
+{
+    if (lua_isnoneornil(L, 1))
+    {
+        bool bAnyModifier = false;
+        if (FSlateApplication::IsInitialized())
+        {
+            const FModifierKeysState Modifiers = FSlateApplication::Get().GetModifierKeys();
+            bAnyModifier = Modifiers.IsShiftDown() || Modifiers.IsControlDown() || Modifiers.IsAltDown();
+        }
+        lua_pushboolean(L, bAnyModifier);
+        return 1;
+    }
+
+    const char* Action = luaL_optstring(L, 1, "");
+    const FString BindingName = GetModifiedClickBindingName(Action);
+    lua_pushboolean(L, IsModifierBindingPressed(BindingName));
+    return 1;
+}
+
 static int L_HasAction(lua_State* L)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -3734,6 +3893,8 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetActionTexture", L_GetActionTexture);
     lua_register(L, "GetActionCount", L_GetActionCount);
     lua_register(L, "GetActionCooldown", L_GetActionCooldown);
+    lua_register(L, "PickupAction", L_PickupAction);
+    lua_register(L, "PlaceAction", L_PlaceAction);
     lua_register(L, "IsCurrentAction", L_IsCurrentAction);
     lua_register(L, "IsUsableAction", L_IsUsableAction);
     lua_register(L, "IsAttackAction", L_IsAttackAction);
@@ -3765,6 +3926,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "UseAction", L_UseAction);
 
     // Spell
+    lua_register(L, "PickupSpell", L_PickupSpell);
     lua_register(L, "GetSpellInfo", L_GetSpellInfo);
     lua_register(L, "GetSpellCooldown", L_GetSpellCooldown);
     lua_register(L, "GetSpellTexture", L_GetSpellTexture);
@@ -4114,19 +4276,8 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "ResetCursor", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "ShowCursor", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "HideCursor", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "GetCursorInfo", [](lua_State* L2) -> int {
-        // GetCursorInfo() → type, id, ... (or nothing if empty cursor)
-        // For now, return nothing (cursor is empty)
-        return 0;
-    });
-    lua_register(L, "ClearCursor", [](lua_State* L2) -> int {
-        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
-        if (Ctx && Ctx->ConnectionManager) {
-            // TODO: Send CMSG_CLEAR_CURSOR when opcode is available
-            UE_LOG(LogWowLuaStub, Log, TEXT("ClearCursor: clearing held item"));
-        }
-        return 0;
-    });
+    lua_register(L, "GetCursorInfo", L_GetCursorInfo);
+    lua_register(L, "ClearCursor", L_ClearCursor);
     lua_register(L, "GetItemQualityColor", [](lua_State* L2) -> int {
         // Returns r,g,b,hex for item quality. Simplified: return white for all.
         lua_pushnumber(L2, 1); lua_pushnumber(L2, 1); lua_pushnumber(L2, 1);
@@ -4517,11 +4668,10 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         return 3;
     });
     lua_register(L, "CursorHasItem", [](lua_State* L2) -> int {
-        // CursorHasItem() → boolean (true if holding something)
-        // For now, no drag system, so always false
         lua_pushboolean(L2, false);
         return 1;
     });
+    lua_register(L, "CursorHasSpell", L_CursorHasSpell);
     lua_register(L, "IsEquippedAction", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
 
     // Loot
@@ -5511,20 +5661,8 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetNumPendingCalendarInvites", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
 
     // Missing functions that cause OnLoad errors
-    lua_register(L, "GetModifiedClick", [](lua_State* L2) -> int {
-        const char* action = luaL_optstring(L2, 1, "");
-        // Return the default modifier key for each action
-        if (strcmp(action, "CHATLINK") == 0) lua_pushstring(L2, "SHIFT");
-        else if (strcmp(action, "SELFCAST") == 0) lua_pushstring(L2, "ALT");
-        else if (strcmp(action, "FOCUSCAST") == 0) lua_pushstring(L2, "CTRL");
-        else if (strcmp(action, "AUTOLOOTTOGGLE") == 0) lua_pushstring(L2, "SHIFT");
-        else if (strcmp(action, "COMPAREITEMS") == 0) lua_pushstring(L2, "SHIFT");
-        else if (strcmp(action, "OPENALLBAGS") == 0) lua_pushstring(L2, "SHIFT");
-        else if (strcmp(action, "QUESTWATCHTOGGLE") == 0) lua_pushstring(L2, "SHIFT");
-        else if (strcmp(action, "DRESSUP") == 0) lua_pushstring(L2, "CTRL");
-        else lua_pushstring(L2, "NONE");
-        return 1;
-    });
+    lua_register(L, "GetModifiedClick", L_GetModifiedClick);
+    lua_register(L, "IsModifiedClick", L_IsModifiedClick);
     lua_register(L, "SetModifiedClick", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "GetModifiedClickAction", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetLFGInfoServer", [](lua_State* L2) -> int {

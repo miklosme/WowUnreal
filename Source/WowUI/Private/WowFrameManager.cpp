@@ -2123,3 +2123,13 @@ void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button)
 	// WoW OnClick signature: function(self, button, down)
 	EventSystem->RunFrameScript(Handle, TEXT("OnClick"), {Button, TEXT("false")});
 }
+
+bool FWowFrameManager::DispatchReceiveDrag(int64 Handle)
+{
+	if (!EventSystem || Handle < 0)
+	{
+		return false;
+	}
+
+	return EventSystem->RunFrameScript(Handle, TEXT("OnReceiveDrag"));
+}

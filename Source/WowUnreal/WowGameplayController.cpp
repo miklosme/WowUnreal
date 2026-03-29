@@ -866,6 +866,12 @@ void AWowGameplayController::OnLeftClick()
 			int64 HitFrame = UIManager->GetFrameManager()->HitTestFrames(MX, MY);
 			if (HitFrame >= 0)
 			{
+				if (ConnectionManager && ConnectionManager->HasCursorPayload()
+					&& UIManager->GetFrameManager()->DispatchReceiveDrag(HitFrame))
+				{
+					return; // Consume drag-drop on WoW UI before regular click handling
+				}
+
 				UIManager->GetFrameManager()->DispatchMouseDown(HitFrame, TEXT("LeftButton"));
 				UIManager->GetFrameManager()->DispatchClick(HitFrame, TEXT("LeftButton"));
 				UIManager->GetFrameManager()->DispatchMouseUp(HitFrame, TEXT("LeftButton"));
@@ -3674,6 +3680,11 @@ void AWowGameplayController::OnInitialSpells(const TArray<uint32>& SpellIds)
 void AWowGameplayController::OnActionButtonsUpdated()
 {
 	UE_LOG(LogWowGameplay, Log, TEXT("Action buttons updated"));
+
+	if (ActionBarWidget.IsValid())
+	{
+		ActionBarWidget->RefreshActionButtons();
+	}
 
 	// Fire action bar events
 	for (int32 SlotIndex = 0; SlotIndex < 12; ++SlotIndex)

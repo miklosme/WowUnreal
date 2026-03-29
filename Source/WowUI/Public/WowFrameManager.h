@@ -141,6 +141,7 @@ public:
 	void DispatchMouseDown(int64 Handle, const FString& Button);
 	void DispatchMouseUp(int64 Handle, const FString& Button);
 	void DispatchClick(int64 Handle, const FString& Button);
+	bool DispatchReceiveDrag(int64 Handle);
 
 	/** Set the UI scale factor (typically calculated from viewport size vs WoW's base resolution) */
 	void SetUIScale(float InScale) { UIScale = InScale; }

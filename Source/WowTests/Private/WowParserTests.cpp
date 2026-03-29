@@ -90,6 +90,7 @@ bool FCoordWowRoundtrip::RunTest(const FString& Parameters)
 #include "WowEntity.h"
 #include "WowEntityManager.h"
 #include "WowUpdateFields.h"
+#include "WowConnectionManager.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEntityCreateAndLookup, "WowUnreal.Entity.CreateAndLookup",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -244,6 +245,73 @@ bool FEntityTypedContainersAndGameObjects::RunTest(const FString& Parameters)
     TestEqual(TEXT("GameObject display ID accessor works"), GameObject->GetGameObjectDisplayId(), static_cast<uint32>(31415));
     TestEqual(TEXT("GameObject flags accessor works"), GameObject->GetGameObjectFlags(), static_cast<uint32>(0x20));
     TestEqual(TEXT("GameObject level accessor works"), GameObject->GetGameObjectLevel(), 1);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FActionCursorPlacesSpellIntoActionBar, "WowUnreal.UI.ActionCursorPlacesSpellIntoActionBar",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FActionCursorPlacesSpellIntoActionBar::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    Connection->PickupSpellCursor(133, TEXT("spell"));
+
+    FString CursorType;
+    FString CursorDetail;
+    int32 CursorId = 0;
+    TestTrue(TEXT("Cursor info available after spell pickup"), Connection->GetCursorInfo(CursorType, CursorId, CursorDetail));
+    TestEqual(TEXT("Cursor type is spell"), CursorType, FString(TEXT("spell")));
+    TestEqual(TEXT("Cursor spell id matches"), CursorId, 133);
+    TestEqual(TEXT("Cursor detail stores spell book type"), CursorDetail, FString(TEXT("spell")));
+    TestTrue(TEXT("Spell payload is reported"), Connection->HasCursorSpellPayload());
+
+    const bool bPlaced = Connection->PlaceCursorIntoActionSlot(4);
+    TestTrue(TEXT("Placing spell payload into slot succeeds"), bPlaced);
+    TestTrue(TEXT("Action array grew to include placed slot"), Connection->PacketHandler.ActionButtons.IsValidIndex(4));
+    if (Connection->PacketHandler.ActionButtons.IsValidIndex(4))
+    {
+        TestEqual(TEXT("Placed action stores spell id in the slot"), Connection->PacketHandler.ActionButtons[4], static_cast<uint32>(133));
+    }
+    TestFalse(TEXT("Cursor payload clears after placement"), Connection->HasCursorPayload());
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FActionCursorMovesExistingAction, "WowUnreal.UI.ActionCursorMovesExistingAction",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FActionCursorMovesExistingAction::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    Connection->PacketHandler.ActionButtons.SetNumZeroed(12);
+    const uint32 PackedSpellAction = 6603; // type 0 spell action
+    Connection->PacketHandler.ActionButtons[1] = PackedSpellAction;
+
+    Connection->PickupActionCursor(1);
+
+    FString CursorType;
+    FString CursorDetail;
+    int32 CursorId = 0;
+    TestTrue(TEXT("Cursor info available after action pickup"), Connection->GetCursorInfo(CursorType, CursorId, CursorDetail));
+    TestEqual(TEXT("Cursor type is action"), CursorType, FString(TEXT("action")));
+    TestEqual(TEXT("Cursor action id is 1-based source slot"), CursorId, 2);
+
+    const bool bPlaced = Connection->PlaceCursorIntoActionSlot(3);
+    TestTrue(TEXT("Moving action payload into destination slot succeeds"), bPlaced);
+    TestEqual(TEXT("Source slot is cleared after move"), Connection->PacketHandler.ActionButtons[1], static_cast<uint32>(0));
+    TestEqual(TEXT("Destination slot receives moved action"), Connection->PacketHandler.ActionButtons[3], PackedSpellAction);
+    TestFalse(TEXT("Cursor payload clears after move"), Connection->HasCursorPayload());
 
     return true;
 }

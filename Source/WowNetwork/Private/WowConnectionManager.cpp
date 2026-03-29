@@ -5,6 +5,11 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowNet, Log, All);
 
+namespace
+{
+    constexpr uint8 ACTION_BUTTON_TYPE_SPELL = 0x00;
+}
+
 void UWowConnectionManager::SetState(EWowSessionState S)
 {
     State = S;
@@ -380,6 +385,168 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
 
     WorldSocket->SendPacket(WowOpcode::CMSG_CAST_SPELL, Data);
     UE_LOG(LogWowNet, Log, TEXT("Cast spell %d on target %lld"), SpellId, InTargetGuid);
+}
+
+void UWowConnectionManager::SendSetActionButton(int32 SlotIndex, uint32 ActionId, uint8 ActionType)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if (SlotIndex < 0 || SlotIndex >= 144) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(5);
+
+    const uint8 Button = static_cast<uint8>(SlotIndex);
+    const uint32 PackedAction = (ActionId & 0x00FFFFFFu) | (uint32(ActionType) << 24);
+
+    Data.Add(Button);
+    Data.Append(reinterpret_cast<const uint8*>(&PackedAction), sizeof(PackedAction));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_SET_ACTION_BUTTON, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Set action button %d -> action=%u type=%u"), SlotIndex, ActionId, ActionType);
+}
+
+void UWowConnectionManager::SendClearActionButton(int32 SlotIndex)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if (SlotIndex < 0 || SlotIndex >= 144) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(5);
+
+    const uint8 Button = static_cast<uint8>(SlotIndex);
+    const uint32 PackedAction = 0;
+
+    Data.Add(Button);
+    Data.Append(reinterpret_cast<const uint8*>(&PackedAction), sizeof(PackedAction));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_SET_ACTION_BUTTON, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Cleared action button %d"), SlotIndex);
+}
+
+void UWowConnectionManager::PickupSpellCursor(int32 SpellId, const FString& BookType)
+{
+    CursorPayload.Type = ECursorPayloadType::Spell;
+    CursorPayload.PrimaryId = SpellId;
+    CursorPayload.Detail = BookType;
+    CursorPayload.ActionType = ACTION_BUTTON_TYPE_SPELL;
+    CursorPayload.SourceActionSlot = -1;
+}
+
+void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
+{
+    if (SlotIndex < 0 || SlotIndex >= 144 || !PacketHandler.ActionButtons.IsValidIndex(SlotIndex))
+    {
+        return;
+    }
+
+    const uint32 PackedAction = PacketHandler.ActionButtons[SlotIndex];
+    if (PackedAction == 0)
+    {
+        return;
+    }
+
+    CursorPayload.Type = ECursorPayloadType::Action;
+    CursorPayload.PrimaryId = static_cast<int32>(PackedAction & 0x00FFFFFFu);
+    CursorPayload.Detail.Empty();
+    CursorPayload.ActionType = static_cast<uint8>((PackedAction >> 24) & 0xFF);
+    CursorPayload.SourceActionSlot = SlotIndex;
+}
+
+void UWowConnectionManager::ClearCursorPayload()
+{
+    CursorPayload = FCursorPayloadState();
+}
+
+bool UWowConnectionManager::HasCursorPayload() const
+{
+    return CursorPayload.Type != ECursorPayloadType::None;
+}
+
+bool UWowConnectionManager::HasCursorSpellPayload() const
+{
+    return CursorPayload.Type == ECursorPayloadType::Spell;
+}
+
+bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const
+{
+    if (CursorPayload.Type == ECursorPayloadType::Spell)
+    {
+        OutType = TEXT("spell");
+        OutId = CursorPayload.PrimaryId;
+        OutDetail = CursorPayload.Detail;
+        return true;
+    }
+
+    if (CursorPayload.Type == ECursorPayloadType::Action)
+    {
+        OutType = TEXT("action");
+        OutId = CursorPayload.SourceActionSlot + 1;
+        OutDetail.Empty();
+        return true;
+    }
+
+    OutType.Empty();
+    OutId = 0;
+    OutDetail.Empty();
+    return false;
+}
+
+bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
+{
+    if (SlotIndex < 0 || SlotIndex >= 144 || CursorPayload.Type == ECursorPayloadType::None)
+    {
+        return false;
+    }
+
+    EnsureActionButtonCapacity(SlotIndex);
+
+    if (CursorPayload.Type == ECursorPayloadType::Spell)
+    {
+        SendSetActionButton(SlotIndex, static_cast<uint32>(CursorPayload.PrimaryId), ACTION_BUTTON_TYPE_SPELL);
+        PacketHandler.ActionButtons[SlotIndex] = (static_cast<uint32>(CursorPayload.PrimaryId) & 0x00FFFFFFu);
+    }
+    else if (CursorPayload.Type == ECursorPayloadType::Action)
+    {
+        if (CursorPayload.SourceActionSlot == SlotIndex)
+        {
+            ClearCursorPayload();
+            return true;
+        }
+
+        const uint32 PackedAction = (static_cast<uint32>(CursorPayload.PrimaryId) & 0x00FFFFFFu)
+            | (uint32(CursorPayload.ActionType) << 24);
+        SendSetActionButton(SlotIndex, static_cast<uint32>(CursorPayload.PrimaryId), CursorPayload.ActionType);
+        PacketHandler.ActionButtons[SlotIndex] = PackedAction;
+
+        if (CursorPayload.SourceActionSlot >= 0 && CursorPayload.SourceActionSlot < 144)
+        {
+            EnsureActionButtonCapacity(CursorPayload.SourceActionSlot);
+            SendClearActionButton(CursorPayload.SourceActionSlot);
+            PacketHandler.ActionButtons[CursorPayload.SourceActionSlot] = 0;
+        }
+    }
+
+    BroadcastActionButtonsChanged();
+    ClearCursorPayload();
+    return true;
+}
+
+void UWowConnectionManager::BroadcastActionButtonsChanged()
+{
+    PacketHandler.OnActionButtonsUpdated.Broadcast();
+}
+
+void UWowConnectionManager::EnsureActionButtonCapacity(int32 SlotIndex)
+{
+    if (SlotIndex < 0)
+    {
+        return;
+    }
+
+    if (PacketHandler.ActionButtons.Num() <= SlotIndex)
+    {
+        PacketHandler.ActionButtons.SetNumZeroed(SlotIndex + 1);
+    }
 }
 
 void UWowConnectionManager::SendAttackSwing(int64 InTargetGuid)
