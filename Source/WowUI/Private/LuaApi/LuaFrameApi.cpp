@@ -24,6 +24,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowLuaFrame, Log, All);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 
+static UImage* GetTextureImage(lua_State* L, int idx = 1);
+static int LF_SetText(lua_State* L);
+static int LF_GetText(lua_State* L);
+static int LF_FontStringSetTextColor(lua_State* L);
+
 // Get the frame handle from a frame table (self argument at ArgIdx)
 static int64 GetFrameHandle(lua_State* L, int ArgIdx = 1)
 {
@@ -32,6 +37,114 @@ static int64 GetFrameHandle(lua_State* L, int ArgIdx = 1)
 	int64 Handle = static_cast<int64>(lua_tointeger(L, -1));
 	lua_pop(L, 1);
 	return Handle;
+}
+
+static int64 GetOptionalFrameHandle(lua_State* L, int ArgIdx = 1)
+{
+	luaL_checktype(L, ArgIdx, LUA_TTABLE);
+	lua_getfield(L, ArgIdx, "__handle");
+	int64 Handle = lua_isnumber(L, -1) ? static_cast<int64>(lua_tointeger(L, -1)) : -1;
+	lua_pop(L, 1);
+	return Handle;
+}
+
+static UButton* GetButtonWidgetForTable(lua_State* L, int Idx = 1)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return nullptr;
+
+	const int64 Handle = GetOptionalFrameHandle(L, Idx);
+	if (Handle < 0) return nullptr;
+
+	if (UButton* Button = Ctx->FrameManager->GetButtonWidget(Handle))
+	{
+		return Button;
+	}
+
+	return Cast<UButton>(Ctx->FrameManager->GetWidgetForHandle(Handle));
+}
+
+static UEditableTextBox* GetEditBoxWidgetForTable(lua_State* L, int Idx = 1)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return nullptr;
+
+	const int64 Handle = GetOptionalFrameHandle(L, Idx);
+	if (Handle < 0) return nullptr;
+
+	if (UEditableTextBox* EditBox = Ctx->FrameManager->GetEditBoxWidget(Handle))
+	{
+		return EditBox;
+	}
+
+	return Cast<UEditableTextBox>(Ctx->FrameManager->GetWidgetForHandle(Handle));
+}
+
+static UTextBlock* GetTextBlockWidgetForTable(lua_State* L, int Idx = 1)
+{
+	luaL_checktype(L, Idx, LUA_TTABLE);
+
+	lua_getfield(L, Idx, "__textWidget");
+	if (lua_islightuserdata(L, -1))
+	{
+		UTextBlock* TextBlock = static_cast<UTextBlock*>(lua_touserdata(L, -1));
+		lua_pop(L, 1);
+		return TextBlock;
+	}
+	lua_pop(L, 1);
+
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return nullptr;
+
+	lua_getfield(L, Idx, "__name");
+	if (lua_isstring(L, -1))
+	{
+		if (UTextBlock* NamedText = Ctx->FrameManager->GetNamedFontString(UTF8_TO_TCHAR(lua_tostring(L, -1))))
+		{
+			lua_pop(L, 1);
+			return NamedText;
+		}
+	}
+	lua_pop(L, 1);
+
+	const int64 Handle = GetOptionalFrameHandle(L, Idx);
+	if (Handle >= 0)
+	{
+		if (UTextBlock* PrimaryText = Ctx->FrameManager->GetPrimaryTextWidget(Handle))
+		{
+			return PrimaryText;
+		}
+
+		return Cast<UTextBlock>(Ctx->FrameManager->GetWidgetForHandle(Handle));
+	}
+
+	return nullptr;
+}
+
+static bool TableRepresentsRegion(lua_State* L, int Idx = 1)
+{
+	luaL_checktype(L, Idx, LUA_TTABLE);
+
+	lua_getfield(L, Idx, "__objectType");
+	const bool bHasObjectType = lua_isstring(L, -1);
+	lua_pop(L, 1);
+	if (bHasObjectType)
+	{
+		return true;
+	}
+
+	lua_getfield(L, Idx, "__imageWidget");
+	const bool bHasImageWidget = lua_islightuserdata(L, -1);
+	lua_pop(L, 1);
+	if (bHasImageWidget)
+	{
+		return true;
+	}
+
+	lua_getfield(L, Idx, "__textWidget");
+	const bool bHasTextWidget = lua_islightuserdata(L, -1);
+	lua_pop(L, 1);
+	return bHasTextWidget;
 }
 
 // ── Global: CreateFrame(type, name, parent, template) ────────────────────────────
@@ -131,6 +244,13 @@ static int LF_GetName(lua_State* L)
 // frame:GetObjectType()
 static int LF_GetObjectType(lua_State* L)
 {
+	lua_getfield(L, 1, "__objectType");
+	if (lua_isstring(L, -1))
+	{
+		return 1;
+	}
+	lua_pop(L, 1);
+
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
@@ -263,11 +383,29 @@ static int LF_GetScript(lua_State* L)
 // frame:Show()
 static int LF_Show(lua_State* L)
 {
+	if (TableRepresentsRegion(L, 1))
+	{
+		if (UImage* Image = GetTextureImage(L, 1))
+		{
+			Image->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			return 0;
+		}
+		if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
+		{
+			TextBlock->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			return 0;
+		}
+	}
+
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
 	{
 		Ctx->FrameManager->SetFrameVisible(Handle, true);
+	}
+	if (Ctx && Ctx->EventSystem)
+	{
+		Ctx->EventSystem->RunFrameScript(Handle, TEXT("OnShow"));
 	}
 	return 0;
 }
@@ -275,11 +413,29 @@ static int LF_Show(lua_State* L)
 // frame:Hide()
 static int LF_Hide(lua_State* L)
 {
+	if (TableRepresentsRegion(L, 1))
+	{
+		if (UImage* Image = GetTextureImage(L, 1))
+		{
+			Image->SetVisibility(ESlateVisibility::Collapsed);
+			return 0;
+		}
+		if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
+		{
+			TextBlock->SetVisibility(ESlateVisibility::Collapsed);
+			return 0;
+		}
+	}
+
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
 	{
 		Ctx->FrameManager->SetFrameVisible(Handle, false);
+	}
+	if (Ctx && Ctx->EventSystem)
+	{
+		Ctx->EventSystem->RunFrameScript(Handle, TEXT("OnHide"));
 	}
 	return 0;
 }
@@ -287,6 +443,20 @@ static int LF_Hide(lua_State* L)
 // frame:IsShown()
 static int LF_IsShown(lua_State* L)
 {
+	if (TableRepresentsRegion(L, 1))
+	{
+		if (UImage* Image = GetTextureImage(L, 1))
+		{
+			lua_pushboolean(L, Image->GetVisibility() != ESlateVisibility::Collapsed);
+			return 1;
+		}
+		if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
+		{
+			lua_pushboolean(L, TextBlock->GetVisibility() != ESlateVisibility::Collapsed);
+			return 1;
+		}
+	}
+
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
@@ -538,6 +708,23 @@ static int LF_GetHeight(lua_State* L)
 // frame:SetAlpha(alpha)
 static int LF_SetAlpha(lua_State* L)
 {
+	if (TableRepresentsRegion(L, 1))
+	{
+		float Alpha = static_cast<float>(luaL_checknumber(L, 2));
+		if (UImage* Image = GetTextureImage(L, 1))
+		{
+			Image->SetRenderOpacity(Alpha);
+		}
+		else if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
+		{
+			TextBlock->SetRenderOpacity(Alpha);
+		}
+
+		lua_pushnumber(L, Alpha);
+		lua_setfield(L, 1, "__alpha");
+		return 0;
+	}
+
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	int64 Handle = GetFrameHandle(L);
 	if (Ctx && Ctx->FrameManager)
@@ -659,18 +846,39 @@ static int LF_GetFrameLevel(lua_State* L)
 // frame:EnableMouse(enable)
 static int LF_EnableMouse(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	const int64 Handle = GetFrameHandle(L);
+	const bool bEnable = lua_isnoneornil(L, 2) ? true : (lua_toboolean(L, 2) != 0);
+	if (Ctx && Ctx->FrameManager)
+	{
+		Ctx->FrameManager->SetFrameMouseEnabled(Handle, bEnable);
+	}
 	return 0;
 }
 
 // frame:EnableKeyboard(enable)
 static int LF_EnableKeyboard(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	const int64 Handle = GetFrameHandle(L);
+	const bool bEnable = lua_isnoneornil(L, 2) ? true : (lua_toboolean(L, 2) != 0);
+	if (Ctx && Ctx->FrameManager)
+	{
+		Ctx->FrameManager->SetFrameKeyboardEnabled(Handle, bEnable);
+	}
 	return 0;
 }
 
 // frame:EnableMouseWheel(enable)
 static int LF_EnableMouseWheel(lua_State* L)
 {
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	const int64 Handle = GetFrameHandle(L);
+	const bool bEnable = lua_isnoneornil(L, 2) ? true : (lua_toboolean(L, 2) != 0);
+	if (Ctx && Ctx->FrameManager)
+	{
+		Ctx->FrameManager->SetFrameMouseWheelEnabled(Handle, bEnable);
+	}
 	return 0;
 }
 
@@ -769,7 +977,7 @@ static int LF_GetNumChildren(lua_State* L)
 }
 
 // Helper: get the UImage* from a texture Lua table (either named or dynamic)
-static UImage* GetTextureImage(lua_State* L, int idx = 1)
+static UImage* GetTextureImage(lua_State* L, int idx)
 {
 	// Try dynamic image widget first (from CreateTexture + SetTexture)
 	lua_getfield(L, idx, "__imageWidget");
@@ -1097,6 +1305,16 @@ static int LF_TextureSetVertexColor(lua_State* L)
 	return 0;
 }
 
+static int LF_SetVertexColorDispatch(lua_State* L)
+{
+	if (GetTextureImage(L, 1))
+	{
+		return LF_TextureSetVertexColor(L);
+	}
+
+	return LF_FontStringSetTextColor(L);
+}
+
 static int LF_TextureSetAlpha(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
@@ -1328,6 +1546,27 @@ static int LF_CreateTexture(lua_State* L)
 		lua_setfield(L, -2, "__name");
 	}
 
+	lua_pushstring(L, "Texture");
+	lua_setfield(L, -2, "__objectType");
+
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		if (UCanvasPanel* ParentCanvas = Cast<UCanvasPanel>(Ctx->FrameManager->GetWidgetForHandle(ParentHandle)))
+		{
+			UImage* ImageWidget = NewObject<UImage>(ParentCanvas);
+			ImageWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			if (UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(ImageWidget))
+			{
+				Slot->SetAnchors(FAnchors(0.f, 0.f));
+				Slot->SetAutoSize(true);
+			}
+
+			lua_pushlightuserdata(L, ImageWidget);
+			lua_setfield(L, -2, "__imageWidget");
+		}
+	}
+
 	// Texture methods
 	lua_pushcfunction(L, LF_TextureSetTexture);
 	lua_setfield(L, -2, "SetTexture");
@@ -1380,53 +1619,24 @@ static int LF_CreateTexture(lua_State* L)
 	lua_pushcfunction(L, [](lua_State* L2) -> int { lua_pushnumber(L2, 0); lua_pushnumber(L2, 0); lua_pushnumber(L2, 1); lua_pushnumber(L2, 1); return 4; }); // GetTexCoord
 	lua_setfield(L, -2, "GetTexCoord");
 
+	if (Name && Name[0])
+	{
+		lua_pushvalue(L, -1);
+		lua_setglobal(L, Name);
+	}
+
 	return 1;
 }
 
 // FontString methods
 static int LF_FontStringSetText(lua_State* L)
 {
-	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* Text = luaL_optstring(L, 2, ""); // WoW treats nil as empty string
-
-	// Store in Lua table
-	lua_pushstring(L, Text);
-	lua_setfield(L, 1, "__text");
-
-	// For FontString regions, we need to get the parent frame handle
-	// and find the corresponding UTextBlock widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
-	{
-		lua_getfield(L, 1, "__parentHandle");
-		if (lua_isnumber(L, -1))
-		{
-			int64 ParentHandle = static_cast<int64>(lua_tointeger(L, -1));
-			UWidget* ParentWidget = Ctx->FrameManager->GetWidgetForHandle(ParentHandle);
-
-			// TODO: Proper FontString widget handling
-			// For now, try to cast parent to TextBlock
-			if (UTextBlock* TextBlock = Cast<UTextBlock>(ParentWidget))
-			{
-				FText TextContent = FText::FromString(UTF8_TO_TCHAR(Text));
-				TextBlock->SetText(TextContent);
-			}
-		}
-		lua_pop(L, 1);
-	}
-
-	return 0;
+	return LF_SetText(L);
 }
 
 static int LF_FontStringGetText(lua_State* L)
 {
-	lua_getfield(L, 1, "__text");
-	if (lua_isnil(L, -1))
-	{
-		lua_pop(L, 1);
-		lua_pushstring(L, "");
-	}
-	return 1;
+	return LF_GetText(L);
 }
 
 static int LF_FontStringSetTextColor(lua_State* L)
@@ -1444,22 +1654,10 @@ static int LF_FontStringSetTextColor(lua_State* L)
 	lua_pushnumber(L, A); lua_setfield(L, 1, "__textColorA");
 
 	// Apply to widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
+	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
-		lua_getfield(L, 1, "__parentHandle");
-		if (lua_isnumber(L, -1))
-		{
-			int64 ParentHandle = static_cast<int64>(lua_tointeger(L, -1));
-			UWidget* ParentWidget = Ctx->FrameManager->GetWidgetForHandle(ParentHandle);
-
-			if (UTextBlock* TextBlock = Cast<UTextBlock>(ParentWidget))
-			{
-				FLinearColor TextColor(R, G, B, A);
-				TextBlock->SetColorAndOpacity(FSlateColor(TextColor));
-			}
-		}
-		lua_pop(L, 1);
+		FLinearColor TextColor(R, G, B, A);
+		TextBlock->SetColorAndOpacity(FSlateColor(TextColor));
 	}
 
 	return 0;
@@ -1479,6 +1677,13 @@ static int LF_FontStringSetFont(lua_State* L)
 	lua_setfield(L, 1, "__fontSize");
 	lua_pushstring(L, Flags);
 	lua_setfield(L, 1, "__fontFlags");
+
+	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
+	{
+		FSlateFontInfo FontInfo = TextBlock->GetFont();
+		FontInfo.Size = FMath::RoundToInt(FontSize);
+		TextBlock->SetFont(FontInfo);
+	}
 
 	return 0;
 }
@@ -1513,16 +1718,27 @@ static int LF_FontStringGetFont(lua_State* L)
 // fontstring:GetStringWidth() -> approximate width
 static int LF_FontStringGetStringWidth(lua_State* L)
 {
-	lua_getfield(L, 1, "__text");
-	const char* Text = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
-	lua_pop(L, 1);
+	FString Text;
+	float FontSize = 12.0f;
 
-	lua_getfield(L, 1, "__fontSize");
-	float FontSize = lua_isnumber(L, -1) ? static_cast<float>(lua_tonumber(L, -1)) : 12.0f;
-	lua_pop(L, 1);
+	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
+	{
+		Text = TextBlock->GetText().ToString();
+		FontSize = static_cast<float>(TextBlock->GetFont().Size);
+	}
+	else
+	{
+		lua_getfield(L, 1, "__text");
+		Text = lua_isstring(L, -1) ? UTF8_TO_TCHAR(lua_tostring(L, -1)) : TEXT("");
+		lua_pop(L, 1);
+
+		lua_getfield(L, 1, "__fontSize");
+		FontSize = lua_isnumber(L, -1) ? static_cast<float>(lua_tonumber(L, -1)) : 12.0f;
+		lua_pop(L, 1);
+	}
 
 	// Rough estimate: average character width is ~0.5 * font height
-	float Width = static_cast<float>(strlen(Text)) * FontSize * 0.5f;
+	float Width = static_cast<float>(Text.Len()) * FontSize * 0.5f;
 	lua_pushnumber(L, Width);
 	return 1;
 }
@@ -1536,6 +1752,34 @@ static int LF_CreateFontString(lua_State* L)
 	int64 ParentHandle = GetFrameHandle(L);
 	lua_pushinteger(L, ParentHandle);
 	lua_setfield(L, -2, "__parentHandle");
+
+	const char* Name = luaL_optstring(L, 2, nullptr);
+	if (Name && Name[0])
+	{
+		lua_pushstring(L, Name);
+		lua_setfield(L, -2, "__name");
+	}
+
+	lua_pushstring(L, "FontString");
+	lua_setfield(L, -2, "__objectType");
+
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		if (UCanvasPanel* ParentCanvas = Cast<UCanvasPanel>(Ctx->FrameManager->GetWidgetForHandle(ParentHandle)))
+		{
+			UTextBlock* TextWidget = NewObject<UTextBlock>(ParentCanvas);
+			TextWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			if (UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(TextWidget))
+			{
+				Slot->SetAnchors(FAnchors(0.f, 0.f));
+				Slot->SetAutoSize(true);
+			}
+
+			lua_pushlightuserdata(L, TextWidget);
+			lua_setfield(L, -2, "__textWidget");
+		}
+	}
 
 	// FontString methods
 	lua_pushcfunction(L, LF_FontStringSetText);
@@ -1589,6 +1833,12 @@ static int LF_CreateFontString(lua_State* L)
 	lua_pushcfunction(L, LF_FontStringSetTextColor); // SetVertexColor (alias for SetTextColor for fontstrings)
 	lua_setfield(L, -2, "SetVertexColor");
 
+	if (Name && Name[0])
+	{
+		lua_pushvalue(L, -1);
+		lua_setglobal(L, Name);
+	}
+
 	return 1;
 }
 
@@ -1605,13 +1855,35 @@ static int LF_CreateTextureGlobal(lua_State* L)
 		lua_setfield(L, -2, "__name");
 	}
 
+	lua_pushstring(L, "Texture");
+	lua_setfield(L, -2, "__objectType");
+
 	// Store parent frame handle if provided (arg 2)
+	int64 ParentHandle = -1;
 	if (lua_istable(L, 2)) {
 		lua_pushvalue(L, 2); // Push parent table to top
-		int64 ParentHandle = GetFrameHandle(L);
+		ParentHandle = GetFrameHandle(L);
 		lua_pop(L, 1); // Remove parent table copy
 		lua_pushinteger(L, ParentHandle);
 		lua_setfield(L, -2, "__parentHandle");
+	}
+
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (Ctx && Ctx->FrameManager && ParentHandle >= 0)
+	{
+		if (UCanvasPanel* ParentCanvas = Cast<UCanvasPanel>(Ctx->FrameManager->GetWidgetForHandle(ParentHandle)))
+		{
+			UImage* ImageWidget = NewObject<UImage>(ParentCanvas);
+			ImageWidget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			if (UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(ImageWidget))
+			{
+				Slot->SetAnchors(FAnchors(0.f, 0.f));
+				Slot->SetAutoSize(true);
+			}
+
+			lua_pushlightuserdata(L, ImageWidget);
+			lua_setfield(L, -2, "__imageWidget");
+		}
 	}
 
 	// Store draw layer if provided (arg 3)
@@ -1664,6 +1936,12 @@ static int LF_CreateTextureGlobal(lua_State* L)
 		return 1;
 	}); // GetObjectType
 	lua_setfield(L, -2, "GetObjectType");
+
+	if (Name && Name[0])
+	{
+		lua_pushvalue(L, -1);
+		lua_setglobal(L, Name);
+	}
 
 	return 1;
 }
@@ -1862,11 +2140,51 @@ static int LF_SetAttribute(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
 	const char* AttrName = luaL_checkstring(L, 2);
+	const int Top = lua_gettop(L);
 	// Store as __attr_<name> on the frame table
 	FString Key = FString::Printf(TEXT("__attr_%s"), UTF8_TO_TCHAR(AttrName));
 	FTCHARToUTF8 UTF8Key(*Key);
-	lua_pushvalue(L, 3); // value (or nil)
+	if (Top >= 3)
+	{
+		lua_pushvalue(L, 3);
+	}
+	else
+	{
+		lua_pushnil(L);
+	}
 	lua_setfield(L, 1, UTF8Key.Get());
+
+	const int64 Handle = GetOptionalFrameHandle(L);
+	if (Handle >= 0)
+	{
+		FString GlobalKey = FString::Printf(TEXT("__WowScript_%lld_OnAttributeChanged"), Handle);
+		FTCHARToUTF8 UTF8GlobalKey(*GlobalKey);
+		lua_getglobal(L, UTF8GlobalKey.Get());
+		if (lua_isfunction(L, -1))
+		{
+			lua_pushvalue(L, 1);
+			lua_pushvalue(L, 2);
+			if (Top >= 3)
+			{
+				lua_pushvalue(L, 3);
+			}
+			else
+			{
+				lua_pushnil(L);
+			}
+
+			if (lua_pcall(L, 3, 0, 0) != 0)
+			{
+				UE_LOG(LogWowLuaFrame, Warning, TEXT("SetAttribute OnAttributeChanged error [%lld] %s: %s"),
+					Handle, UTF8_TO_TCHAR(AttrName), UTF8_TO_TCHAR(lua_tostring(L, -1)));
+				lua_pop(L, 1);
+			}
+		}
+		else
+		{
+			lua_pop(L, 1);
+		}
+	}
 	return 0;
 }
 
@@ -1999,8 +2317,7 @@ static int LF_SetNormalTexture(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UButton* Button = Cast<UButton>(Widget))
+		if (UButton* Button = GetButtonWidgetForTable(L))
 		{
 			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
 			if (Texture)
@@ -2049,8 +2366,7 @@ static int LF_SetPushedTexture(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UButton* Button = Cast<UButton>(Widget))
+		if (UButton* Button = GetButtonWidgetForTable(L))
 		{
 			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
 			if (Texture)
@@ -2099,8 +2415,7 @@ static int LF_SetHighlightTexture(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UButton* Button = Cast<UButton>(Widget))
+		if (UButton* Button = GetButtonWidgetForTable(L))
 		{
 			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
 			if (Texture)
@@ -2149,8 +2464,7 @@ static int LF_SetDisabledTexture(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UButton* Button = Cast<UButton>(Widget))
+		if (UButton* Button = GetButtonWidgetForTable(L))
 		{
 			UTexture2D* Texture = Ctx->FrameManager->LoadUITexture(UTF8_TO_TCHAR(TexturePath));
 			if (Texture)
@@ -2179,26 +2493,15 @@ static int LF_SetText(lua_State* L)
 	lua_setfield(L, 1, "__text");
 
 	// Update UMG widget
-	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
+	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
-		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UButton* Button = Cast<UButton>(Widget))
-		{
-			// UButton doesn't have SetText directly - this would need child text widget handling
-			// For now, just store in Lua table
-		}
-		else if (UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
-		{
-			FText TextContent = FText::FromString(UTF8_TO_TCHAR(Text));
-			TextBlock->SetText(TextContent);
-		}
-		else if (UEditableTextBox* EditBox = Cast<UEditableTextBox>(Widget))
-		{
-			FText EditContent = FText::FromString(UTF8_TO_TCHAR(Text));
-			EditBox->SetText(EditContent);
-		}
+		FText TextContent = FText::FromString(UTF8_TO_TCHAR(Text));
+		TextBlock->SetText(TextContent);
+	}
+	else if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1))
+	{
+		FText EditContent = FText::FromString(UTF8_TO_TCHAR(Text));
+		EditBox->SetText(EditContent);
 	}
 
 	return 0;
@@ -2208,28 +2511,17 @@ static int LF_GetText(lua_State* L)
 {
 	// Try to get text from widget first
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
+	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
-		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-
-		if (UButton* Button = Cast<UButton>(Widget))
-		{
-			// UButton doesn't have GetText directly - would need child text widget handling
-			// Fall back to stored value
-		}
-		else if (UEditableTextBox* EditBox = Cast<UEditableTextBox>(Widget))
-		{
-			FString EditText = EditBox->GetText().ToString();
-			lua_pushstring(L, (const char*)StringCast<UTF8CHAR>(*EditText).Get());
-			return 1;
-		}
-		else if (UTextBlock* TextBlock = Cast<UTextBlock>(Widget))
-		{
-			FString TextContent = TextBlock->GetText().ToString();
-			lua_pushstring(L, (const char*)StringCast<UTF8CHAR>(*TextContent).Get());
-			return 1;
-		}
+		FString TextContent = TextBlock->GetText().ToString();
+		lua_pushstring(L, (const char*)StringCast<UTF8CHAR>(*TextContent).Get());
+		return 1;
+	}
+	else if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1))
+	{
+		FString EditText = EditBox->GetText().ToString();
+		lua_pushstring(L, (const char*)StringCast<UTF8CHAR>(*EditText).Get());
+		return 1;
 	}
 
 	// Fallback to stored value
@@ -2247,6 +2539,8 @@ static int LF_Disable(lua_State* L)
 	luaL_checktype(L, 1, LUA_TTABLE);
 	lua_pushboolean(L, 0);
 	lua_setfield(L, 1, "__enabled");
+	if (UButton* Button = GetButtonWidgetForTable(L, 1)) Button->SetIsEnabled(false);
+	if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1)) EditBox->SetIsEnabled(false);
 	return 0;
 }
 
@@ -2255,6 +2549,8 @@ static int LF_Enable(lua_State* L)
 	luaL_checktype(L, 1, LUA_TTABLE);
 	lua_pushboolean(L, 1);
 	lua_setfield(L, 1, "__enabled");
+	if (UButton* Button = GetButtonWidgetForTable(L, 1)) Button->SetIsEnabled(true);
+	if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L, 1)) EditBox->SetIsEnabled(true);
 	return 0;
 }
 
@@ -2318,16 +2614,16 @@ static int LF_GetMinMaxValues(lua_State* L)
 static int LF_SetValue(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	float Value = static_cast<float>(luaL_checknumber(L, 2));
 
 	// Store in Lua table
-	lua_pushnumber(L, Value);
+	lua_pushvalue(L, 2);
 	lua_setfield(L, 1, "__value");
 
 	// Update UMG widget
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-	if (Ctx && Ctx->FrameManager)
+	if (Ctx && Ctx->FrameManager && lua_isnumber(L, 2))
 	{
+		const float Value = static_cast<float>(lua_tonumber(L, 2));
 		int64 Handle = GetFrameHandle(L);
 		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
 		if (ProgressBar)
@@ -2354,7 +2650,11 @@ static int LF_SetValue(lua_State* L)
 static int LF_GetValue(lua_State* L)
 {
 	lua_getfield(L, 1, "__value");
-	if (lua_isnil(L, -1)) { lua_pop(L, 1); lua_pushnumber(L, 0); }
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		lua_pushnumber(L, 0);
+	}
 	return 1;
 }
 
@@ -2405,8 +2705,7 @@ static int LF_SetMaxLetters(lua_State* L)
 	if (Ctx && Ctx->FrameManager)
 	{
 		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UEditableTextBox* EditBox = Cast<UEditableTextBox>(Widget))
+		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
 		{
 			// UEditableTextBox doesn't have a direct max length property in UE5
 			// This would need custom implementation
@@ -2433,9 +2732,7 @@ static int LF_ClearFocus(lua_State* L)
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (Ctx && Ctx->FrameManager)
 	{
-		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UEditableTextBox* EditBox = Cast<UEditableTextBox>(Widget))
+		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
 		{
 			// Clear focus from the edit box
 			EditBox->SetUserFocus(nullptr);
@@ -2450,9 +2747,7 @@ static int LF_SetFocus(lua_State* L)
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (Ctx && Ctx->FrameManager)
 	{
-		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UEditableTextBox* EditBox = Cast<UEditableTextBox>(Widget))
+		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
 		{
 			// Set focus to the edit box
 			EditBox->SetKeyboardFocus();
@@ -2469,9 +2764,7 @@ static int LF_HasFocus(lua_State* L)
 	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
 	if (Ctx && Ctx->FrameManager)
 	{
-		int64 Handle = GetFrameHandle(L);
-		UWidget* Widget = Ctx->FrameManager->GetWidgetForHandle(Handle);
-		if (UEditableTextBox* EditBox = Cast<UEditableTextBox>(Widget))
+		if (UEditableTextBox* EditBox = GetEditBoxWidgetForTable(L))
 		{
 			HasFocus = EditBox->HasKeyboardFocus();
 		}
@@ -2873,9 +3166,9 @@ static const luaL_Reg FrameMethods[] =
 
 	// Text methods on frames
 	{"GetTextHeight", [](lua_State* L) -> int { lua_pushnumber(L, 12); return 1; }},
-	{"SetVertexColor", [](lua_State* L) -> int { return 0; }},
-	{"GetTextWidth", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
-	{"GetStringWidth", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"SetVertexColor", LF_SetVertexColorDispatch},
+	{"GetTextWidth", LF_FontStringGetStringWidth},
+	{"GetStringWidth", LF_FontStringGetStringWidth},
 	{"GetStringHeight", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
 	{"SetTextHeight", [](lua_State* L) -> int { return 0; }},
 	{"SetShadowOffset", [](lua_State* L) -> int { return 0; }},
@@ -2995,9 +3288,9 @@ static const luaL_Reg FrameMethods[] =
 	}},
 
 	// Font access
-	{"SetFont", [](lua_State* L) -> int { return 0; }},
-	{"GetFont", [](lua_State* L) -> int { lua_pushstring(L, "Fonts\\FRIZQT__.TTF"); lua_pushnumber(L, 12); lua_pushstring(L, ""); return 3; }},
-	{"SetTextColor", [](lua_State* L) -> int { return 0; }},
+	{"SetFont", LF_FontStringSetFont},
+	{"GetFont", LF_FontStringGetFont},
+	{"SetTextColor", LF_FontStringSetTextColor},
 	{"GetTextColor", [](lua_State* L) -> int { lua_pushnumber(L, 1); lua_pushnumber(L, 1); lua_pushnumber(L, 1); lua_pushnumber(L, 1); return 4; }},
 
 	{nullptr, nullptr}
