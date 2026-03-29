@@ -9,6 +9,7 @@ DECLARE_MULTICAST_DELEGATE_SixParams(FOnChatMessage, uint8 /*Type*/, uint32 /*La
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnSpellStart, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/, int32 /*CastTime*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint32 /*CastFlags*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellFailure, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint8 /*FailureReason*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSpellCooldown, uint32 /*SpellId*/, float /*Duration*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnAttackerStateUpdate, uint64 /*AttackerGuid*/, uint64 /*TargetGuid*/, uint32 /*HitInfo*/, uint32 /*Damage*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnLootOpened, uint64 /*LootGuid*/, uint8 /*LootType*/, uint32 /*Gold*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
@@ -30,12 +31,24 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnTaxiActivateReply, uint8 /*Result*/);
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnTeleportRequest, uint64 /*Guid*/, uint32 /*Flags*/, uint32 /*Time*/, FVector /*Position*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE_FiveParams(FOnMapTransfer, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/, float /*Orientation*/);
 DECLARE_MULTICAST_DELEGATE(FOnPlayerDeath);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnEntityDeath, uint64 /*Guid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnCorpseReclaimDelay, float /*DelayInSeconds*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnResurrectRequest, const FString& /*RequesterName*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnPlayerTeleport, uint32 /*MapId*/, float /*X*/, float /*Y*/, float /*Z*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlayerNameReceived, uint64 /*Guid*/, const FString& /*Name*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnCreatureNameReceived, uint32 /*Entry*/, const FString& /*Name*/, const FString& /*Title*/);
 DECLARE_MULTICAST_DELEGATE(FOnPlayerInventoryUpdate);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnEmote, uint64 /*EntityGuid*/, uint32 /*EmoteId*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnLevelUp, uint32 /*NewLevel*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnXPGain, uint32 /*Amount*/, uint8 /*Type*/);
+DECLARE_MULTICAST_DELEGATE_FiveParams(FOnBindPointUpdate, float /*X*/, float /*Y*/, float /*Z*/, uint32 /*MapId*/, uint32 /*AreaId*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnWeatherUpdate, uint32 /*WeatherType*/, float /*Grade*/, uint8 /*Sound*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnWorldStatesInit, uint32 /*MapId*/, uint32 /*AreaId*/, uint32 /*SubAreaId*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnWorldStateUpdate, uint32 /*Field*/, uint32 /*Value*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnProficiencySet, uint8 /*ItemClass*/, uint32 /*ItemSubclassMask*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnGossipMessage, uint64 /*NpcGuid*/, uint32 /*TextId*/, uint32 /*MenuId*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnInitialSpells, const TArray<uint32>& /*SpellIds*/);
+DECLARE_MULTICAST_DELEGATE(FOnActionButtonsUpdated);
 
 // Simple byte-stream reader for packet payloads
 struct FPacketReader
@@ -136,12 +149,18 @@ public:
     /** Action bar data (144 slots, first 12 are main action bar) */
     TArray<uint32> ActionButtons;
 
+    /** Spell cooldowns (SpellId -> expiry time as FPlatformTime::Seconds()) */
+    TMap<uint32, double> SpellCooldowns;
+
     /** Player name cache */
     TMap<uint64, FString> PlayerNameCache;
 
     /** Creature name cache */
     TMap<uint32, FString> CreatureNameCache;
     TMap<uint32, FString> CreatureTitleCache;
+
+    /** World states (field -> value) */
+    TMap<uint32, uint32> WorldStates;
 
     /** ── Social System ──────────────────────────────────────────────────── */
     /** Friends list */
@@ -166,6 +185,7 @@ public:
     FOnSpellStart OnSpellStart;
     FOnSpellGo OnSpellGo;
     FOnSpellFailure OnSpellFailure;
+    FOnSpellCooldown OnSpellCooldown;
     FOnAttackerStateUpdate OnAttackerStateUpdate;
     FOnLootOpened OnLootOpened;
     FOnLootClosed OnLootClosed;
@@ -185,18 +205,36 @@ public:
     FOnTeleportRequest OnTeleportRequest;
     FOnMapTransfer OnMapTransfer;
     FOnPlayerDeath OnPlayerDeath;
+    FOnEntityDeath OnEntityDeath;
     FOnCorpseReclaimDelay OnCorpseReclaimDelay;
     FOnResurrectRequest OnResurrectRequest;
     FOnPlayerTeleport OnPlayerTeleport;
     FOnPlayerNameReceived OnPlayerNameReceived;
     FOnCreatureNameReceived OnCreatureNameReceived;
     FOnPlayerInventoryUpdate OnPlayerInventoryUpdate;
+    FOnEmote OnEmote;
+    FOnLevelUp OnLevelUp;
+    FOnXPGain OnXPGain;
+    FOnBindPointUpdate OnBindPointUpdate;
+    FOnWeatherUpdate OnWeatherUpdate;
+    FOnWorldStatesInit OnWorldStatesInit;
+    FOnWorldStateUpdate OnWorldStateUpdate;
+    FOnProficiencySet OnProficiencySet;
+    FOnGossipMessage OnGossipMessage;
+    FOnInitialSpells OnInitialSpells;
+    FOnActionButtonsUpdated OnActionButtonsUpdated;
 
     /** Bind this to send packets back to the server (e.g. TIME_SYNC_RESP) */
     FOnSendPacket OnSendPacket;
 
     /** Initialize Warden encryption with session key */
     void InitializeWarden(const TArray<uint8>& SessionKey);
+
+    /** Check if spell is on cooldown */
+    bool IsSpellOnCooldown(uint32 SpellId) const;
+
+    /** Get remaining cooldown time in seconds */
+    float GetSpellCooldownRemaining(uint32 SpellId) const;
 
     /** Fired for every processed SMSG opcode — wire to EventSystem for UI events */
     FOnOpcodeReceived OnOpcodeReceived;
@@ -221,6 +259,7 @@ private:
     void HandleSpellStart(FPacketReader& R);
     void HandleSpellGo(FPacketReader& R);
     void HandleSpellFailure(FPacketReader& R);
+    void HandleSpellCooldown(FPacketReader& R);
     void HandleAttackerStateUpdate(FPacketReader& R);
     void HandleAuraUpdate(FPacketReader& R);
     void HandlePowerUpdate(FPacketReader& R);
@@ -261,6 +300,10 @@ private:
     void HandleNameQueryResponse(FPacketReader& R);
     void HandleCreatureQueryResponse(FPacketReader& R);
 
+    // ── Emote handlers ──────────────────────────────────────────────────────
+    void HandleEmote(FPacketReader& R);
+    void HandleTextEmote(FPacketReader& R);
+
     // ── Warden / Teleport handlers ──────────────────────────────────────────
     void HandleWardenData(FPacketReader& R);
     void HandleMoveTeleport(FPacketReader& R);
@@ -270,6 +313,33 @@ private:
     // ── Death / Corpse / Resurrection handlers ──────────────────────────────
     void HandleCorpseReclaimDelay(FPacketReader& R);
     void HandleResurrectRequest(FPacketReader& R);
+
+    // ── Player progression handlers ─────────────────────────────────────────
+    void HandleLevelUpInfo(FPacketReader& R);
+    void HandleLogXPGain(FPacketReader& R);
+    void HandleExplorationExperience(FPacketReader& R);
+    void HandleEnvironmentalDamageLog(FPacketReader& R);
+    void HandleBindPointUpdate(FPacketReader& R);
+    void HandlePlayedTime(FPacketReader& R);
+
+    // ── World state handlers ────────────────────────────────────────────────
+    void HandleWeather(FPacketReader& R);
+    void HandleInitWorldStates(FPacketReader& R);
+    void HandleUpdateWorldState(FPacketReader& R);
+
+    // ── Proficiency handlers ────────────────────────────────────────────────
+    void HandleSetProficiency(FPacketReader& R);
+    void HandleAccountDataTimes(FPacketReader& R);
+    void HandlePartyMemberStats(FPacketReader& R);
+
+    // ── NPC interaction handlers ────────────────────────────────────────────
+    void HandleGossipMessage(FPacketReader& R);
+
+    // ── Mail system handlers ────────────────────────────────────────────────
+    void HandleMailListResult(FPacketReader& R);
+
+    // ── Bank system handlers ────────────────────────────────────────────────
+    void HandleShowBank(FPacketReader& R);
 
     // Internal parsing
     void ParseUpdateBlock(FPacketReader& R);

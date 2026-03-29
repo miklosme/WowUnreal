@@ -246,7 +246,14 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                 LiqSM->BuildFromMeshDescriptions(LiqDescs, LiqBuild);
 
                 UMaterial* LiqMat = FWowWaterMaterial::GetMaterialForCategory(Category);
-                if (LiqMat) LiqSM->SetMaterial(0, LiqMat);
+                if (LiqMat)
+                {
+                    if (LiqSM->GetStaticMaterials().Num() <= 0)
+                    {
+                        LiqSM->GetStaticMaterials().SetNum(1);
+                    }
+                    LiqSM->GetStaticMaterials()[0].MaterialInterface = LiqMat;
+                }
 
                 FName LiqCompName = *FString::Printf(TEXT("WmoLiquid_%d"), GroupIdx);
                 UStaticMeshComponent* LiqComp = NewObject<UStaticMeshComponent>(WmoActor, LiqCompName);

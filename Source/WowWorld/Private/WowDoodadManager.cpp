@@ -514,7 +514,11 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     // Re-set materials after build in case BuildFromMeshDescriptions resets them
     for (int32 i = 0; i < BatchMaterials.Num(); ++i)
     {
-        StaticMesh->SetMaterial(i, BatchMaterials[i]);
+        if (StaticMesh->GetStaticMaterials().Num() <= i)
+        {
+            StaticMesh->GetStaticMaterials().SetNum(i + 1);
+        }
+        StaticMesh->GetStaticMaterials()[i].MaterialInterface = BatchMaterials[i];
     }
 
     // Ensure bounds are computed — bFastBuild may skip this

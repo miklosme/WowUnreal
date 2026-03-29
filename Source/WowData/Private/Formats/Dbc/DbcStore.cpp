@@ -64,6 +64,7 @@ static bool LoadSingleDbcAny(FMpqManager& Mpq, std::initializer_list<const TCHAR
 
 bool FDbcStore::LoadAll(FMpqManager& Mpq)
 {
+    // Load Tier 1 (Essential) DBC tables for initial world display
     FDbcParser Parser;
     int32 Loaded = 0;
 
@@ -76,7 +77,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, MapDbc.Num()); ++i)
         {
             const FMapDbcEntry& E = MapDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  Map[%d]: ID=%d Name='%s' Type=%d"), i, E.ID, *E.Name, E.MapType);
+            UE_LOG(LogDbcStore, Verbose, TEXT("Map[%d]: ID=%d Name='%s' Type=%d"), i, E.ID, *E.Name, E.MapType);
         }
     }
 
@@ -88,7 +89,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, AreaTableDbc.Num()); ++i)
         {
             const FAreaTableDbcEntry& E = AreaTableDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  Area[%d]: ID=%d MapID=%d Name='%s'"), i, E.ID, E.MapID, *E.Name);
+            UE_LOG(LogDbcStore, Verbose, TEXT("Area[%d]: ID=%d MapID=%d Name='%s'"), i, E.ID, E.MapID, *E.Name);
         }
     }
 
@@ -100,7 +101,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, LightDbc.Num()); ++i)
         {
             const FLightDbcEntry& E = LightDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  Light[%d]: ID=%d MapID=%d Pos=(%.1f,%.1f,%.1f)"), i, E.ID, E.MapID, E.X, E.Y, E.Z);
+            UE_LOG(LogDbcStore, Verbose, TEXT("Light[%d]: ID=%d MapID=%d Pos=(%.1f,%.1f,%.1f)"), i, E.ID, E.MapID, E.X, E.Y, E.Z);
         }
     }
 
@@ -112,7 +113,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, LightParamsDbc.Num()); ++i)
         {
             const FLightParamsDbcEntry& E = LightParamsDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  LightParams[%d]: ID=%d SkyboxID=%d Glow=%.2f"), i, E.ID, E.SkyboxID, E.Glow);
+            UE_LOG(LogDbcStore, Verbose, TEXT("LightParams[%d]: ID=%d SkyboxID=%d Glow=%.2f"), i, E.ID, E.SkyboxID, E.Glow);
         }
     }
 
@@ -126,7 +127,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, LightIntParamsDbc.Num()); ++i)
         {
             const FLightIntParamsDbcEntry& E = LightIntParamsDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  LightIntParams[%d]: ID=%d Entries=%d FirstTime=%d Source='%s'"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("LightIntParams[%d]: ID=%d Entries=%d FirstTime=%d Source='%s'"),
                 i, E.ID, E.EntryCount, E.Times[0], *LoadedPath);
         }
     }
@@ -139,7 +140,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, LightFloatParamsDbc.Num()); ++i)
         {
             const FLightFloatParamsDbcEntry& E = LightFloatParamsDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  LightFloatParams[%d]: ID=%d Entries=%d FirstTime=%d Source='%s'"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("LightFloatParams[%d]: ID=%d Entries=%d FirstTime=%d Source='%s'"),
                 i, E.ID, E.EntryCount, E.Times[0], *LoadedPath);
         }
     }
@@ -152,7 +153,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, LiquidTypeDbc.Num()); ++i)
         {
             const FLiquidTypeDbcEntry& E = LiquidTypeDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  LiquidType[%d]: ID=%d Name='%s' Type=%d Spell=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("LiquidType[%d]: ID=%d Name='%s' Type=%d Spell=%d"),
                 i, E.ID, *E.Name, E.Type, E.SpellID);
         }
     }
@@ -165,7 +166,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, AnimationDataDbc.Num()); ++i)
         {
             const FAnimationDataDbcEntry& E = AnimationDataDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  AnimationData[%d]: ID=%d Name='%s' Flags=%d Fallback=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("AnimationData[%d]: ID=%d Name='%s' Flags=%d Fallback=%d"),
                 i, E.ID, *E.Name, E.Flags, E.Fallback);
         }
     }
@@ -178,7 +179,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, ChrRacesDbc.Num()); ++i)
         {
             const FChrRacesDbcEntry& E = ChrRacesDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  ChrRaces[%d]: ID=%d Name='%s' Prefix='%s' Models=%d/%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("ChrRaces[%d]: ID=%d Name='%s' Prefix='%s' Models=%d/%d"),
                 i, E.ID, *E.Name, *E.ClientPrefix, E.MaleModelID, E.FemaleModelID);
         }
     }
@@ -191,7 +192,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, CharSectionsDbc.Num()); ++i)
         {
             const FCharSectionsDbcEntry& E = CharSectionsDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  CharSections[%d]: ID=%d Race=%d Sex=%d Type=%d Variation=%d Color=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CharSections[%d]: ID=%d Race=%d Sex=%d Type=%d Variation=%d Color=%d"),
                 i, E.ID, E.RaceID, E.SexID, E.Type, E.Variation, E.Color);
         }
     }
@@ -204,7 +205,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, CreatureDisplayInfoDbc.Num()); ++i)
         {
             const FCreatureDisplayInfoDbcEntry& E = CreatureDisplayInfoDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  CreatureDisplayInfo[%d]: ID=%d Model=%d Scale=%.2f Tex1='%s'"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CreatureDisplayInfo[%d]: ID=%d Model=%d Scale=%.2f Tex1='%s'"),
                 i, E.ID, E.ModelID, E.Scale, *E.Texture1);
         }
     }
@@ -217,10 +218,21 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, CreatureModelDataDbc.Num()); ++i)
         {
             const FCreatureModelDataDbcEntry& E = CreatureModelDataDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  CreatureModelData[%d]: ID=%d Path='%s' SizeClass=%d Scale=%.2f"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CreatureModelData[%d]: ID=%d Path='%s' SizeClass=%d Scale=%.2f"),
                 i, E.ID, *E.ModelPath, E.SizeClass, E.Scale);
         }
     }
+
+    bLoaded = Loaded > 0;
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/12 essential DBC tables (Tier 1)"), Loaded);
+    return bLoaded;
+}
+
+void FDbcStore::LoadDeferred(FMpqManager& Mpq)
+{
+    // Load Tier 2 (Deferred) DBC tables that can wait
+    FDbcParser Parser;
+    int32 Loaded = 0;
 
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\ItemDisplayInfo.dbc"), Parser))
     {
@@ -230,12 +242,10 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, ItemDisplayInfoDbc.Num()); ++i)
         {
             const FItemDisplayInfoDbcEntry& E = ItemDisplayInfoDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  ItemDisplayInfo[%d]: ID=%d Icon='%s' ModelL='%s' ModelR='%s'"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("ItemDisplayInfo[%d]: ID=%d Icon='%s' ModelL='%s' ModelR='%s'"),
                 i, E.ID, *E.Icon1, *E.ModelNames[0], *E.ModelNames[1]);
         }
     }
-
-    // --- Tier 2 DBC tables ---
 
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\Spell.dbc"), Parser))
     {
@@ -245,8 +255,21 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, SpellDbc.Num()); ++i)
         {
             const FSpellDbcEntry& E = SpellDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  Spell[%d]: ID=%d Name='%s' School=%d Level=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("Spell[%d]: ID=%d Name='%s' School=%d Level=%d"),
                 i, E.ID, *E.SpellName, E.SchoolMask, E.SpellLevel);
+        }
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellIcon.dbc"), Parser))
+    {
+        SpellIconDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, SpellIconDbc.Num()); ++i)
+        {
+            const FSpellIconDbcEntry& E = SpellIconDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Verbose, TEXT("SpellIcon[%d]: ID=%d Path='%s'"),
+                i, E.ID, *E.TexturePath);
         }
     }
 
@@ -255,7 +278,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         SpellVisualDbc.Load(Parser);
         ++Loaded;
 
-        UE_LOG(LogDbcStore, Log, TEXT("  SpellVisual: %d records"), SpellVisualDbc.Num());
+        UE_LOG(LogDbcStore, Verbose, TEXT("SpellVisual: %d records"), SpellVisualDbc.Num());
     }
 
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellVisualKit.dbc"), Parser))
@@ -263,7 +286,20 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         SpellVisualKitDbc.Load(Parser);
         ++Loaded;
 
-        UE_LOG(LogDbcStore, Log, TEXT("  SpellVisualKit: %d records"), SpellVisualKitDbc.Num());
+        UE_LOG(LogDbcStore, Verbose, TEXT("SpellVisualKit: %d records"), SpellVisualKitDbc.Num());
+    }
+
+    if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SpellVisualEffectName.dbc"), Parser))
+    {
+        SpellVisualEffectNameDbc.Load(Parser);
+        ++Loaded;
+
+        for (int32 i = 0; i < FMath::Min(3, SpellVisualEffectNameDbc.Num()); ++i)
+        {
+            const FSpellVisualEffectNameDbcEntry& E = SpellVisualEffectNameDbc.GetAll()[i];
+            UE_LOG(LogDbcStore, Verbose, TEXT("SpellVisualEffectName[%d]: ID=%d Name='%s' FilePath='%s' AreaEffectSize=%.2f Scale=%.2f"),
+                i, E.ID, *E.Name, *E.FilePath, E.AreaEffectSize, E.Scale);
+        }
     }
 
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\SoundEntries.dbc"), Parser))
@@ -274,7 +310,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, SoundEntriesDbc.Num()); ++i)
         {
             const FSoundEntriesDbcEntry& E = SoundEntriesDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  SoundEntries[%d]: ID=%d Name='%s' Type=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("SoundEntries[%d]: ID=%d Name='%s' Type=%d"),
                 i, E.ID, *E.Name, E.SoundType);
         }
     }
@@ -287,7 +323,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, LoadingScreensDbc.Num()); ++i)
         {
             const FLoadingScreensDbcEntry& E = LoadingScreensDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  LoadingScreens[%d]: ID=%d Name='%s' File='%s'"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("LoadingScreens[%d]: ID=%d Name='%s' File='%s'"),
                 i, E.ID, *E.Name, *E.FileName);
         }
     }
@@ -297,7 +333,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         GroundEffectTextureDbc.Load(Parser);
         ++Loaded;
 
-        UE_LOG(LogDbcStore, Log, TEXT("  GroundEffectTexture: %d records"), GroundEffectTextureDbc.Num());
+        UE_LOG(LogDbcStore, Verbose, TEXT("GroundEffectTexture: %d records"), GroundEffectTextureDbc.Num());
     }
 
     if (LoadSingleDbc(Mpq, TEXT("DBFilesClient\\EmotesText.dbc"), Parser))
@@ -308,7 +344,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, EmotesTextDbc.Num()); ++i)
         {
             const FEmotesTextDbcEntry& E = EmotesTextDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  EmotesText[%d]: ID=%d Name='%s' EmoteID=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("EmotesText[%d]: ID=%d Name='%s' EmoteID=%d"),
                 i, E.ID, *E.Name, E.EmoteID);
         }
     }
@@ -321,7 +357,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, TalentDbc.Num()); ++i)
         {
             const FTalentDbcEntry& E = TalentDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  Talent[%d]: ID=%d Tab=%d Row=%d Col=%d Rank0=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("Talent[%d]: ID=%d Tab=%d Row=%d Col=%d Rank0=%d"),
                 i, E.TalentID, E.TalentTab, E.Row, E.Col, E.RankID[0]);
         }
     }
@@ -334,7 +370,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, TalentTabDbc.Num()); ++i)
         {
             const FTalentTabDbcEntry& E = TalentTabDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  TalentTab[%d]: ID=%d Name='%s' ClassMask=%d Page=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("TalentTab[%d]: ID=%d Name='%s' ClassMask=%d Page=%d"),
                 i, E.TalentTabID, *E.Name, E.ClassMask, E.TabPage);
         }
     }
@@ -359,7 +395,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, CharComponentTextureLayoutsDbc.Num()); ++i)
         {
             const FCharComponentTextureLayoutsDbcEntry& E = CharComponentTextureLayoutsDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  CharComponentTextureLayouts[%d]: ID=%d Size=%dx%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CharComponentTextureLayouts[%d]: ID=%d Size=%dx%d"),
                 i, E.ID, E.Width, E.Height);
         }
     }
@@ -372,7 +408,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, CharComponentTextureSectionsDbc.Num()); ++i)
         {
             const FCharComponentTextureSectionsDbcEntry& E = CharComponentTextureSectionsDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  CharComponentTextureSections[%d]: ID=%d LayoutID=%d Type=%d Rect=(%d,%d,%dx%d)"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CharComponentTextureSections[%d]: ID=%d LayoutID=%d Type=%d Rect=(%d,%d,%dx%d)"),
                 i, E.ID, E.CharComponentTextureLayoutID, E.SectionType, E.X, E.Y, E.Width, E.Height);
         }
     }
@@ -385,7 +421,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, CharHairGeosetsDbc.Num()); ++i)
         {
             const FCharHairGeosetsDbcEntry& E = CharHairGeosetsDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  CharHairGeosets[%d]: ID=%d Race=%d Sex=%d Variation=%d GeosetID=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CharHairGeosets[%d]: ID=%d Race=%d Sex=%d Variation=%d GeosetID=%d"),
                 i, E.ID, E.RaceID, E.SexID, E.VariationID, E.GeosetID);
         }
     }
@@ -398,7 +434,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, CharacterFacialHairStylesDbc.Num()); ++i)
         {
             const FCharacterFacialHairStylesDbcEntry& E = CharacterFacialHairStylesDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  CharacterFacialHairStyles[%d]: Race=%d Sex=%d Variation=%d Geosets=[%d,%d,%d,%d,%d]"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CharacterFacialHairStyles[%d]: Race=%d Sex=%d Variation=%d Geosets=[%d,%d,%d,%d,%d]"),
                 i, E.RaceID, E.SexID, E.VariationID, E.Geosets[0], E.Geosets[1], E.Geosets[2], E.Geosets[3], E.Geosets[4]);
         }
     }
@@ -416,7 +452,7 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
             {
                 if (E.ItemDisplayIds[j] > 0) ItemCount++;
             }
-            UE_LOG(LogDbcStore, Log, TEXT("  CharStartOutfit[%d]: ID=%d Race=%d Class=%d Gender=%d Items=%d"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("CharStartOutfit[%d]: ID=%d Race=%d Class=%d Gender=%d Items=%d"),
                 i, E.ID, E.RaceID, E.ClassID, E.GenderID, ItemCount);
         }
     }
@@ -429,12 +465,11 @@ bool FDbcStore::LoadAll(FMpqManager& Mpq)
         for (int32 i = 0; i < FMath::Min(3, TaxiNodesDbc.Num()); ++i)
         {
             const FTaxiNodesDbcEntry& E = TaxiNodesDbc.GetAll()[i];
-            UE_LOG(LogDbcStore, Log, TEXT("  TaxiNode[%d]: ID=%d MapID=%d Pos=(%.1f,%.1f,%.1f) Name='%s'"),
+            UE_LOG(LogDbcStore, Verbose, TEXT("TaxiNode[%d]: ID=%d MapID=%d Pos=(%.1f,%.1f,%.1f) Name='%s'"),
                 i, E.ID, E.MapID, E.X, E.Y, E.Z, *E.Name);
         }
     }
 
-    bLoaded = Loaded > 0;
-    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/29 DBC tables"), Loaded);
-    return bLoaded;
+    bDeferredLoaded = true;
+    UE_LOG(LogDbcStore, Log, TEXT("DbcStore: loaded %d/19 deferred DBC tables (Tier 2)"), Loaded);
 }

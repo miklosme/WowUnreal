@@ -274,17 +274,20 @@ void AWowLoginController::InitializeWorldSystems()
         }
     }
 
-    // 3. Start AudioManager
+    // 3. Start AudioManager (find existing or spawn new)
     if (WorldManager && WorldManager->GetMpqManager())
     {
-        FActorSpawnParameters AudioParams;
-        AudioParams.Name = FName(TEXT("WowAudioManager"));
-        AWowAudioManager* AudioMgr = World->SpawnActor<AWowAudioManager>(
-            AWowAudioManager::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, AudioParams);
+        TArray<AActor*> ExistingAudio;
+        UGameplayStatics::GetAllActorsOfClass(World, AWowAudioManager::StaticClass(), ExistingAudio);
+        AWowAudioManager* AudioMgr = ExistingAudio.Num() > 0 ? Cast<AWowAudioManager>(ExistingAudio[0]) : nullptr;
+        if (!AudioMgr)
+        {
+            AudioMgr = World->SpawnActor<AWowAudioManager>(AWowAudioManager::StaticClass());
+            UE_LOG(LogWowLogin, Log, TEXT("Spawned AudioManager"));
+        }
         if (AudioMgr)
         {
             AudioMgr->SetMpqManager(WorldManager->GetMpqManager());
-            UE_LOG(LogWowLogin, Log, TEXT("Spawned AudioManager"));
         }
     }
 
@@ -298,51 +301,23 @@ void AWowLoginController::InitializeWorldSystems()
                 // Create root canvas for WoW UI frame system
                 if (GEngine && GEngine->GameViewport)
                 {
-                    UCanvasPanel* UIRootCanvas = NewObject<UCanvasPanel>(GetTransientPackage());
+                    UCanvasPanel* UIRootCanvas = NewObject<UCanvasPanel>(UIManager, TEXT("WowUIRootCanvas"));
                     UIRootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+                    UIRootCanvas->AddToRoot(); // Prevent GC
                     GEngine->GameViewport->AddViewportWidgetContent(
                         UIRootCanvas->TakeWidget(), 50);
                     UIManager->SetRootCanvas(UIRootCanvas);
+                    UE_LOG(LogWowLogin, Log, TEXT("Created WoW UI root canvas at z-order 50"));
                 }
 
-                UIManager->LoadUI(WorldManager->GetMpqManager());
+                UIManager->LoadUI(WorldManager->GetMpqManager(), WorldManager->GetAssetCache());
                 UE_LOG(LogWowLogin, Log, TEXT("Loaded WoW UI system"));
             }
         }
     }
 
-    // 5. Create chat window widget
-    if (AWowGameplayController* GPC = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0)))
-    {
-        if (GEngine && GEngine->GameViewport)
-        {
-            // Create the chat window
-            GPC->CreateChatWindow();
-
-            if (GPC->ChatWindow.IsValid())
-            {
-                // Add to viewport at bottom-left with z-order 55 (above UI elements)
-                TSharedRef<SWidget> ChatWindowContainer =
-                    SNew(SOverlay)
-                    .Visibility(EVisibility::SelfHitTestInvisible) // Pass clicks through to 3D world
-                    + SOverlay::Slot()
-                    .HAlign(HAlign_Left)   // Bottom left positioning
-                    .VAlign(VAlign_Bottom)
-                    .Padding(20, 0, 0, 100) // 20px from left, 100px from bottom
-                    [
-                        GPC->ChatWindow.ToSharedRef()
-                    ];
-
-                GEngine->GameViewport->AddViewportWidgetContent(ChatWindowContainer, 55);
-
-                UE_LOG(LogWowLogin, Log, TEXT("Created chat window widget"));
-            }
-
-            // Still create legacy combat log as backup
-            GPC->CombatLog = SNew(SWowCombatLog);
-            UE_LOG(LogWowLogin, Log, TEXT("Created backup combat log widget"));
-        }
-    }
+    // Slate chat/combat log disabled — using Lua FrameXML UI instead.
+    // The WoW FrameXML handles chat windows, combat log, etc.
 }
 
 void AWowLoginController::HandleLoginSubmit(const FString& Server, int32 Port, const FString& User, const FString& Pass)
@@ -547,11 +522,14 @@ void AWowLoginController::FinalizeWorldEntry()
                 Pawn->GetActorLocation().X, Pawn->GetActorLocation().Y, Pawn->GetActorLocation().Z);
         }
 
-        // Game gets ALL input (keyboard + mouse). Cursor stays visible.
+        // WoW-style: cursor visible, game + UI both get input
         GPC->bShowMouseCursor = true;
         GPC->bEnableClickEvents = true;
         GPC->bEnableMouseOverEvents = true;
-        GPC->SetInputMode(FInputModeGameOnly());
+        FInputModeGameAndUI InputMode;
+        InputMode.SetHideCursorDuringCapture(false);
+        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+        GPC->SetInputMode(InputMode);
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));

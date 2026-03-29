@@ -2,6 +2,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "Components/WidgetComponent.h"
+#include "Components/PointLightComponent.h"
+#include "WowAnimationController.h"
 #include "WowGameplayController.generated.h"
 
 class UWowConnectionManager;
@@ -22,6 +24,10 @@ class SWowMinimap;
 class SWowPartyFrame;
 class SWowPartyInvite;
 class SWowTaxiMap;
+class SWowQuestLog;
+class SWowGuildRoster;
+class SWowMailbox;
+class SProgressBar;
 struct FWowFloatingTextInfo;
 
 UCLASS()
@@ -95,6 +101,28 @@ public:
     /** Taxi map widget */
     TSharedPtr<SWowTaxiMap> TaxiMapWidget;
 
+    /** Quest log widget */
+    TSharedPtr<SWowQuestLog> QuestLogWidget;
+
+    /** Quest tracker widget */
+    TSharedPtr<SVerticalBox> QuestTrackerWidget;
+
+    /** Experience bar widgets */
+    TSharedPtr<SProgressBar> XPBar;
+    TSharedPtr<STextBlock> XPText;
+
+    /** Spellbook widget */
+    TSharedPtr<class SWowSpellbook> SpellbookWidget;
+
+    /** Talent window widget */
+    TSharedPtr<class SWowTalentWindow> TalentWindowWidget;
+
+    /** Guild roster widget */
+    TSharedPtr<class SWowGuildRoster> GuildRosterWidget;
+
+    /** Mailbox widget */
+    TSharedPtr<class SWowMailbox> MailboxWidget;
+
     /** Cast a spell on the current target (or self if no target) */
     UFUNCTION(BlueprintCallable)
     void CastSpell(int32 SpellId);
@@ -119,6 +147,10 @@ private:
     // Keep-alive
     float KeepAliveTimer = 0.0f;
     float KeepAliveInterval = 30.0f;
+
+    // Aura display update
+    float AuraUpdateTimer = 0.0f;
+    float AuraUpdateInterval = 0.5f;
 
     // Server position sync
     void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);
@@ -233,9 +265,28 @@ private:
     TSharedPtr<class STextBlock> PlayerHealthText;
     TSharedPtr<class STextBlock> PlayerNameText;
 
+    /** Aura display widgets */
+    TSharedPtr<class SHorizontalBox> PlayerBuffBar;
+    TSharedPtr<class SHorizontalBox> TargetBuffBar;
+    void UpdateAuraDisplay();
+
+    // Target selection highlight
+    UPROPERTY()
+    TObjectPtr<UStaticMeshComponent> TargetHighlightCircle;
+    void UpdateTargetHighlight();
+
+    // Death + looting
+    void OnEntityDeath(uint64 Guid);
+    TSet<uint64> DeadEntityGuids; // Entities that died and are lootable corpses
+
+    // Mouse click polling (reliable across all input modes)
+    bool bLeftMouseWasDown = false;
+    bool bRightMouseWasDown = false;
+
     // Combat state
     bool bIsAutoAttacking = false;
     uint64 AutoAttackTargetGuid = 0;
+    bool bWasInCombat = false;
 
     // Spell casting
     bool bIsCasting = false;
@@ -249,6 +300,15 @@ private:
     void OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason);
     void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
     void OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel);
+    void OnEmote(uint64 EntityGuid, uint32 EmoteId);
+    void OnInitialSpells(const TArray<uint32>& SpellIds);
+    void OnActionButtonsUpdated();
+
+    /** Play emote animation on a character actor */
+    void PlayEmoteAnimation(AActor* CharacterActor, uint32 EmoteId);
+
+    /** Map emote ID to animation ID */
+    EWowAnimId GetAnimationForEmoteId(uint32 EmoteId);
 
     // Party/Group event handlers
     void OnGroupUpdated();
@@ -262,6 +322,12 @@ private:
     /** Create and show party frame */
     void CreatePartyFrame();
 
+    /** Create experience bar */
+    void CreateXPBar();
+
+    /** Update experience bar (throttled) */
+    void UpdateXPBar();
+
     /** Handle Enter key for chat input */
     void OnEnterKey();
 
@@ -271,9 +337,49 @@ private:
     /** Handle C key for character panel */
     void OnCharacterKey();
 
+    /** Handle L key for quest log */
+    void OnQuestLogKey();
+
+    /** Create and show quest log */
+    void CreateQuestLog();
+
+    /** Create quest tracker widget */
+    void CreateQuestTracker();
+
+    /** Update quest tracker widget */
+    void UpdateQuestTracker();
+
+    /** Handle P key for spellbook */
+    void OnSpellbookKey();
+
+    /** Create spellbook widget */
+    void CreateSpellbook();
+
+    /** Handle N key for talent window */
+    void OnTalentKey();
+
+    /** Create talent window widget */
+    void CreateTalentWindow();
+
+    /** Handle J key for guild roster */
+    void OnGuildRosterKey();
+
+    /** Create guild roster widget */
+    void CreateGuildRoster();
+
+    /** Show mailbox (called from NPC interaction) */
+    void ShowMailbox();
+
+    /** Create mailbox widget */
+    void CreateMailbox();
+
     /** Handle player inventory updates from server */
     UFUNCTION()
     void OnPlayerInventoryUpdated();
+
+    /** Handle guild roster updates from server */
+    UFUNCTION()
+    void OnGuildRosterUpdated();
 
     /** Handle input mode changes from chat window */
     void OnChatInputModeChanged(bool bGameAndUI);
@@ -285,4 +391,25 @@ private:
 
     // Minimap input
     void OnToggleMap(); // 'M' key handler
+
+    // Spell visual effects
+    void SpawnSpellVisualEffect(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId, bool bIsMissile);
+    void SpawnSpellMissile(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId);
+
+    // Active spell cast effects (destroyed when cast completes)
+    UPROPERTY()
+    TArray<TObjectPtr<UPointLightComponent>> ActiveCastEffects;
+
+    void SpawnCastGlowEffects(uint64 CasterGuid, uint32 SpellId);
+    void RemoveCastGlowEffects();
+
+    /** Initialize the audio system with the world manager */
+    void InitializeAudioSystem(class AWowWorldManager* WorldManager);
+
+private:
+    /** Get spell school color based on SchoolMask */
+    FLinearColor GetSpellSchoolColor(uint32 SchoolMask) const;
+
+    /** Fire a UI event through the event system (helper method) */
+    void FireUIEvent(const FString& EventName, const TArray<FString>& Args = {});
 };

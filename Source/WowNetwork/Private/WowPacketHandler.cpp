@@ -21,6 +21,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_SPELL_START,              &FWowPacketHandler::HandleSpellStart);
     Handlers.Add(WowOpcode::SMSG_SPELL_GO,                 &FWowPacketHandler::HandleSpellGo);
     Handlers.Add(WowOpcode::SMSG_SPELL_FAILURE,            &FWowPacketHandler::HandleSpellFailure);
+    Handlers.Add(WowOpcode::SMSG_SPELL_COOLDOWN,           &FWowPacketHandler::HandleSpellCooldown);
     Handlers.Add(WowOpcode::SMSG_ATTACKERSTATEUPDATE,      &FWowPacketHandler::HandleAttackerStateUpdate);
     Handlers.Add(WowOpcode::SMSG_AURA_UPDATE,              &FWowPacketHandler::HandleAuraUpdate);
     Handlers.Add(WowOpcode::SMSG_POWER_UPDATE,             &FWowPacketHandler::HandlePowerUpdate);
@@ -72,6 +73,10 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_NAME_QUERY_RESPONSE,      &FWowPacketHandler::HandleNameQueryResponse);
     Handlers.Add(WowOpcode::SMSG_CREATURE_QUERY_RESPONSE,  &FWowPacketHandler::HandleCreatureQueryResponse);
 
+    // ── Emote handlers ──────────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_EMOTE,                    &FWowPacketHandler::HandleEmote);
+    Handlers.Add(WowOpcode::SMSG_TEXT_EMOTE,               &FWowPacketHandler::HandleTextEmote);
+
     // Movement handlers — all use the same parser
     for (uint16 Op = WowOpcode::MSG_MOVE_START_FORWARD; Op <= WowOpcode::MSG_MOVE_SET_PITCH; ++Op)
     {
@@ -86,6 +91,33 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::MSG_MOVE_TELEPORT,      &FWowPacketHandler::HandleMoveTeleport);
     Handlers.Add(WowOpcode::SMSG_TRANSFER_PENDING,  &FWowPacketHandler::HandleTransferPending);
     Handlers.Add(WowOpcode::SMSG_NEW_WORLD,         &FWowPacketHandler::HandleNewWorld);
+
+    // ── Player progression handlers ─────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_LEVELUP_INFO,            &FWowPacketHandler::HandleLevelUpInfo);
+    Handlers.Add(WowOpcode::SMSG_LOG_XPGAIN,              &FWowPacketHandler::HandleLogXPGain);
+    Handlers.Add(WowOpcode::SMSG_EXPLORATION_EXPERIENCE,  &FWowPacketHandler::HandleExplorationExperience);
+    Handlers.Add(WowOpcode::SMSG_ENVIRONMENTAL_DAMAGE_LOG, &FWowPacketHandler::HandleEnvironmentalDamageLog);
+    Handlers.Add(WowOpcode::SMSG_BINDPOINTUPDATE,         &FWowPacketHandler::HandleBindPointUpdate);
+    Handlers.Add(WowOpcode::SMSG_PLAYED_TIME,             &FWowPacketHandler::HandlePlayedTime);
+
+    // ── World state handlers ────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_WEATHER,                 &FWowPacketHandler::HandleWeather);
+    Handlers.Add(WowOpcode::SMSG_INIT_WORLD_STATES,       &FWowPacketHandler::HandleInitWorldStates);
+    Handlers.Add(WowOpcode::SMSG_UPDATE_WORLD_STATE,      &FWowPacketHandler::HandleUpdateWorldState);
+
+    // ── Account/Party handlers ──────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_SET_PROFICIENCY,         &FWowPacketHandler::HandleSetProficiency);
+    Handlers.Add(WowOpcode::SMSG_ACCOUNT_DATA_TIMES,      &FWowPacketHandler::HandleAccountDataTimes);
+    Handlers.Add(WowOpcode::SMSG_PARTY_MEMBER_STATS,      &FWowPacketHandler::HandlePartyMemberStats);
+
+    // ── NPC interaction handlers ────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_GOSSIP_MESSAGE,          &FWowPacketHandler::HandleGossipMessage);
+
+    // ── Mail system handlers ────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_MAIL_LIST_RESULT,        &FWowPacketHandler::HandleMailListResult);
+
+    // ── Bank system handlers ────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_SHOW_BANK,               &FWowPacketHandler::HandleShowBank);
 
     // Bind Warden response delegate to send packets
     WardenHandler.OnSendResponse.BindLambda([this](uint32 Opcode, const TArray<uint8>& Data)
@@ -538,12 +570,16 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
 void FWowPacketHandler::HandleDestroyObject(FPacketReader& R)
 {
     uint64 Guid = R.ReadU64();
-    R.ReadU8(); // onDeath flag
+    uint8 OnDeath = R.ReadU8();
 
+    UE_LOG(LogWowPacket, Log, TEXT("DESTROY_OBJECT: GUID=%llu onDeath=%d"), Guid, OnDeath);
+
+    // onDeath=1 means the CORPSE is being removed (~60s after death), not the death itself.
+    // Death animation is triggered by health→0 in OnEntityUpdated.
+    // Always remove from entity manager — the gameplay controller's OnEntityDestroyed
+    // will clean up the actor.
     EntityManager.Remove(Guid);
     EntitiesDestroyed++;
-
-    UE_LOG(LogWowPacket, Verbose, TEXT("DESTROY_OBJECT: GUID=%llu (total tracked: %d)"), Guid, EntityManager.Num());
 }
 
 // ── Movement packets ─────────────────────────────────────────────────────────
@@ -656,14 +692,24 @@ void FWowPacketHandler::HandleInitialSpells(FPacketReader& R)
     uint16 CooldownCount = R.ReadU16();
     for (int32 i = 0; i < CooldownCount; ++i)
     {
-        R.ReadU32(); // spell ID
+        uint32 SpellId = R.ReadU32();
         R.ReadU16(); // item ID
         R.ReadU16(); // spell category
-        R.ReadU32(); // cooldown
+        uint32 CooldownMs = R.ReadU32();
         R.ReadU32(); // category cooldown
+
+        if (CooldownMs > 0)
+        {
+            double ExpiryTime = FPlatformTime::Seconds() + CooldownMs / 1000.0;
+            SpellCooldowns.Add(SpellId, ExpiryTime);
+            OnSpellCooldown.Broadcast(SpellId, CooldownMs / 1000.0f);
+        }
     }
 
     UE_LOG(LogWowPacket, Log, TEXT("INITIAL_SPELLS: %d spells stored, %d cooldowns"), SpellCount, CooldownCount);
+
+    // Fire delegate with loaded spells
+    OnInitialSpells.Broadcast(KnownSpells.Array());
 }
 
 // ── SMSG_ACTION_BUTTONS ──────────────────────────────────────────────────────
@@ -690,6 +736,21 @@ void FWowPacketHandler::HandleActionButtons(FPacketReader& R)
     }
 
     UE_LOG(LogWowPacket, Log, TEXT("ACTION_BUTTONS: %d/%d slots assigned"), NonEmpty, ButtonCount);
+
+    // Debug: log first 12 slots (main action bar)
+    for (int32 i = 0; i < FMath::Min(12, ButtonCount); ++i)
+    {
+        uint32 Data = ActionButtons[i];
+        if (Data != 0)
+        {
+            uint8 Type = (Data >> 24) & 0xFF;
+            uint32 Id = Data & 0x00FFFFFF;
+            UE_LOG(LogWowPacket, Log, TEXT("  Slot %d: type=%d id=%d (raw=0x%08X)"), i+1, Type, Id, Data);
+        }
+    }
+
+    // Fire delegate for action bar updates
+    OnActionButtonsUpdated.Broadcast();
 }
 
 // ── SMSG_TIME_SYNC_REQ ──────────────────────────────────────────────────────
@@ -806,6 +867,44 @@ void FWowPacketHandler::HandleSpellFailure(FPacketReader& R)
         CasterGuid, SpellId, FailureReason);
 
     OnSpellFailure.Broadcast(CasterGuid, SpellId, FailureReason);
+}
+
+// ── SMSG_SPELL_COOLDOWN ──────────────────────────────────────────────────
+// SMSG_SPELL_COOLDOWN format (3.3.5a):
+// - uint64 CasterGuid
+// - uint8 Flags (1 = ON_LOGIN)
+// - Then repeated until end of packet:
+//   - uint32 SpellId
+//   - uint32 CooldownMs
+
+void FWowPacketHandler::HandleSpellCooldown(FPacketReader& R)
+{
+    if (!R.CanRead(9)) // minimum: guid (8) + flags (1)
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("SPELL_COOLDOWN: packet too short"));
+        return;
+    }
+
+    uint64 CasterGuid = R.ReadU64();
+    uint8 Flags = R.ReadU8();
+
+    int32 CooldownsProcessed = 0;
+    while (R.CanRead(8)) // spell id (4) + cooldown ms (4)
+    {
+        uint32 SpellId = R.ReadU32();
+        uint32 CooldownMs = R.ReadU32();
+
+        if (CooldownMs > 0)
+        {
+            double ExpiryTime = FPlatformTime::Seconds() + CooldownMs / 1000.0;
+            SpellCooldowns.Add(SpellId, ExpiryTime);
+            OnSpellCooldown.Broadcast(SpellId, CooldownMs / 1000.0f);
+            CooldownsProcessed++;
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("SPELL_COOLDOWN: caster=%llu flags=%u processed=%d cooldowns"),
+        CasterGuid, Flags, CooldownsProcessed);
 }
 
 // ── SMSG_ATTACKERSTATEUPDATE ────────────────────────────────────────────
@@ -979,13 +1078,10 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
         return;
     }
 
-    // Store current position as the starting point for spline movement
-    Entity->Movement.SplineStartPosition = Entity->Movement.Position;
-
-    // Update entity position to the starting position from packet
-    Entity->Movement.Position.X = PosX;
-    Entity->Movement.Position.Y = PosY;
-    Entity->Movement.Position.Z = PosZ;
+    // The packet provides the starting position of this movement segment
+    FVector PacketStartPos(PosX, PosY, PosZ);
+    Entity->Movement.SplineStartPosition = PacketStartPos;
+    Entity->Movement.Position = PacketStartPos;
     Entity->Movement.SplineMoveType = MoveType;
 
     uint32 PointCount = 0;
@@ -1056,19 +1152,57 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
         Entity->Movement.SplineDuration = Duration;
         Entity->Movement.SplineElapsed = 0.0f;
         Entity->Movement.SplineWaypoints.Empty();
-        Entity->Movement.bHasActiveSpline = (PointCount > 0 && Duration > 0);
 
-        // Read waypoints
-        for (uint32 i = 0; i < PointCount && R.CanRead(12); ++i)
+        if (PointCount > 0 && Duration > 0)
         {
-            float WPX = R.ReadFloat();
-            float WPY = R.ReadFloat();
-            float WPZ = R.ReadFloat();
-            Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(FVector(WPX, WPY, WPZ)));
+            // WoW 3.3.5a SMSG_MONSTER_MOVE waypoint format:
+            // First point: the DESTINATION (full float x,y,z) — this is the END of the path
+            // Remaining points: packed int32 deltas from midpoint between start and end
+            // Each packed point is (x,y,z) as int32 values
+
+            if (PointCount == 1 && R.CanRead(12))
+            {
+                // Single destination — simple path from current pos to destination
+                float DestX = R.ReadFloat();
+                float DestY = R.ReadFloat();
+                float DestZ = R.ReadFloat();
+                Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(FVector(DestX, DestY, DestZ)));
+            }
+            else if (PointCount > 1 && R.CanRead(12))
+            {
+                // First point is full destination
+                float DestX = R.ReadFloat();
+                float DestY = R.ReadFloat();
+                float DestZ = R.ReadFloat();
+                FVector Destination(DestX, DestY, DestZ);
+
+                // Remaining points are packed int32 deltas from midpoint
+                FVector MidPoint = (FVector(PosX, PosY, PosZ) + Destination) * 0.5f;
+
+                // Read packed waypoints (intermediate points)
+                for (uint32 i = 1; i < PointCount && R.CanRead(4); ++i)
+                {
+                    uint32 Packed = R.ReadU32();
+                    // Unpack: each component is 11 bits (x), 11 bits (y), 10 bits (z)
+                    float UnpackX = MidPoint.X + static_cast<float>(static_cast<int32>(Packed << 21) >> 21) * 0.25f;
+                    float UnpackY = MidPoint.Y + static_cast<float>(static_cast<int32>((Packed >> 11) << 21) >> 21) * 0.25f;
+                    float UnpackZ = MidPoint.Z + static_cast<float>(static_cast<int32>((Packed >> 22) << 22) >> 22) * 0.25f;
+                    Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(FVector(UnpackX, UnpackY, UnpackZ)));
+                }
+
+                // Add final destination as last waypoint
+                Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(Destination));
+            }
+
+            Entity->Movement.bHasActiveSpline = (Entity->Movement.SplineWaypoints.Num() > 0);
+        }
+        else
+        {
+            Entity->Movement.bHasActiveSpline = false;
         }
 
-        UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: SPLINE guid=%llu pos=(%.1f,%.1f,%.1f) duration=%ums points=%u"),
-            TargetGuid, PosX, PosY, PosZ, Duration, PointCount);
+        UE_LOG(LogWowPacket, Log, TEXT("MONSTER_MOVE: SPLINE guid=%llu pos=(%.1f,%.1f,%.1f) duration=%ums rawPoints=%u resolvedPoints=%d flags=0x%X"),
+            TargetGuid, PosX, PosY, PosZ, Duration, PointCount, Entity->Movement.SplineWaypoints.Num(), SplineFlags);
     }
     else
     {
@@ -2144,4 +2278,484 @@ void FWowPacketHandler::HandleCreatureQueryResponse(FPacketReader& R)
     }
 
     // Skip the rest of the packet (icon name, type flags, etc.)
+}
+
+// ── Cooldown Helper Methods ──────────────────────────────────────────────────
+
+bool FWowPacketHandler::IsSpellOnCooldown(uint32 SpellId) const
+{
+    const double* ExpiryTime = SpellCooldowns.Find(SpellId);
+    return ExpiryTime && FPlatformTime::Seconds() < *ExpiryTime;
+}
+
+float FWowPacketHandler::GetSpellCooldownRemaining(uint32 SpellId) const
+{
+    const double* ExpiryTime = SpellCooldowns.Find(SpellId);
+    if (!ExpiryTime)
+    {
+        return 0.0f;
+    }
+
+    double Remaining = *ExpiryTime - FPlatformTime::Seconds();
+    return FMath::Max(0.0f, static_cast<float>(Remaining));
+}
+
+// ── Emote Handlers ───────────────────────────────────────────────────────
+
+void FWowPacketHandler::HandleEmote(FPacketReader& R)
+{
+    // SMSG_EMOTE
+    // uint32 emoteId + uint64 guid
+
+    if (!R.CanRead(12)) // 4 + 8
+    {
+        UE_LOG(LogWowPacket, Error, TEXT("EMOTE packet too short"));
+        return;
+    }
+
+    uint32 EmoteId = R.ReadU32();
+    uint64 Guid = R.ReadU64();
+
+    UE_LOG(LogWowPacket, Log, TEXT("EMOTE: EmoteId=%u, GUID=%llu"), EmoteId, Guid);
+
+    // Broadcast emote event for animation system
+    OnEmote.Broadcast(Guid, EmoteId);
+}
+
+void FWowPacketHandler::HandleTextEmote(FPacketReader& R)
+{
+    // SMSG_TEXT_EMOTE
+    // uint32 textEmoteId + uint32 emoteNum + uint64 senderGuid + string emoteText
+
+    if (!R.CanRead(16)) // 4 + 4 + 8
+    {
+        UE_LOG(LogWowPacket, Error, TEXT("TEXT_EMOTE packet too short"));
+        return;
+    }
+
+    uint32 TextEmoteId = R.ReadU32();
+    uint32 EmoteNum = R.ReadU32();
+    uint64 SenderGuid = R.ReadU64();
+
+    FString EmoteText;
+    if (R.CanRead(1))
+    {
+        EmoteText = R.ReadCString();
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("TEXT_EMOTE: TextEmoteId=%u, EmoteNum=%u, Sender=%llu, Text=%s"),
+           TextEmoteId, EmoteNum, SenderGuid, *EmoteText);
+
+    // Show the text emote in chat
+    if (!EmoteText.IsEmpty())
+    {
+        // Get sender name
+        FString SenderName;
+        const FString* CachedName = PlayerNameCache.Find(SenderGuid);
+        if (CachedName)
+        {
+            SenderName = *CachedName;
+        }
+        else
+        {
+            SenderName = TEXT("Unknown");
+        }
+
+        // Broadcast as a special chat message (emote type)
+        OnChatMessage.Broadcast(0, 0, SenderGuid, SenderName, EmoteText, TEXT(""));
+    }
+
+    // Also trigger the animation if we have the EmoteNum
+    if (EmoteNum > 0)
+    {
+        OnEmote.Broadcast(SenderGuid, EmoteNum);
+    }
+}
+
+// ── Player progression handlers ─────────────────────────────────────────
+
+void FWowPacketHandler::HandleLevelUpInfo(FPacketReader& R)
+{
+    // SMSG_LEVELUP_INFO
+    // uint32 Level, uint32 HealthGained, uint32 ManaGained, then 5x uint32 stat gains (STR/AGI/STA/INT/SPI)
+
+    if (!R.CanRead(28)) // 7 * 4 bytes
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("LEVELUP_INFO: packet too short"));
+        return;
+    }
+
+    uint32 Level = R.ReadU32();
+    uint32 HealthGained = R.ReadU32();
+    uint32 ManaGained = R.ReadU32();
+    uint32 StrGained = R.ReadU32();
+    uint32 AgiGained = R.ReadU32();
+    uint32 StaGained = R.ReadU32();
+    uint32 IntGained = R.ReadU32();
+    uint32 SpiGained = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("LEVELUP_INFO: Level %u, HP+%u, MP+%u, STR+%u, AGI+%u, STA+%u, INT+%u, SPI+%u"),
+           Level, HealthGained, ManaGained, StrGained, AgiGained, StaGained, IntGained, SpiGained);
+
+    OnLevelUp.Broadcast(Level);
+}
+
+void FWowPacketHandler::HandleLogXPGain(FPacketReader& R)
+{
+    // SMSG_LOG_XPGAIN
+    // uint64 VictimGuid, uint32 XPAmount, uint8 Type (0=kill, 1=non-kill)
+
+    if (!R.CanRead(13)) // 8 + 4 + 1
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("LOG_XPGAIN: packet too short"));
+        return;
+    }
+
+    uint64 VictimGuid = R.ReadU64();
+    uint32 XPAmount = R.ReadU32();
+    uint8 Type = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("LOG_XPGAIN: +%u XP from GUID %llu (type %u)"), XPAmount, VictimGuid, Type);
+
+    OnXPGain.Broadcast(XPAmount, Type);
+}
+
+void FWowPacketHandler::HandleExplorationExperience(FPacketReader& R)
+{
+    // SMSG_EXPLORATION_EXPERIENCE
+    // uint32 AreaId, uint32 XPAmount
+
+    if (!R.CanRead(8)) // 4 + 4
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("EXPLORATION_EXPERIENCE: packet too short"));
+        return;
+    }
+
+    uint32 AreaId = R.ReadU32();
+    uint32 XPAmount = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("EXPLORATION_EXPERIENCE: +%u XP for exploring area %u"), XPAmount, AreaId);
+
+    // Broadcast as XP gain (type 1 = non-kill)
+    OnXPGain.Broadcast(XPAmount, 1);
+}
+
+void FWowPacketHandler::HandleEnvironmentalDamageLog(FPacketReader& R)
+{
+    // SMSG_ENVIRONMENTAL_DAMAGE_LOG
+    // uint64 VictimGuid, uint8 DamageType, uint32 Damage, uint32 Absorbed, uint32 Resisted
+
+    if (!R.CanRead(21)) // 8 + 1 + 4 + 4 + 4
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("ENVIRONMENTAL_DAMAGE_LOG: packet too short"));
+        return;
+    }
+
+    uint64 VictimGuid = R.ReadU64();
+    uint8 DamageType = R.ReadU8();
+    uint32 Damage = R.ReadU32();
+    uint32 Absorbed = R.ReadU32();
+    uint32 Resisted = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("ENVIRONMENTAL_DAMAGE_LOG: GUID %llu, type %u, %u damage (%u absorbed, %u resisted)"),
+           VictimGuid, DamageType, Damage, Absorbed, Resisted);
+}
+
+void FWowPacketHandler::HandleBindPointUpdate(FPacketReader& R)
+{
+    // SMSG_BINDPOINTUPDATE
+    // float X, float Y, float Z, uint32 MapId, uint32 AreaId
+
+    if (!R.CanRead(20)) // 3*4 + 4 + 4
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("BINDPOINTUPDATE: packet too short"));
+        return;
+    }
+
+    float X = R.ReadFloat();
+    float Y = R.ReadFloat();
+    float Z = R.ReadFloat();
+    uint32 MapId = R.ReadU32();
+    uint32 AreaId = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("BINDPOINTUPDATE: Map %u, Area %u, Position (%.2f, %.2f, %.2f)"),
+           MapId, AreaId, X, Y, Z);
+
+    OnBindPointUpdate.Broadcast(X, Y, Z, MapId, AreaId);
+}
+
+void FWowPacketHandler::HandlePlayedTime(FPacketReader& R)
+{
+    // SMSG_PLAYED_TIME
+    // uint32 TotalTime, uint32 LevelTime, uint8 TriggerEvent
+
+    if (!R.CanRead(9)) // 4 + 4 + 1
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("PLAYED_TIME: packet too short"));
+        return;
+    }
+
+    uint32 TotalTime = R.ReadU32();
+    uint32 LevelTime = R.ReadU32();
+    uint8 TriggerEvent = R.ReadU8();
+
+    uint32 TotalHours = TotalTime / 3600;
+    uint32 TotalMinutes = (TotalTime % 3600) / 60;
+    uint32 LevelHours = LevelTime / 3600;
+    uint32 LevelMinutes = (LevelTime % 3600) / 60;
+
+    UE_LOG(LogWowPacket, Log, TEXT("PLAYED_TIME: Total %uh %um, This Level %uh %um (event %u)"),
+           TotalHours, TotalMinutes, LevelHours, LevelMinutes, TriggerEvent);
+}
+
+// ── World state handlers ────────────────────────────────────────────────
+
+void FWowPacketHandler::HandleWeather(FPacketReader& R)
+{
+    // SMSG_WEATHER
+    // uint32 WeatherType, float Grade, uint8 Sound
+
+    if (!R.CanRead(9)) // 4 + 4 + 1
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("WEATHER: packet too short"));
+        return;
+    }
+
+    uint32 WeatherType = R.ReadU32();
+    float Grade = R.ReadFloat();
+    uint8 Sound = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("WEATHER: Type %u, Grade %.2f, Sound %u"), WeatherType, Grade, Sound);
+
+    OnWeatherUpdate.Broadcast(WeatherType, Grade, Sound);
+}
+
+void FWowPacketHandler::HandleInitWorldStates(FPacketReader& R)
+{
+    // SMSG_INIT_WORLD_STATES
+    // uint32 MapId, uint32 AreaId, uint32 SubAreaId, uint16 Count, then Count x (uint32 Field, uint32 Value)
+
+    if (!R.CanRead(14)) // 4 + 4 + 4 + 2
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("INIT_WORLD_STATES: packet too short"));
+        return;
+    }
+
+    uint32 MapId = R.ReadU32();
+    uint32 AreaId = R.ReadU32();
+    uint32 SubAreaId = R.ReadU32();
+    uint16 Count = R.ReadU16();
+
+    UE_LOG(LogWowPacket, Log, TEXT("INIT_WORLD_STATES: Map %u, Area %u, SubArea %u, %u states"), MapId, AreaId, SubAreaId, Count);
+
+    // Clear existing world states
+    WorldStates.Empty();
+
+    // Read each world state
+    for (uint16 i = 0; i < Count && R.CanRead(8); ++i)
+    {
+        uint32 Field = R.ReadU32();
+        uint32 Value = R.ReadU32();
+        WorldStates.Add(Field, Value);
+        UE_LOG(LogWowPacket, VeryVerbose, TEXT("  World State %u = %u"), Field, Value);
+    }
+
+    OnWorldStatesInit.Broadcast(MapId, AreaId, SubAreaId);
+}
+
+void FWowPacketHandler::HandleUpdateWorldState(FPacketReader& R)
+{
+    // SMSG_UPDATE_WORLD_STATE
+    // uint32 Field, uint32 Value
+
+    if (!R.CanRead(8)) // 4 + 4
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("UPDATE_WORLD_STATE: packet too short"));
+        return;
+    }
+
+    uint32 Field = R.ReadU32();
+    uint32 Value = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("UPDATE_WORLD_STATE: Field %u = %u"), Field, Value);
+
+    // Update world state
+    WorldStates.FindOrAdd(Field) = Value;
+
+    OnWorldStateUpdate.Broadcast(Field, Value);
+}
+
+// ── Account/Party handlers ──────────────────────────────────────────────
+
+void FWowPacketHandler::HandleSetProficiency(FPacketReader& R)
+{
+    // SMSG_SET_PROFICIENCY
+    // uint8 ItemClass, uint32 ItemSubclassMask
+
+    if (!R.CanRead(5)) // 1 + 4
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("SET_PROFICIENCY: packet too short"));
+        return;
+    }
+
+    uint8 ItemClass = R.ReadU8();
+    uint32 ItemSubclassMask = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("SET_PROFICIENCY: ItemClass %u, SubclassMask 0x%08X"), ItemClass, ItemSubclassMask);
+
+    OnProficiencySet.Broadcast(ItemClass, ItemSubclassMask);
+}
+
+void FWowPacketHandler::HandleAccountDataTimes(FPacketReader& R)
+{
+    // SMSG_ACCOUNT_DATA_TIMES
+    // uint32 Time, uint8 Mask, then up to 8x uint32 timestamps
+
+    if (!R.CanRead(5)) // 4 + 1
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("ACCOUNT_DATA_TIMES: packet too short"));
+        return;
+    }
+
+    uint32 Time = R.ReadU32();
+    uint8 Mask = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("ACCOUNT_DATA_TIMES: Time %u, Mask 0x%02X"), Time, Mask);
+
+    // Read timestamps for each enabled bit
+    for (int32 i = 0; i < 8; ++i)
+    {
+        if ((Mask & (1 << i)) && R.CanRead(4))
+        {
+            uint32 Timestamp = R.ReadU32();
+            UE_LOG(LogWowPacket, VeryVerbose, TEXT("  Account data %d timestamp: %u"), i, Timestamp);
+        }
+    }
+
+    // No action needed - just prevents server disconnect
+}
+
+void FWowPacketHandler::HandlePartyMemberStats(FPacketReader& R)
+{
+    // SMSG_PARTY_MEMBER_STATS
+    // Complex packet with variable structure
+
+    if (!R.CanRead(9)) // packed guid + mask
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("PARTY_MEMBER_STATS: packet too short"));
+        return;
+    }
+
+    uint64 MemberGuid = R.ReadPackedGuid();
+    uint32 Mask = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("PARTY_MEMBER_STATS: Member GUID %llu, Mask 0x%08X"), MemberGuid, Mask);
+
+    // For now, just skip the rest - full implementation would parse all the conditional fields
+    // This prevents errors when receiving these packets
+}
+
+// ── NPC interaction handlers ────────────────────────────────────────────
+
+void FWowPacketHandler::HandleGossipMessage(FPacketReader& R)
+{
+    // SMSG_GOSSIP_MESSAGE
+    // uint64 NpcGuid, uint32 TextId, uint32 MenuId, uint32 OptionCount
+    // Then OptionCount x (uint32 OptionId, uint8 OptionIcon, uint8 OptionCoded, uint32 BoxMoney, FString Text, FString BoxText)
+    // Then uint32 QuestCount, QuestCount x (uint32 QuestId, uint32 QuestIcon, int32 QuestLevel, uint32 QuestFlags, uint8 Repeatable, FString Title)
+
+    if (!R.CanRead(20)) // 8 + 4 + 4 + 4
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("GOSSIP_MESSAGE: packet too short"));
+        return;
+    }
+
+    uint64 NpcGuid = R.ReadU64();
+    uint32 TextId = R.ReadU32();
+    uint32 MenuId = R.ReadU32();
+    uint32 OptionCount = R.ReadU32();
+
+    UE_LOG(LogWowPacket, Log, TEXT("GOSSIP_MESSAGE: NPC GUID %llu, Text %u, Menu %u, %u options"),
+           NpcGuid, TextId, MenuId, OptionCount);
+
+    // Read gossip options
+    for (uint32 i = 0; i < OptionCount && R.Remaining() > 14; ++i) // minimum: 4 + 1 + 1 + 4 + 2 nulls = 12
+    {
+        if (!R.CanRead(10)) break; // minimum for option header
+
+        uint32 OptionId = R.ReadU32();
+        uint8 OptionIcon = R.ReadU8();
+        uint8 OptionCoded = R.ReadU8();
+        uint32 BoxMoney = R.ReadU32();
+        FString OptionText = R.ReadCString();
+        FString BoxText = R.ReadCString();
+
+        UE_LOG(LogWowPacket, VeryVerbose, TEXT("  Option %u: Icon %u, Text '%s'"), OptionId, OptionIcon, *OptionText);
+    }
+
+    // Read quest options
+    if (R.CanRead(4))
+    {
+        uint32 QuestCount = R.ReadU32();
+        UE_LOG(LogWowPacket, Log, TEXT("  %u quest options"), QuestCount);
+
+        for (uint32 i = 0; i < QuestCount && R.Remaining() > 18; ++i) // minimum for quest header
+        {
+            if (!R.CanRead(17)) break; // minimum: 4 + 4 + 4 + 4 + 1
+
+            uint32 QuestId = R.ReadU32();
+            uint32 QuestIcon = R.ReadU32();
+            int32 QuestLevel = static_cast<int32>(R.ReadU32());
+            uint32 QuestFlags = R.ReadU32();
+            uint8 Repeatable = R.ReadU8();
+            FString QuestTitle = R.ReadCString();
+
+            UE_LOG(LogWowPacket, VeryVerbose, TEXT("  Quest %u: Level %d, Title '%s'"), QuestId, QuestLevel, *QuestTitle);
+        }
+    }
+
+    OnGossipMessage.Broadcast(NpcGuid, TextId, MenuId);
+}
+
+// ── Mail system handlers ────────────────────────────────────────────
+
+void FWowPacketHandler::HandleMailListResult(FPacketReader& R)
+{
+    // SMSG_MAIL_LIST_RESULT
+    // uint8 mailCount
+    // For each mail: complex structure with sender, subject, body, attachments, etc.
+
+    if (!R.CanRead(1))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("MAIL_LIST_RESULT: packet too short"));
+        return;
+    }
+
+    uint8 MailCount = R.ReadU8();
+
+    UE_LOG(LogWowPacket, Log, TEXT("MAIL_LIST_RESULT: %d mails received"), MailCount);
+
+    // For stub implementation, just log the count and ignore the rest
+    // In a full implementation, this would parse each mail entry
+}
+
+// ── Bank system handlers ────────────────────────────────────────────
+
+void FWowPacketHandler::HandleShowBank(FPacketReader& R)
+{
+    // SMSG_SHOW_BANK
+    // uint64 bankerGuid
+
+    if (!R.CanRead(8))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("SHOW_BANK: packet too short"));
+        return;
+    }
+
+    uint64 BankerGuid = R.ReadU64();
+
+    UE_LOG(LogWowPacket, Log, TEXT("SHOW_BANK: Bank opened by banker GUID %llu"), BankerGuid);
+
+    // For stub implementation, just log that bank was opened
+    // In a full implementation, this would trigger showing bank UI
 }

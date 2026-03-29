@@ -13,8 +13,10 @@
 #include "Formats/Dbc/CreatureModelDataDbc.h"
 #include "Formats/Dbc/ItemDisplayInfoDbc.h"
 #include "Formats/Dbc/SpellDbc.h"
+#include "Formats/Dbc/SpellIconDbc.h"
 #include "Formats/Dbc/SpellVisualDbc.h"
 #include "Formats/Dbc/SpellVisualKitDbc.h"
+#include "Formats/Dbc/SpellVisualEffectNameDbc.h"
 #include "Formats/Dbc/SoundEntriesDbc.h"
 #include "Formats/Dbc/LoadingScreensDbc.h"
 #include "Formats/Dbc/GroundEffectTextureDbc.h"
@@ -39,6 +41,7 @@ public:
     static FDbcStore& Get();
 
     bool LoadAll(FMpqManager& Mpq);
+    void LoadDeferred(FMpqManager& Mpq);
 
     FMapDbc& Maps() { return MapDbc; }
     FAreaTableDbc& AreaTable() { return AreaTableDbc; }
@@ -54,8 +57,10 @@ public:
     FCreatureModelDataDbc& CreatureModelData() { return CreatureModelDataDbc; }
     FItemDisplayInfoDbc& ItemDisplayInfo() { return ItemDisplayInfoDbc; }
     FSpellDbc& Spells() { return SpellDbc; }
+    FSpellIconDbc& SpellIcons() { return SpellIconDbc; }
     FSpellVisualDbc& SpellVisuals() { return SpellVisualDbc; }
     FSpellVisualKitDbc& SpellVisualKits() { return SpellVisualKitDbc; }
+    FSpellVisualEffectNameDbc& SpellVisualEffectNames() { return SpellVisualEffectNameDbc; }
     FSoundEntriesDbc& SoundEntries() { return SoundEntriesDbc; }
     FLoadingScreensDbc& LoadingScreens() { return LoadingScreensDbc; }
     FGroundEffectTextureDbc& GroundEffectTextures() { return GroundEffectTextureDbc; }
@@ -85,8 +90,10 @@ public:
     const FCreatureModelDataDbc& CreatureModelData() const { return CreatureModelDataDbc; }
     const FItemDisplayInfoDbc& ItemDisplayInfo() const { return ItemDisplayInfoDbc; }
     const FSpellDbc& Spells() const { return SpellDbc; }
+    const FSpellIconDbc& SpellIcons() const { return SpellIconDbc; }
     const FSpellVisualDbc& SpellVisuals() const { return SpellVisualDbc; }
     const FSpellVisualKitDbc& SpellVisualKits() const { return SpellVisualKitDbc; }
+    const FSpellVisualEffectNameDbc& SpellVisualEffectNames() const { return SpellVisualEffectNameDbc; }
     const FSoundEntriesDbc& SoundEntries() const { return SoundEntriesDbc; }
     const FLoadingScreensDbc& LoadingScreens() const { return LoadingScreensDbc; }
     const FGroundEffectTextureDbc& GroundEffectTextures() const { return GroundEffectTextureDbc; }
@@ -103,6 +110,7 @@ public:
     const FTaxiNodesDbc& TaxiNodes() const { return TaxiNodesDbc; }
 
     bool IsLoaded() const { return bLoaded; }
+    bool IsDeferredLoaded() const { return bDeferredLoaded; }
 
 private:
     FMapDbc MapDbc;
@@ -119,8 +127,10 @@ private:
     FCreatureModelDataDbc CreatureModelDataDbc;
     FItemDisplayInfoDbc ItemDisplayInfoDbc;
     FSpellDbc SpellDbc;
+    FSpellIconDbc SpellIconDbc;
     FSpellVisualDbc SpellVisualDbc;
     FSpellVisualKitDbc SpellVisualKitDbc;
+    FSpellVisualEffectNameDbc SpellVisualEffectNameDbc;
     FSoundEntriesDbc SoundEntriesDbc;
     FLoadingScreensDbc LoadingScreensDbc;
     FGroundEffectTextureDbc GroundEffectTextureDbc;
@@ -136,4 +146,5 @@ private:
     FCharStartOutfitDbc CharStartOutfitDbc;
     FTaxiNodesDbc TaxiNodesDbc;
     bool bLoaded = false;
+    bool bDeferredLoaded = false;
 };

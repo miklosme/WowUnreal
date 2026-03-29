@@ -4,6 +4,12 @@ public class WowAssets : ModuleRules
     public WowAssets(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "RenderCore", "RHI", "WowData", "WowNetwork", "MeshDescription", "StaticMeshDescription", "SkeletalMeshDescription", "AnimationCore", "MeshUtilities", "ProceduralMeshComponent" });
+        PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "RenderCore", "RHI", "WowData", "WowNetwork", "MeshDescription", "StaticMeshDescription", "SkeletalMeshDescription", "AnimationCore", "ProceduralMeshComponent" });
+
+        // Add MeshUtilities only for editor targets
+        if (Target.Type == TargetType.Editor)
+        {
+            PublicDependencyModuleNames.Add("MeshUtilities");
+        }
     }
 }

@@ -114,6 +114,61 @@ struct FWowQuestDetails
     uint32 RewardXP = 0;
 };
 
+// WoW 3.3.5a NPC flags — determine what interactions are available
+namespace WowNpcFlags
+{
+    inline constexpr uint32 NONE            = 0x00000000;
+    inline constexpr uint32 GOSSIP          = 0x00000001;
+    inline constexpr uint32 QUESTGIVER      = 0x00000002;
+    inline constexpr uint32 VENDOR          = 0x00000080; // Generic vendor (sells items)
+    inline constexpr uint32 VENDOR_AMMO     = 0x00000100;
+    inline constexpr uint32 VENDOR_FOOD     = 0x00000200;
+    inline constexpr uint32 VENDOR_POISON   = 0x00000400;
+    inline constexpr uint32 VENDOR_REAGENT  = 0x00000800;
+    inline constexpr uint32 REPAIR          = 0x00001000;
+    inline constexpr uint32 FLIGHTMASTER    = 0x00002000;
+    inline constexpr uint32 TRAINER         = 0x00000010;
+    inline constexpr uint32 TRAINER_CLASS   = 0x00000020;
+    inline constexpr uint32 TRAINER_PROF    = 0x00000040;
+    inline constexpr uint32 INNKEEPER       = 0x00010000;
+    inline constexpr uint32 BANKER          = 0x00020000;
+    inline constexpr uint32 PETITIONER      = 0x00040000;
+    inline constexpr uint32 AUCTIONEER      = 0x00200000;
+    inline constexpr uint32 STABLEMASTER    = 0x00400000;
+    inline constexpr uint32 MAILBOX         = 0x04000000;
+
+    // Combined mask: any flag that means "talk to me" instead of "attack me"
+    inline constexpr uint32 INTERACTABLE = GOSSIP | QUESTGIVER | VENDOR | REPAIR
+        | FLIGHTMASTER | TRAINER | TRAINER_CLASS | TRAINER_PROF
+        | INNKEEPER | BANKER | PETITIONER | AUCTIONEER | STABLEMASTER;
+}
+
+// WoW 3.3.5a unit stand states (UNIT_FIELD_BYTES_1 byte 0)
+namespace WowStandState
+{
+    inline constexpr uint8 STAND     = 0;
+    inline constexpr uint8 SIT       = 1;
+    inline constexpr uint8 SIT_CHAIR = 2;
+    inline constexpr uint8 SLEEP     = 3;
+    inline constexpr uint8 SIT_LOW   = 4;
+    inline constexpr uint8 SIT_MED   = 5;
+    inline constexpr uint8 SIT_HIGH  = 6;
+    inline constexpr uint8 DEAD      = 7;
+    inline constexpr uint8 KNEEL     = 8;
+    inline constexpr uint8 SUBMERGED = 9;
+}
+
+// WoW 3.3.5a unit dynamic flags
+namespace WowDynFlags
+{
+    inline constexpr uint32 NONE         = 0x0000;
+    inline constexpr uint32 LOOTABLE     = 0x0001;
+    inline constexpr uint32 TRACK_UNIT   = 0x0002;
+    inline constexpr uint32 TAPPED       = 0x0004;
+    inline constexpr uint32 TAPPED_BY_PLAYER = 0x0008;
+    inline constexpr uint32 DEAD         = 0x0020;
+}
+
 enum class EWowEntityKind : uint8
 {
     Object,
@@ -289,7 +344,50 @@ struct WOWNETWORK_API FWowUnitEntity : public FWowEntity
     uint32 GetFactionTemplate() const { return GetField(UnitField::FACTIONTEMPLATE); }
     uint32 GetUnitFlags() const { return GetField(UnitField::FLAGS); }
     uint32 GetUnitFlags2() const { return GetField(UnitField::FLAGS_2); }
+    uint32 GetNpcFlags() const { return GetField(UnitField::NPC_FLAGS); }
     uint32 GetMountDisplayId() const { return GetField(UnitField::MOUNTDISPLAYID); }
+
+    /** Check if this NPC has any interactable flags (gossip, questgiver, vendor, etc.) */
+    bool IsInteractable() const { return (GetNpcFlags() & WowNpcFlags::INTERACTABLE) != 0; }
+    bool IsQuestGiver() const { return (GetNpcFlags() & WowNpcFlags::QUESTGIVER) != 0; }
+    bool IsVendor() const { return (GetNpcFlags() & WowNpcFlags::VENDOR) != 0; }
+    bool IsFlightMaster() const { return (GetNpcFlags() & WowNpcFlags::FLIGHTMASTER) != 0; }
+
+    // Stand state (from BYTES_1, byte 0) — controls idle pose: stand, sit, sleep, kneel, dead
+    uint8 GetStandState() const { return GetFieldByte(UnitField::BYTES_1, 0); }
+    bool IsDead() const { return GetStandState() == WowStandState::DEAD || GetHealth() <= 0; }
+    bool IsSitting() const { return GetStandState() >= WowStandState::SIT && GetStandState() <= WowStandState::SIT_HIGH; }
+    bool IsSleeping() const { return GetStandState() == WowStandState::SLEEP; }
+    bool IsKneeling() const { return GetStandState() == WowStandState::KNEEL; }
+
+    // Dynamic flags — lootable, tapped, etc.
+    uint32 GetDynamicFlags() const { return GetField(UnitField::DYNAMIC_FLAGS); }
+    bool IsLootable() const { return (GetDynamicFlags() & WowDynFlags::LOOTABLE) != 0; }
+    bool IsTapped() const { return (GetDynamicFlags() & WowDynFlags::TAPPED) != 0; }
+
+    // NPC emote state (looping emote animation)
+    uint32 GetEmoteState() const { return GetField(UnitField::NPC_EMOTESTATE); }
+
+    // Stats (Strength, Agility, Stamina, Intellect, Spirit)
+    int32 GetStrength() const { return static_cast<int32>(GetField(UnitField::STAT0)); }
+    int32 GetAgility() const { return static_cast<int32>(GetField(UnitField::STAT1)); }
+    int32 GetStamina() const { return static_cast<int32>(GetField(UnitField::STAT2)); }
+    int32 GetIntellect() const { return static_cast<int32>(GetField(UnitField::STAT3)); }
+    int32 GetSpirit() const { return static_cast<int32>(GetField(UnitField::STAT4)); }
+
+    // Resistances (Physical=armor at index 0, then Holy, Fire, Nature, Frost, Shadow, Arcane)
+    int32 GetArmor() const { return static_cast<int32>(GetField(UnitField::RESISTANCES)); }
+    int32 GetResistance(int32 School) const
+    {
+        return (School >= 0 && School < 7) ? static_cast<int32>(GetField(UnitField::RESISTANCES + School)) : 0;
+    }
+
+    // Attack Power
+    int32 GetAttackPower() const { return static_cast<int32>(GetField(UnitField::ATTACK_POWER)); }
+    int32 GetRangedAttackPower() const { return static_cast<int32>(GetField(UnitField::RANGED_ATTACK_POWER)); }
+
+    // Sheath state (from BYTES_2, byte 0) — weapon visibility
+    uint8 GetSheathState() const { return GetFieldByte(UnitField::BYTES_2, 0); }
     uint8 GetRaceId() const { return GetFieldByte(UnitField::BYTES_0, 0); }
     uint8 GetClassId() const { return GetFieldByte(UnitField::BYTES_0, 1); }
     uint8 GetGenderId() const { return GetFieldByte(UnitField::BYTES_0, 2); }
@@ -326,6 +424,12 @@ struct WOWNETWORK_API FWowPlayerEntity : public FWowUnitEntity
         if (BagIndex >= 1 && BagIndex <= 4)
             return GetField64(PlayerField::PACK_SLOT_1 + (BagIndex - 1) * 2);
         return 0;
+    }
+
+    // Combat ratings (for players only)
+    int32 GetCombatRating(int32 RatingType) const
+    {
+        return (RatingType >= 0 && RatingType < 25) ? static_cast<int32>(GetField(PlayerField::COMBAT_RATING_1 + RatingType)) : 0;
     }
 };
 

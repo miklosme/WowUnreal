@@ -91,12 +91,18 @@ private:
     /** Parse chat command and determine type/target */
     struct FChatCommand
     {
-        uint8 Type = 1; // SAY
+        int32 Type = 1; // SAY (changed to int32 to allow -1 for emotes)
         FString Target; // For whispers
         FString Message;
         FString Channel; // For channel messages
     };
     FChatCommand ParseChatCommand(const FString& Input) const;
+
+    /** Check if a command is an emote command */
+    bool IsEmoteCommand(const FString& Command) const;
+
+    /** Get EmotesText.dbc ID for an emote command */
+    int32 GetEmoteTextIdForCommand(const FString& Command) const;
 
     /** Get default language for player */
     uint32 GetDefaultLanguage() const { return 7; } // Common for now

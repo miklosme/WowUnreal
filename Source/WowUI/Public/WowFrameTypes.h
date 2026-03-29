@@ -54,6 +54,8 @@ struct FWowTextureElement
 	float Height = 0.f;
 	TArray<FWowAnchor> Anchors;
 	FLinearColor VertexColor = FLinearColor::White;
+	bool bSetAllPoints = false;
+	bool bHidden = false;
 	// Tex coords
 	float Left = 0.f, Right = 1.f, Top = 0.f, Bottom = 1.f;
 };
@@ -142,6 +144,7 @@ struct WOWUI_API FWowFrameDef
 
 	EWowFrameStrata Strata = EWowFrameStrata::MEDIUM;
 	int32 FrameLevel = 0;
+	int32 FrameID = 0; // WoW XML "id" attribute
 
 	TArray<FWowAnchor> Anchors;
 	TArray<FWowLayer> Layers;
@@ -153,6 +156,7 @@ struct WOWUI_API FWowFrameDef
 	// Type-specific properties
 	FString ButtonText;
 	FString NormalTexture, PushedTexture, HighlightTexture, DisabledTexture;
+	FString NormalTextureName, PushedTextureName, HighlightTextureName, DisabledTextureName;
 	float MinValue = 0.f, MaxValue = 100.f, DefaultValue = 0.f;
 	FString Orientation; // HORIZONTAL, VERTICAL (for Slider/StatusBar)
 };

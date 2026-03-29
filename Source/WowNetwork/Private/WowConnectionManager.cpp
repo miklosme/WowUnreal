@@ -409,6 +409,32 @@ void UWowConnectionManager::SendKeepAlive()
     WorldSocket->SendPacket(WowOpcode::CMSG_KEEP_ALIVE);
 }
 
+void UWowConnectionManager::SendLoot(int64 CorpseGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    uint64 Guid = static_cast<uint64>(CorpseGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_LOOT, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_LOOT for corpse %llu"), Guid);
+}
+
+void UWowConnectionManager::SendLootRelease(int64 CorpseGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    uint64 Guid = static_cast<uint64>(CorpseGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_LOOT_RELEASE, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_LOOT_RELEASE for corpse %llu"), Guid);
+}
+
 void UWowConnectionManager::SendLootItem(int32 LootSlot)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
@@ -440,6 +466,43 @@ void UWowConnectionManager::SendBuyItem(int64 VendorGuid, int32 ItemId, int32 Co
 
     WorldSocket->SendPacket(WowOpcode::CMSG_BUY_ITEM, Data);
     UE_LOG(LogWowNet, Log, TEXT("Buy item %d (count=%d) from vendor %lld"), ItemId, Count, VendorGuid);
+}
+
+void UWowConnectionManager::SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8 Count)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(17);
+
+    // uint64 vendor_guid, uint64 item_guid, uint8 count
+    uint64 VGuid = static_cast<uint64>(VendorGuid);
+    Data.SetNumUninitialized(8);
+    FMemory::Memcpy(Data.GetData(), &VGuid, 8);
+
+    uint64 IGuid = static_cast<uint64>(ItemGuid);
+    Data.SetNumUninitialized(Data.Num() + 8);
+    FMemory::Memcpy(Data.GetData() + 8, &IGuid, 8);
+
+    Data.Add(Count);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_SELL_ITEM, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sell item %lld (count=%d) to vendor %lld"), ItemGuid, Count, VendorGuid);
+}
+
+void UWowConnectionManager::SendGossipHello(int64 NpcGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    uint64 Guid = static_cast<uint64>(NpcGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    // Use CMSG_GOSSIP_HELLO — the server routes to questgiver/vendor/trainer
+    // based on the NPC's flags automatically
+    WorldSocket->SendPacket(WowOpcode::CMSG_GOSSIP_HELLO, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_GOSSIP_HELLO for NPC %llu"), Guid);
 }
 
 void UWowConnectionManager::SendQuestAccept(int64 QuestGiverGuid, int32 QuestId)
@@ -522,6 +585,48 @@ void UWowConnectionManager::SendCreatureQuery(int32 Entry, int64 Guid)
 
     WorldSocket->SendPacket(WowOpcode::CMSG_CREATURE_QUERY, Data);
     UE_LOG(LogWowNet, Verbose, TEXT("Sent creature query for Entry %d, GUID %lld"), Entry, Guid);
+}
+
+void UWowConnectionManager::SendTextEmote(int32 EmoteTextId, int64 InTargetGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(16);
+
+    // EmoteTextId (uint32) — from EmotesText.dbc
+    uint32 TextEmoteId = static_cast<uint32>(EmoteTextId);
+    Data.Append(reinterpret_cast<const uint8*>(&TextEmoteId), 4);
+
+    // EmoteNum (uint32) — always 0 for client-sent emotes
+    uint32 EmoteNum = 0;
+    Data.Append(reinterpret_cast<const uint8*>(&EmoteNum), 4);
+
+    // TargetGuid (uint64) — 0 for untargeted emotes
+    uint64 EmoteTargetGuid = static_cast<uint64>(InTargetGuid);
+    Data.Append(reinterpret_cast<const uint8*>(&EmoteTargetGuid), 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_TEXT_EMOTE, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent text emote: EmoteTextId=%d, Target=%lld"), EmoteTextId, InTargetGuid);
+}
+
+void UWowConnectionManager::SendLearnTalent(int32 TalentId, int32 RequestedRank)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(8);
+
+    // TalentId (uint32)
+    uint32 TId = static_cast<uint32>(TalentId);
+    Data.Append(reinterpret_cast<const uint8*>(&TId), 4);
+
+    // RequestedRank (uint32)
+    uint32 Rank = static_cast<uint32>(RequestedRank);
+    Data.Append(reinterpret_cast<const uint8*>(&Rank), 4);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_LEARN_TALENT, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent learn talent: TalentId=%d, Rank=%d"), TalentId, RequestedRank);
 }
 
 void UWowConnectionManager::Disconnect()

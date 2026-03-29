@@ -8,6 +8,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Colors/SColorBlock.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/CoreStyle.h"
 #include "Engine/Engine.h"
@@ -131,6 +132,74 @@ TSharedRef<SWidget> SWowActionBar::CreateActionSlotWidget(int32 SlotIndex)
                     .Font(FCoreStyle::GetDefaultFontStyle("Regular", 6))
                     .ColorAndOpacity(FSlateColor::UseForeground())
                 ]
+
+                // Cooldown overlay
+                + SOverlay::Slot()
+                .HAlign(HAlign_Fill)
+                .VAlign(VAlign_Fill)
+                [
+                    SNew(SBox)
+                    .Visibility_Lambda([this, SlotIndex]() -> EVisibility
+                    {
+                        return ActionSlots[SlotIndex].IsOnCooldown() ? EVisibility::Visible : EVisibility::Hidden;
+                    })
+                    [
+                        SNew(SOverlay)
+
+                        // Semi-transparent dark overlay with progress
+                        + SOverlay::Slot()
+                        .HAlign(HAlign_Fill)
+                        .VAlign(VAlign_Fill)
+                        [
+                            SNew(SColorBlock)
+                            .Color_Lambda([this, SlotIndex]() -> FLinearColor
+                            {
+                                if (!ActionSlots[SlotIndex].IsOnCooldown())
+                                {
+                                    return FLinearColor::Transparent;
+                                }
+
+                                float Remaining = static_cast<float>(ActionSlots[SlotIndex].CooldownExpiry - FPlatformTime::Seconds());
+                                float Progress = 1.0f - (Remaining / ActionSlots[SlotIndex].CooldownDuration);
+                                Progress = FMath::Clamp(Progress, 0.0f, 1.0f);
+
+                                // Create a vertical gradient effect by adjusting alpha based on progress
+                                return FLinearColor(0.0f, 0.0f, 0.0f, 0.7f * (1.0f - Progress));
+                            })
+                        ]
+
+                        // Cooldown text
+                        + SOverlay::Slot()
+                        .HAlign(HAlign_Center)
+                        .VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
+                            .Text_Lambda([this, SlotIndex]() -> FText
+                            {
+                                if (!ActionSlots[SlotIndex].IsOnCooldown())
+                                {
+                                    return FText::GetEmpty();
+                                }
+
+                                float Remaining = static_cast<float>(ActionSlots[SlotIndex].CooldownExpiry - FPlatformTime::Seconds());
+                                if (Remaining > 60.0f)
+                                {
+                                    return FText::FromString(FString::Printf(TEXT("%.0fm"), Remaining / 60.0f));
+                                }
+                                else if (Remaining > 10.0f)
+                                {
+                                    return FText::FromString(FString::Printf(TEXT("%.0f"), Remaining));
+                                }
+                                else
+                                {
+                                    return FText::FromString(FString::Printf(TEXT("%.1f"), Remaining));
+                                }
+                            })
+                            .Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+                            .ColorAndOpacity(FSlateColor(FLinearColor::White))
+                        ]
+                    ]
+                ]
             ]
         ];
 }
@@ -203,6 +272,20 @@ void SWowActionBar::RefreshActionButtons()
     }
 
     UE_LOG(LogWowActionBar, Log, TEXT("Refreshed action bar with %d buttons"), ActionButtons.Num());
+}
+
+void SWowActionBar::UpdateCooldown(uint32 SpellId, float Duration)
+{
+    for (FActionSlot& Slot : ActionSlots)
+    {
+        if (!Slot.bIsEmpty && Slot.ActionType == 0 && Slot.ActionId == SpellId)
+        {
+            Slot.CooldownExpiry = FPlatformTime::Seconds() + Duration;
+            Slot.CooldownDuration = Duration;
+            UE_LOG(LogWowActionBar, Log, TEXT("Updated cooldown for spell %u: %f seconds"), SpellId, Duration);
+            break;
+        }
+    }
 }
 
 FString SWowActionBar::GetSpellName(uint32 SpellId) const

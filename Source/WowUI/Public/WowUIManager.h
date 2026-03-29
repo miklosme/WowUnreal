@@ -13,7 +13,9 @@
 struct FWowLuaContext;
 
 class FMpqManager;
+class FWowAssetCache;
 class UCanvasPanel;
+class UWowConnectionManager;
 
 /**
  * GameInstanceSubsystem that owns the WoW UI systems (Lua VM, FrameManager, EventSystem).
@@ -30,11 +32,14 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	/** Load FrameXML and addons from MPQ — call once MpqManager is available */
-	void LoadUI(FMpqManager* Mpq);
+	/** Load FrameXML and addons from MPQ — call once MpqManager and AssetCache are available */
+	void LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache);
 
 	/** Set the root UMG canvas for frame rendering */
 	void SetRootCanvas(UCanvasPanel* Canvas);
+
+	/** Set connection manager for character stats */
+	void SetConnectionManager(UWowConnectionManager* InConnectionManager);
 
 	/** Accessors */
 	FWowLuaVM* GetLuaVM() const { return LuaVM.Get(); }
@@ -58,6 +63,7 @@ private:
 	TUniquePtr<FWowEventSystem> EventSystem;
 	TUniquePtr<FWowFontManager> FontManager;
 	TSharedPtr<FWowInventoryManager> InventoryManager;
+	TObjectPtr<UWowConnectionManager> ConnectionManager;
 
 	FWowLuaContext* UIContext = nullptr;
 	bool bUILoaded = false;

@@ -383,24 +383,21 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
 
     if (Header.nAnimations > 0 && Header.nBones > 0 && RawBones != nullptr)
     {
-        // Only parse keyframes for looping animations (internal data, not external .anim files)
+        // Parse keyframes for all animations that have embedded data
         Result.AnimationTracks.Reserve(Header.nAnimations);
 
         for (uint32 animIdx = 0; animIdx < Header.nAnimations; animIdx++)
         {
             const FM2AnimSequenceRaw& AnimSeq = RawAnims[animIdx];
 
-            // Skip animations that don't have embedded data (external .anim files)
-            if ((AnimSeq.Flags & 0x20) == 0)
-            {
-                continue; // Not looping, likely external animation
-            }
-
             FM2AnimationData AnimData;
             AnimData.AnimationId = AnimSeq.AnimationId;
             AnimData.SubAnimationId = AnimSeq.SubAnimationId;
             AnimData.Duration = AnimSeq.Length;
-            AnimData.bIsLooping = (AnimSeq.Flags & 0x20) != 0;
+            // Looping animations: Stand, Walk, Run, Swim, etc. Non-looping: Attack, Cast, Death, Wound
+            AnimData.bIsLooping = (AnimSeq.Flags & 0x20) != 0 ||
+                AnimSeq.AnimationId == 0 || AnimSeq.AnimationId == 4 || AnimSeq.AnimationId == 5 ||
+                AnimSeq.AnimationId == 39 || AnimSeq.AnimationId == 40; // Stand, Walk, Run, SwimIdle, Swim
             AnimData.MoveSpeed = AnimSeq.MoveSpeed;
             AnimData.BoneTracks.SetNum(Header.nBones);
 

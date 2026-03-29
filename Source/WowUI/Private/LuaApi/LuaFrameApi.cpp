@@ -8,6 +8,7 @@
 #include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
 #include "Components/CanvasPanel.h"
+#include "Slate/WidgetTransform.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Engine/Texture2D.h"
 #include "Slate/SlateBrushAsset.h"
@@ -140,9 +141,19 @@ static int LF_GetObjectType(lua_State* L)
 			switch (Def->Type)
 			{
 			case EWowFrameType::Button: lua_pushstring(L, "Button"); break;
+			case EWowFrameType::CheckButton: lua_pushstring(L, "CheckButton"); break;
 			case EWowFrameType::EditBox: lua_pushstring(L, "EditBox"); break;
+			case EWowFrameType::ScrollFrame: lua_pushstring(L, "ScrollFrame"); break;
 			case EWowFrameType::Slider: lua_pushstring(L, "Slider"); break;
 			case EWowFrameType::StatusBar: lua_pushstring(L, "StatusBar"); break;
+			case EWowFrameType::SimpleHTML: lua_pushstring(L, "SimpleHTML"); break;
+			case EWowFrameType::Cooldown: lua_pushstring(L, "Cooldown"); break;
+			case EWowFrameType::GameTooltip: lua_pushstring(L, "GameTooltip"); break;
+			case EWowFrameType::Minimap: lua_pushstring(L, "Minimap"); break;
+			case EWowFrameType::Model: lua_pushstring(L, "Model"); break;
+			case EWowFrameType::PlayerModel: lua_pushstring(L, "PlayerModel"); break;
+			case EWowFrameType::MessageFrame: lua_pushstring(L, "MessageFrame"); break;
+			case EWowFrameType::ScrollingMessageFrame: lua_pushstring(L, "ScrollingMessageFrame"); break;
 			default: lua_pushstring(L, "Frame"); break;
 			}
 			return 1;
@@ -201,72 +212,27 @@ static int LF_SetScript(lua_State* L)
 	{
 		if (lua_isfunction(L, 3))
 		{
-			// Store the function as a script reference directly
-			// We need to wrap this: store function ref and call it in FireEvent
-			// Use the event system's script storage via a Lua indirection
-			FString Key = FString::Printf(TEXT("__script_%lld_%s"), Handle, UTF8_TO_TCHAR(ScriptType));
-			FTCHARToUTF8 UTF8Key(*Key);
-
-			lua_pushvalue(L, 3); // push the function
-			lua_setfield(L, LUA_REGISTRYINDEX, UTF8Key.Get());
-
-			// Create a wrapper code that calls the stored function
-			FString WrapperCode = FString::Printf(
-				TEXT("local f = rawget(_G, '__NOOP'); return function(self, event, ...) ")
-				TEXT("local fn = _R['%s']; if fn then fn(self, event, ...) end end"),
-				*Key);
-
-			// Simpler approach: directly store the function via the event system
-			// Store function ref in registry
+			// Store the Lua function reference directly in the event system
 			lua_pushvalue(L, 3);
-			int Ref = luaL_ref(L, LUA_REGISTRYINDEX);
+			int32 Ref = luaL_ref(L, LUA_REGISTRYINDEX);
+			Ctx->EventSystem->SetFrameScriptRef(Handle, UTF8_TO_TCHAR(ScriptType), Ref);
 
-			// Create a tiny wrapper that calls the ref'd function
-			FString Code = FString::Printf(
-				TEXT("local __ref=%d; return function(self,event,...) ")
-				TEXT("local f=__WowGetRef(%d); if f then f(self,event,...) end end"),
-				Ref, Ref);
-
-			// Actually, the simplest approach: store the Lua function ref directly
-			// in the event system's script ref map
-			// We can access the ScriptRefs through SetFrameScript but it expects code...
-			// Let's just store the function ref directly
-			// Push function, store as registry ref, set in event system's map
-
-			// Undo the ref we just made - we'll store it differently
-			luaL_unref(L, LUA_REGISTRYINDEX, Ref);
-
-			// Directly store: push function, luaL_ref, store in event system
-			lua_pushvalue(L, 3);
-			// We need the event system to accept a raw Lua ref...
-			// For now, let's use a simple global lookup approach
-
-			// Store function in a known global key
-			lua_pushvalue(L, 3);
-			lua_setfield(L, LUA_REGISTRYINDEX, UTF8Key.Get());
-
-			// Compile wrapper code that retrieves and calls it
-			FString WrapCode = FString::Printf(
-				TEXT("return function(self, event, ...) ")
-				TEXT("local _R = debug and debug.getregistry and debug.getregistry() ")
-				TEXT("end"));
-
-			// Simplest working approach: store function in a global, compile a stub
-			// that calls it
+			// Also store in a global key so GetScript can retrieve it
 			FString GlobalKey = FString::Printf(TEXT("__WowScript_%lld_%s"),
 				Handle, UTF8_TO_TCHAR(ScriptType));
 			FTCHARToUTF8 UTF8GlobalKey(*GlobalKey);
-
 			lua_pushvalue(L, 3);
 			lua_setglobal(L, UTF8GlobalKey.Get());
-
-			FString StubCode = FString::Printf(TEXT("%s(self, event, ...)"),
-				*GlobalKey);
-			Ctx->EventSystem->SetFrameScript(Handle, UTF8_TO_TCHAR(ScriptType), StubCode);
+		}
+		else if (lua_isstring(L, 3))
+		{
+			// Code string passed - compile it
+			const char* CodeStr = lua_tostring(L, 3);
+			Ctx->EventSystem->SetFrameScript(Handle, UTF8_TO_TCHAR(ScriptType), UTF8_TO_TCHAR(CodeStr));
 		}
 		else if (lua_isnil(L, 3))
 		{
-			// Clear the script - set empty code
+			// Clear the script
 			Ctx->EventSystem->SetFrameScript(Handle, UTF8_TO_TCHAR(ScriptType), FString());
 		}
 	}
@@ -436,11 +402,24 @@ static int LF_SetPoint(lua_State* L)
 		}
 	}
 
-	// Get current anchors and append (SetPoint adds, doesn't replace)
+	// Replace existing anchor with same point, or append if new
 	FWowFrameDef* Def = Ctx->FrameManager->GetMutableFrameDef(Handle);
 	if (Def)
 	{
-		Def->Anchors.Add(Anchor);
+		bool bReplaced = false;
+		for (int32 i = 0; i < Def->Anchors.Num(); i++)
+		{
+			if (Def->Anchors[i].Point == Anchor.Point)
+			{
+				Def->Anchors[i] = Anchor;
+				bReplaced = true;
+				break;
+			}
+		}
+		if (!bReplaced)
+		{
+			Def->Anchors.Add(Anchor);
+		}
 		Ctx->FrameManager->SetFrameAnchors(Handle, Def->Anchors);
 	}
 	return 0;
@@ -823,7 +802,25 @@ static UImage* GetTextureImage(lua_State* L, int idx = 1)
 static int LF_TextureSetTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* TexturePath = luaL_checkstring(L, 2);
+	// WoW allows SetTexture(nil) to clear the texture
+	if (lua_isnil(L, 2) || lua_isnone(L, 2))
+	{
+		lua_pushnil(L);
+		lua_setfield(L, 1, "__texture");
+		return 0;
+	}
+	// Also handle number arg (texture ID) — convert to string
+	const char* TexturePath;
+	if (lua_isnumber(L, 2))
+	{
+		lua_pushfstring(L, "%d", (int)lua_tonumber(L, 2));
+		TexturePath = lua_tostring(L, -1);
+		lua_pop(L, 1);
+	}
+	else
+	{
+		TexturePath = luaL_checkstring(L, 2);
+	}
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -848,7 +845,7 @@ static int LF_TextureSetTexture(lua_State* L)
 			Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
 			Brush.Tiling = ESlateBrushTileType::NoTile;
 
-			// Apply stored UV coordinates if any
+			// Apply stored UV coordinates if any, handling WoW's Left>Right flip convention
 			lua_getfield(L, 1, "__texLeft");
 			if (lua_isnumber(L, -1))
 			{
@@ -856,8 +853,20 @@ static int LF_TextureSetTexture(lua_State* L)
 				lua_getfield(L, 1, "__texRight"); float UVRight = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
 				lua_getfield(L, 1, "__texTop"); float UVTop = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
 				lua_getfield(L, 1, "__texBottom"); float UVBottom = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
-				FBox2D UVRegion(FVector2D(UVLeft, UVTop), FVector2D(UVRight, UVBottom));
+
+				float NL = FMath::Min(UVLeft, UVRight), NR = FMath::Max(UVLeft, UVRight);
+				float NT = FMath::Min(UVTop, UVBottom), NB = FMath::Max(UVTop, UVBottom);
+				FBox2D UVRegion(FVector2D(NL, NT), FVector2D(NR, NB));
 				Brush.SetUVRegion(UVRegion);
+
+				bool bFlipH = UVLeft > UVRight;
+				bool bFlipV = UVTop > UVBottom;
+				if (bFlipH || bFlipV)
+				{
+					FVector2D Scale(bFlipH ? -1.0f : 1.0f, bFlipV ? -1.0f : 1.0f);
+					NamedImage->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+					NamedImage->SetRenderTransform(FWidgetTransform(FVector2D::ZeroVector, Scale, FVector2D::ZeroVector, 0.0f));
+				}
 			}
 			else
 			{
@@ -886,7 +895,8 @@ static int LF_TextureSetTexture(lua_State* L)
 				Brush.ImageSize = FVector2D(Texture->GetSizeX(), Texture->GetSizeY());
 				Brush.Tiling = ESlateBrushTileType::NoTile;
 
-				// Apply stored UV coordinates if any
+				// Apply stored UV coordinates if any, handling WoW flip convention
+				bool bDynFlipH = false, bDynFlipV = false;
 				lua_getfield(L, 1, "__texLeft");
 				if (lua_isnumber(L, -1))
 				{
@@ -895,7 +905,12 @@ static int LF_TextureSetTexture(lua_State* L)
 					lua_getfield(L, 1, "__texRight"); float UVRight = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
 					lua_getfield(L, 1, "__texTop"); float UVTop = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
 					lua_getfield(L, 1, "__texBottom"); float UVBottom = static_cast<float>(lua_tonumber(L, -1)); lua_pop(L, 1);
-					FBox2D UVRegion(FVector2D(UVLeft, UVTop), FVector2D(UVRight, UVBottom));
+
+					bDynFlipH = UVLeft > UVRight;
+					bDynFlipV = UVTop > UVBottom;
+					float NL = FMath::Min(UVLeft, UVRight), NR = FMath::Max(UVLeft, UVRight);
+					float NT = FMath::Min(UVTop, UVBottom), NB = FMath::Max(UVTop, UVBottom);
+					FBox2D UVRegion(FVector2D(NL, NT), FVector2D(NR, NB));
 					Brush.SetUVRegion(UVRegion);
 				}
 				else
@@ -1025,13 +1040,34 @@ static int LF_TextureSetTexCoord(lua_State* L)
 	lua_pushnumber(L, Bottom); lua_setfield(L, 1, "__texBottom");
 
 	// Apply UV region to the UImage widget
+	// WoW uses Left > Right for horizontal flip and Top > Bottom for vertical flip.
+	// Normalize UVs for FBox2D and apply render transform for flipping.
 	UImage* Img = GetTextureImage(L, 1);
 	if (Img)
 	{
+		float UVL = FMath::Min(Left, Right);
+		float UVR = FMath::Max(Left, Right);
+		float UVT = FMath::Min(Top, Bottom);
+		float UVB = FMath::Max(Top, Bottom);
+
 		FSlateBrush Brush = Img->GetBrush();
-		FBox2D UVRegion(FVector2D(Left, Top), FVector2D(Right, Bottom));
+		FBox2D UVRegion(FVector2D(UVL, UVT), FVector2D(UVR, UVB));
 		Brush.SetUVRegion(UVRegion);
 		Img->SetBrush(Brush);
+
+		bool bFlipH = Left > Right;
+		bool bFlipV = Top > Bottom;
+		if (bFlipH || bFlipV)
+		{
+			FVector2D Scale(bFlipH ? -1.0f : 1.0f, bFlipV ? -1.0f : 1.0f);
+			Img->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+			Img->SetRenderTransform(FWidgetTransform(FVector2D::ZeroVector, Scale, FVector2D::ZeroVector, 0.0f));
+		}
+		else
+		{
+			// Clear any previous flip transform
+			Img->SetRenderTransform(FWidgetTransform());
+		}
 	}
 
 	return 0;
@@ -1333,7 +1369,7 @@ static int LF_CreateTexture(lua_State* L)
 static int LF_FontStringSetText(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* Text = luaL_checkstring(L, 2);
+	const char* Text = luaL_optstring(L, 2, ""); // WoW treats nil as empty string
 
 	// Store in Lua table
 	lua_pushstring(L, Text);
@@ -1409,6 +1445,68 @@ static int LF_FontStringSetTextColor(lua_State* L)
 	}
 
 	return 0;
+}
+
+// fontstring:SetFont(fontPath, size, flags)
+static int LF_FontStringSetFont(lua_State* L)
+{
+	// Store font info in the Lua table for later retrieval
+	const char* FontPath = luaL_optstring(L, 2, "Fonts\\FRIZQT__.TTF");
+	float FontSize = static_cast<float>(luaL_optnumber(L, 3, 12.0));
+	const char* Flags = luaL_optstring(L, 4, "");
+
+	lua_pushstring(L, FontPath);
+	lua_setfield(L, 1, "__fontPath");
+	lua_pushnumber(L, FontSize);
+	lua_setfield(L, 1, "__fontSize");
+	lua_pushstring(L, Flags);
+	lua_setfield(L, 1, "__fontFlags");
+
+	return 0;
+}
+
+// fontstring:GetFont() -> fontPath, size, flags
+static int LF_FontStringGetFont(lua_State* L)
+{
+	lua_getfield(L, 1, "__fontPath");
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		lua_pushstring(L, "Fonts\\FRIZQT__.TTF");
+	}
+
+	lua_getfield(L, 1, "__fontSize");
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		lua_pushnumber(L, 12.0);
+	}
+
+	lua_getfield(L, 1, "__fontFlags");
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		lua_pushstring(L, "");
+	}
+
+	return 3;
+}
+
+// fontstring:GetStringWidth() -> approximate width
+static int LF_FontStringGetStringWidth(lua_State* L)
+{
+	lua_getfield(L, 1, "__text");
+	const char* Text = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+	lua_pop(L, 1);
+
+	lua_getfield(L, 1, "__fontSize");
+	float FontSize = lua_isnumber(L, -1) ? static_cast<float>(lua_tonumber(L, -1)) : 12.0f;
+	lua_pop(L, 1);
+
+	// Rough estimate: average character width is ~0.5 * font height
+	float Width = static_cast<float>(strlen(Text)) * FontSize * 0.5f;
+	lua_pushnumber(L, Width);
+	return 1;
 }
 
 // frame:CreateFontString(name, layer, inherits)
@@ -1574,7 +1672,7 @@ static int LF_SetBackdropBorderColor(lua_State* L)
 		lua_pushnumber(L, SafeColorArg(L, 2, 1.0)); lua_rawseti(L, -2, 1);
 		lua_pushnumber(L, SafeColorArg(L, 3, 1.0)); lua_rawseti(L, -2, 2);
 		lua_pushnumber(L, SafeColorArg(L, 4, 1.0)); lua_rawseti(L, -2, 3);
-		lua_pushnumber(L, luaL_optnumber(L, 5, 1.0)); lua_rawseti(L, -2, 4);
+		lua_pushnumber(L, SafeColorArg(L, 5, 1.0)); lua_rawseti(L, -2, 4);
 	}
 
 	lua_setfield(L, 1, "__backdropBorderColor");
@@ -1716,7 +1814,8 @@ static int LF_GetBottom(lua_State* L)
 static int LF_SetNormalTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* TexturePath = luaL_checkstring(L, 2);
+	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
+	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -1749,7 +1848,8 @@ static int LF_SetNormalTexture(lua_State* L)
 static int LF_SetPushedTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* TexturePath = luaL_checkstring(L, 2);
+	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
+	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -1782,7 +1882,8 @@ static int LF_SetPushedTexture(lua_State* L)
 static int LF_SetHighlightTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* TexturePath = luaL_checkstring(L, 2);
+	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
+	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -1815,7 +1916,8 @@ static int LF_SetHighlightTexture(lua_State* L)
 static int LF_SetDisabledTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* TexturePath = luaL_checkstring(L, 2);
+	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
+	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -1849,7 +1951,7 @@ static int LF_SetDisabledTexture(lua_State* L)
 static int LF_SetText(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* Text = luaL_checkstring(L, 2);
+	const char* Text = luaL_optstring(L, 2, ""); // WoW treats nil as empty string
 
 	// Store in Lua table
 	lua_pushstring(L, Text);
@@ -2325,103 +2427,7 @@ static int LF_AddMessage(lua_State* L)
 	return 0;
 }
 
-// ── FontString API Fixes ──────────────────────────────────────────────────────────
-
-// fontstring:SetFont(font, size, flags) — needs to call FontManager to update the font
-static int LF_FontStringSetFont(lua_State* L)
-{
-	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* FontPath = luaL_checkstring(L, 2);
-	float FontSize = static_cast<float>(luaL_checknumber(L, 3));
-	const char* Flags = luaL_optstring(L, 4, "");
-
-	// Store in Lua table
-	lua_pushstring(L, FontPath);
-	lua_setfield(L, 1, "__fontPath");
-	lua_pushnumber(L, FontSize);
-	lua_setfield(L, 1, "__fontSize");
-	lua_pushstring(L, Flags);
-	lua_setfield(L, 1, "__fontFlags");
-
-	// TODO: Actually apply font to widget through FontManager
-	return 0;
-}
-
-// fontstring:GetFont() — return current font name, size, flags
-static int LF_FontStringGetFont(lua_State* L)
-{
-	luaL_checktype(L, 1, LUA_TTABLE);
-
-	// Get stored values or defaults
-	lua_getfield(L, 1, "__fontPath");
-	if (lua_isstring(L, -1))
-	{
-		lua_pushvalue(L, -1); // fontPath
-	}
-	else
-	{
-		lua_pop(L, 1);
-		lua_pushstring(L, "Fonts\\FRIZQT__.TTF");
-	}
-
-	lua_getfield(L, 1, "__fontSize");
-	if (lua_isnumber(L, -1))
-	{
-		lua_pushvalue(L, -1); // fontSize
-	}
-	else
-	{
-		lua_pop(L, 1);
-		lua_pushnumber(L, 12);
-	}
-
-	lua_getfield(L, 1, "__fontFlags");
-	if (lua_isstring(L, -1))
-	{
-		lua_pushvalue(L, -1); // fontFlags
-	}
-	else
-	{
-		lua_pop(L, 1);
-		lua_pushstring(L, "");
-	}
-
-	// Clean up stack (we left some values behind)
-	lua_remove(L, -4); // Remove first fontPath check result
-	lua_remove(L, -4); // Remove first fontSize check result
-	lua_remove(L, -4); // Remove first fontFlags check result
-
-	return 3;
-}
-
-// fontstring:GetStringWidth() — return approximate width based on text length * font size * 0.5
-static int LF_FontStringGetStringWidth(lua_State* L)
-{
-	luaL_checktype(L, 1, LUA_TTABLE);
-
-	// Get the text
-	lua_getfield(L, 1, "__text");
-	FString Text;
-	if (lua_isstring(L, -1))
-	{
-		Text = UTF8_TO_TCHAR(lua_tostring(L, -1));
-	}
-	lua_pop(L, 1);
-
-	// Get font size
-	lua_getfield(L, 1, "__fontSize");
-	float FontSize = 12.0f;
-	if (lua_isnumber(L, -1))
-	{
-		FontSize = static_cast<float>(lua_tonumber(L, -1));
-	}
-	lua_pop(L, 1);
-
-	// Rough approximation: character count * font size * 0.5
-	float Width = Text.Len() * FontSize * 0.5f;
-	lua_pushnumber(L, Width);
-	return 1;
-}
+// (FontString API functions defined above near LF_CreateFontString)
 
 // ── Metatable Setup ──────────────────────────────────────────────────────────────
 
@@ -2655,10 +2661,27 @@ static const luaL_Reg FrameMethods[] =
 	{"SetShadowColor", [](lua_State* L) -> int { return 0; }},
 	{"SetSpacing", [](lua_State* L) -> int { return 0; }},
 	{"SetJustifyH", [](lua_State* L) -> int { return 0; }},
+	{"SetFormattedText", [](lua_State* L) -> int { return 0; }},
+	{"SetWordWrap", [](lua_State* L) -> int { return 0; }},
+	{"SetNonSpaceWrap", [](lua_State* L) -> int { return 0; }},
 	{"SetJustifyV", [](lua_State* L) -> int { return 0; }},
 
 	// Button methods
 	{"SetMotionScriptsWhileDisabled", [](lua_State* L) -> int { return 0; }},
+
+	// Missing common methods
+	{"SetPadding", [](lua_State* L) -> int { return 0; }},
+	{"GetPadding", [](lua_State* L) -> int { lua_pushnumber(L, 0); lua_pushnumber(L, 0); lua_pushnumber(L, 0); lua_pushnumber(L, 0); return 4; }},
+	{"SetIndentedWordWrap", [](lua_State* L) -> int { return 0; }},
+	{"SetClampRectInsets", [](lua_State* L) -> int { return 0; }},
+	{"GetClampRectInsets", [](lua_State* L) -> int { lua_pushnumber(L, 0); lua_pushnumber(L, 0); lua_pushnumber(L, 0); lua_pushnumber(L, 0); return 4; }},
+	{"SetClampedToScreen", [](lua_State* L) -> int { return 0; }},
+	{"IsClampedToScreen", [](lua_State* L) -> int { lua_pushboolean(L, 0); return 1; }},
+	{"SetHyperlinksEnabled", [](lua_State* L) -> int { return 0; }},
+	{"GetMaxLines", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"SetHistoryLines", [](lua_State* L) -> int { return 0; }},
+	{"SetFontObject", [](lua_State* L) -> int { return 0; }},
+	{"GetFontObject", [](lua_State* L) -> int { lua_pushnil(L); return 1; }},
 
 	// ScrollingMessageFrame methods
 	{"AddMessage", LF_AddMessage},

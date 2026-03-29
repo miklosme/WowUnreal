@@ -39,7 +39,7 @@ private:
     SIZE_T MemoryLimit = 128 * 1024 * 1024; // 128 MB default
 
     // Execution timeout
-    int32 InstructionLimit = 10000000; // 10M instructions default
+    int32 InstructionLimit = 100000000; // 100M instructions — WoW FrameXML OnUpdate scripts need headroom
 
     static void* LuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize);
 };

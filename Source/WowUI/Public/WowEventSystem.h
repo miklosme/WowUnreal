@@ -31,8 +31,14 @@ public:
 	/** Compile a script handler for a frame and store the Lua function reference */
 	void SetFrameScript(int64 Handle, const FString& ScriptName, const FString& Code);
 
+	/** Store an already-ref'd Lua function as a script handler (for SetScript with function arg) */
+	void SetFrameScriptRef(int64 Handle, const FString& ScriptName, int32 LuaRef);
+
 	/** Create a Lua table representing a frame (sets it as a named global if the frame has a name) */
 	void CreateFrameObject(int64 Handle, const FString& FrameName);
+
+	/** Create a Lua global table for a named texture/fontstring region */
+	void CreateTextureRegionGlobal(const FString& RegionName);
 
 	/** Remove all compiled scripts and the Lua frame object for a handle */
 	void RemoveFrameScripts(int64 Handle);

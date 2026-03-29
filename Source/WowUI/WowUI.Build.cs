@@ -6,6 +6,14 @@ public class WowUI : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "UMG", "Slate", "SlateCore", "WowData", "WowAssets", "WowNetwork", "XmlParser", "InputCore" });
+        // pugixml for robust XML parsing (WoW FrameXML)
+        string PugiPath = Path.Combine(ModuleDirectory, "..", "ThirdParty", "pugixml");
+        if (Directory.Exists(PugiPath))
+        {
+            PublicIncludePaths.Add(PugiPath);
+            PrivateDefinitions.Add("HAS_PUGIXML=1");
+        }
+
         string LuaPath = Path.Combine(ModuleDirectory, "..", "ThirdParty", "lua");
         if (Directory.Exists(LuaPath))
         {

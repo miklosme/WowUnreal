@@ -392,6 +392,16 @@ FVector2D SWowMinimap::WorldToMinimapCoords(const FVector& WorldPos, const FVect
 
 FLinearColor SWowMinimap::GetEntityColor(const FWowEntity& Entity) const
 {
+    // Check if entity is dead by checking health or dynamic flags
+    if (Entity.IsUnit())
+    {
+        const FWowUnitEntity* UnitEntity = static_cast<const FWowUnitEntity*>(&Entity);
+        if (UnitEntity->IsDead())
+        {
+            return FLinearColor(0.5f, 0.5f, 0.5f, 1.0f); // Grey for dead entities
+        }
+    }
+
     if (Entity.IsPlayer())
     {
         // Other players are blue
@@ -399,22 +409,40 @@ FLinearColor SWowMinimap::GetEntityColor(const FWowEntity& Entity) const
     }
     else if (Entity.IsUnit())
     {
-        // Check faction/hostility for NPCs
+        // Cast to unit entity to access NPC flags
+        const FWowUnitEntity* UnitEntity = static_cast<const FWowUnitEntity*>(&Entity);
+
+        // Check NPC flags for interaction types
+        uint32 NpcFlags = UnitEntity->GetNpcFlags();
+
+        // Quest givers get special yellow color (like exclamation mark)
+        if (UnitEntity->IsQuestGiver())
+        {
+            return FLinearColor(1.0f, 1.0f, 0.0f, 1.0f); // Yellow for quest givers
+        }
+
+        // Interactable NPCs (vendors, trainers, etc.) are green
+        if (UnitEntity->IsInteractable())
+        {
+            return FLinearColor::Green; // Green for friendly/interactable NPCs
+        }
+
+        // Check faction/hostility for combat NPCs
         uint32 FactionTemplate = Entity.GetField(UnitField::FACTIONTEMPLATE);
 
         // Simple faction check - this would need proper faction relationship logic
         // For now, just use basic colors
         if (FactionTemplate == 14 || FactionTemplate == 16) // Some hostile factions
         {
-            return FLinearColor::Red; // Hostile
+            return FLinearColor::Red; // Red for hostile creatures
         }
         else
         {
-            return FLinearColor::Green; // Friendly
+            return FLinearColor::Green; // Green for friendly creatures
         }
     }
 
-    return FLinearColor::White; // Default
+    return FLinearColor::White; // Default for other objects
 }
 
 FString SWowMinimap::GetCurrentZoneName() const
@@ -424,9 +452,55 @@ FString SWowMinimap::GetCurrentZoneName() const
         return TEXT("Unknown Zone");
     }
 
-    // For now, return the map name from WorldManager
-    // TODO: This should be enhanced to get the actual current area name from AreaTable.dbc
-    // based on the player's current position and MCNK area IDs
+    // Try to get current zone from AreaTable.dbc based on player position
+    if (EntityManager)
+    {
+        FWowPlayerEntity* LocalPlayer = EntityManager->GetLocalPlayer();
+        if (LocalPlayer)
+        {
+            // Get player position
+            FVector PlayerPos = LocalPlayer->Movement.Position;
+
+            // For now, we'll use a simple map name to ID mapping
+            // In the future, this should come from the server or be derived from the current zone
+            // Common map IDs: 0=Eastern Kingdoms, 1=Kalimdor, 530=Outland, etc.
+            uint32 MapId = 0; // Default to Eastern Kingdoms
+
+            const FString& MapName = WorldManager->GetMapName();
+            if (MapName == TEXT("Kalimdor"))
+            {
+                MapId = 1;
+            }
+            else if (MapName == TEXT("Outland"))
+            {
+                MapId = 530;
+            }
+            // else defaults to 0 (Eastern Kingdoms/Azeroth)
+
+            // Search AreaTable.dbc for matching area based on map
+            const FDbcStore& DbcStore = FDbcStore::Get();
+            if (DbcStore.IsLoaded())
+            {
+                const TArray<FAreaTableDbcEntry>& AreaEntries = DbcStore.AreaTable().GetAll();
+
+                // Find the most specific area (zone) for this map
+                // For now, just find the first zone-level area for this map
+                // TODO: Implement proper position-based area lookup using WDT/ADT area IDs
+                for (const FAreaTableDbcEntry& Area : AreaEntries)
+                {
+                    if (Area.MapID == MapId && Area.ParentAreaID == 0) // Zone-level area
+                    {
+                        if (!Area.Name.IsEmpty())
+                        {
+                            return Area.Name;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to map name from WorldManager
     const FString& MapName = WorldManager->GetMapName();
     if (!MapName.IsEmpty())
     {

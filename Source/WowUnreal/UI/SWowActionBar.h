@@ -21,6 +21,9 @@ public:
     /** Update action bar from packet data */
     void RefreshActionButtons();
 
+    /** Update cooldown for a specific spell */
+    void UpdateCooldown(uint32 SpellId, float Duration);
+
 private:
     /** Connection manager for spell casting and action data */
     TWeakObjectPtr<UWowConnectionManager> ConnectionManager;
@@ -34,8 +37,11 @@ private:
         FString SpellName;
         FString KeybindText;
         bool bIsEmpty = true;
+        double CooldownExpiry = 0.0;
+        float CooldownDuration = 0.0f;
 
         void UpdateFromPacked(uint32 InPackedAction);
+        bool IsOnCooldown() const { return FPlatformTime::Seconds() < CooldownExpiry; }
     };
 
     TArray<FActionSlot> ActionSlots;

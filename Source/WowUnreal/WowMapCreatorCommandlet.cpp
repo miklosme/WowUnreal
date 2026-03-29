@@ -1,6 +1,6 @@
-#if WITH_EDITOR
-
 #include "WowMapCreatorCommandlet.h"
+
+#if WITH_EDITOR
 #include "Engine/World.h"
 #include "Engine/Level.h"
 #include "GameFramework/GameModeBase.h"
@@ -117,6 +117,19 @@ bool UWowMapCreatorCommandlet::CreateMap(const FString& MapName, const FString& 
     }
 
     UE_LOG(LogWowMapCreator, Error, TEXT("  FAIL: %s was not saved"), *MapName);
+    return false;
+}
+
+#else // !WITH_EDITOR
+
+int32 UWowMapCreatorCommandlet::Main(const FString& Params)
+{
+    // Commandlets only run in editor
+    return 1;
+}
+
+bool UWowMapCreatorCommandlet::CreateMap(const FString& MapName, const FString& GameModeClassPath)
+{
     return false;
 }
 

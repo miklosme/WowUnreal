@@ -11,27 +11,90 @@ struct FM2AnimationData;
  * WoW M2 Animation IDs from AnimationData.dbc
  * Maps to specific character actions for state machine control.
  */
+/**
+ * WoW 3.3.5a Animation IDs from AnimationData.dbc.
+ * These MUST match the actual DBC IDs — they're used to look up
+ * animations from M2 model files via the animation cache.
+ */
 UENUM(BlueprintType)
 enum class EWowAnimId : uint8
 {
-    Stand = 0,          // Idle standing
-    Death = 1,          // Death animation
-    Walk = 4,           // Walking
-    Run = 5,            // Running
-    Wound = 13,         // Hit reaction
-    SpellCast = 15,     // Directed spell cast
-    SpellCastOmni = 16, // Omni-directional spell cast
-    Attack1H = 26,      // One-handed attack
-    Attack2H = 27,      // Two-handed attack
-    SpellChannel = 37,  // Directed spell channel
-    SpellChannelOmni = 38, // Omni-directional spell channel
-    SwimIdle = 39,      // Idle in water
-    Swim = 40,          // Swimming
-    Dance = 60,         // Dance emote
-    JumpStart = 69,     // Jump takeoff
-    Jump = 70,          // Jumping (airborne)
-    JumpEnd = 71,       // Jump landing
-    Fall = 80           // Falling
+    Stand = 0,              // Idle standing
+    Death = 1,              // Dying animation (plays once)
+    Spell = 2,              // Generic spell animation
+    Stop = 3,               // Stop moving
+    Walk = 4,               // Walking
+    Run = 5,                // Running
+    Dead = 6,               // Dead pose (looping, after Death)
+    Rise = 7,               // Resurrect rise
+    StandWound = 8,         // Wound while standing
+    CombatWound = 9,        // Wound while in combat
+    CombatCritical = 10,    // Critical hit reaction
+    ShuffleLeft = 11,       // Strafe left
+    ShuffleRight = 12,      // Strafe right
+    Walkbackwards = 13,     // Walk backwards
+    Stun = 14,              // Stunned
+    HandsClosed = 15,       // Hands closed idle
+    AttackUnarmed = 16,     // Unarmed attack
+    Attack1H = 17,          // One-handed melee attack
+    Attack2H = 18,          // Two-handed melee attack
+    Attack2HL = 19,         // Two-handed large melee attack
+    ParryUnarmed = 20,      // Parry unarmed
+    Parry1H = 21,           // Parry one-handed
+    Parry2H = 22,           // Parry two-handed
+    Parry2HL = 23,          // Parry two-handed large
+    ShieldBlock = 24,       // Shield block
+    ReadyUnarmed = 25,      // Ready stance unarmed
+    Ready1H = 26,           // Ready stance one-handed
+    Ready2H = 27,           // Ready stance two-handed
+    Ready2HL = 28,          // Ready stance two-handed large
+    ReadyBow = 29,          // Ready bow
+    Dodge = 30,             // Dodge
+    SpellPrecast = 31,      // Spell precast
+    SpellCast = 32,         // Spell cast (generic)
+    SpellCastArea = 33,     // Area spell cast
+    NPCWelcome = 34,        // NPC greeting
+    NPCGoodbye = 35,        // NPC farewell
+    Block = 36,             // Block
+    JumpStart = 37,         // Jump takeoff
+    Jump = 38,              // Jumping (airborne)
+    JumpEnd = 39,           // Jump landing
+    Fall = 40,              // Falling
+    SwimIdle = 41,          // Idle in water
+    Swim = 42,              // Swimming
+    SwimLeft = 43,          // Swim strafe left
+    SwimRight = 44,         // Swim strafe right
+    SwimBackward = 45,      // Swim backward
+    AttackBow = 46,         // Bow attack
+    FireBow = 47,           // Fire bow (projectile release)
+    ReadyRifle = 48,        // Ready rifle
+    AttackRifle = 49,       // Rifle attack
+    Loot = 50,              // Looting
+    ReadySpellDirected = 51, // Ready directed spell
+    ReadySpellOmni = 52,    // Ready omni spell
+    SpellCastDirected = 53,  // Directed spell cast
+    SpellCastOmni = 54,     // Omni-directional spell cast
+    SpellCastDirectedNose = 55, // BattleRoar / ReadyAbility
+    Special1H = 57,         // Special one-handed attack
+    Special2H = 58,         // Special two-handed attack
+    ShieldBash = 59,        // Shield bash
+    EmoteTalk = 60,         // Talk emote
+    EmoteEat = 61,          // Eat emote
+    EmoteWork = 62,         // Work emote
+    EmoteUseStanding = 63,  // Use standing emote
+    ChannelCast = 65,       // Channel cast directed
+    ChannelCastOmni = 66,   // Channel cast omni-directional
+    Whirlwind = 67,         // Whirlwind
+    Kick = 68,              // Kick
+    SitGround = 69,         // Sit on ground
+    SitChair = 70,          // Sit on chair
+    Sleep = 71,             // Sleeping
+    Kneel = 72,             // Kneeling
+    Dance = 109,            // Dance emote
+    EmoteBow = 115,         // Bow emote
+    FlyRun = 147,           // Flying run
+    FlyWalk = 148,          // Flying walk
+    FlyStand = 149,         // Flying stand
 };
 
 /**
@@ -117,6 +180,22 @@ public:
     bool PlayAnimationById(EWowAnimId AnimId, bool bLooping = true);
 
     /**
+     * Play attack animation with fallback chain.
+     * Tries Attack1H -> AttackUnarmed -> Attack2H -> Spell
+     * Returns true if any animation was successfully played.
+     */
+    UFUNCTION(BlueprintCallable)
+    bool PlayAttackAnimation();
+
+    /**
+     * Play wound animation with fallback chain.
+     * Tries CombatWound -> StandWound
+     * Returns true if any animation was successfully played.
+     */
+    UFUNCTION(BlueprintCallable)
+    bool PlayWoundAnimation();
+
+    /**
      * Get current animation state.
      */
     UFUNCTION(BlueprintCallable, BlueprintPure)
@@ -127,6 +206,13 @@ public:
      */
     UFUNCTION(BlueprintCallable, BlueprintPure)
     bool IsInitialized() const { return MeshComponent != nullptr && AllAnimations.Num() > 0; }
+
+    /**
+     * Check if a one-shot animation (attack, wound) is currently playing.
+     * State machine updates should be skipped while this returns true.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure)
+    bool IsPlayingOneShot() const { return bPlayingOneShot && FPlatformTime::Seconds() < OneShotEndTime; }
 
     /**
      * Get the animation cache for copying to another controller.
@@ -163,6 +249,10 @@ protected:
     /** Jump sequence tracking */
     float JumpStartTime = 0.0f;
     bool bInJumpSequence = false;
+
+    /** One-shot animation lock — prevents state machine from overriding non-looping anims */
+    float OneShotEndTime = 0.0f;
+    bool bPlayingOneShot = false;
 
 private:
     /** Determine animation state from movement info */

@@ -54,6 +54,15 @@ void UWowGameUI::ShowVendorWindow(uint64 VendorGuid, const TArray<FWowVendorItem
     }
 }
 
+void UWowGameUI::UpdateVendorPlayerInventory(const TArray<FWowItem>& Items)
+{
+    if (VendorWindow.IsValid())
+    {
+        VendorWindow->UpdatePlayerInventory(Items);
+        UE_LOG(LogWowGameUI, Log, TEXT("Updated vendor player inventory"));
+    }
+}
+
 void UWowGameUI::HideVendorWindow()
 {
     if (VendorWindow.IsValid())
@@ -105,6 +114,7 @@ void UWowGameUI::CreateWidgets()
     // Create vendor window
     VendorWindow = SNew(SWowVendorWindow)
         .OnBuyItem_UObject(this, &UWowGameUI::OnBuyItem)
+        .OnSellItem_UObject(this, &UWowGameUI::OnSellItem)
         .OnCloseVendor_UObject(this, &UWowGameUI::OnCloseVendor);
 
     // Create quest dialog
@@ -206,6 +216,15 @@ void UWowGameUI::OnBuyItem(uint64 VendorGuid, uint32 ItemId, int32 Count)
     {
         ConnectionManager->SendBuyItem(VendorGuid, ItemId, Count);
         UE_LOG(LogWowGameUI, Log, TEXT("Buying item %u (count=%d) from vendor %llu"), ItemId, Count, VendorGuid);
+    }
+}
+
+void UWowGameUI::OnSellItem(uint64 VendorGuid, uint64 ItemGuid, uint8 Count)
+{
+    if (ConnectionManager)
+    {
+        ConnectionManager->SendSellItem(VendorGuid, ItemGuid, Count);
+        UE_LOG(LogWowGameUI, Log, TEXT("Selling item %llu (count=%d) to vendor %llu"), ItemGuid, Count, VendorGuid);
     }
 }
 

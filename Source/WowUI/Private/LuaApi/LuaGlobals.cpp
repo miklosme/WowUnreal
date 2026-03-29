@@ -98,6 +98,55 @@ static int L_strtrim(lua_State* L)
     return 1;
 }
 
+// ─── strjoin(delimiter, ...) — WoW-specific string join ──────────────────────
+static int L_strjoin(lua_State* L)
+{
+    const char* delim = luaL_checkstring(L, 1);
+    int n = lua_gettop(L);
+    FString Result;
+    for (int i = 2; i <= n; i++)
+    {
+        if (i > 2) Result += UTF8_TO_TCHAR(delim);
+        if (lua_isstring(L, i))
+            Result += UTF8_TO_TCHAR(lua_tostring(L, i));
+        else if (lua_isnil(L, i))
+            Result += TEXT("");
+        else if (lua_isnumber(L, i))
+            Result += FString::Printf(TEXT("%g"), lua_tonumber(L, i));
+    }
+    FTCHARToUTF8 Conv(*Result);
+    lua_pushstring(L, Conv.Get());
+    return 1;
+}
+
+// ─── tconcat — alias for table.concat ────────────────────────────────────────
+static int L_tconcat(lua_State* L)
+{
+    lua_getglobal(L, "table");
+    lua_getfield(L, -1, "concat");
+    lua_remove(L, -2);
+    int n = lua_gettop(L) - 1;
+    for (int i = 1; i <= n; i++) lua_pushvalue(L, i);
+    lua_call(L, n, 1);
+    return 1;
+}
+
+// ─── getglobal / setglobal — WoW legacy functions ───────────────────────────
+static int L_getglobal(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1);
+    lua_getglobal(L, name);
+    return 1;
+}
+
+static int L_setglobal(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1);
+    lua_pushvalue(L, 2);
+    lua_setglobal(L, name);
+    return 0;
+}
+
 // ─── strbyte, strchar etc — aliases for string.* ────────────────────────────────
 static int L_string_alias(lua_State* L, const char* method)
 {
@@ -380,13 +429,28 @@ static int L_seterrorhandler(lua_State* L)
 }
 
 // securecall — call function in secure environment
+// Accepts securecall(func, ...) or securecall("funcName", ...)
 static int L_securecall(lua_State* L)
 {
     if (lua_gettop(L) == 0) return 0;
-    luaL_checktype(L, 1, LUA_TFUNCTION);
+
+    // If first arg is a string, look it up as a global function
+    if (lua_isstring(L, 1))
+    {
+        const char* FuncName = lua_tostring(L, 1);
+        lua_getglobal(L, FuncName);
+        lua_replace(L, 1); // replace string with the looked-up function
+    }
+
+    if (!lua_isfunction(L, 1)) return 0; // silently fail if not found
 
     int nargs = lua_gettop(L) - 1;
-    lua_call(L, nargs, LUA_MULTRET);
+    int status = lua_pcall(L, nargs, LUA_MULTRET, 0);
+    if (status != 0)
+    {
+        lua_pop(L, 1); // pop error message
+        return 0;
+    }
     return lua_gettop(L);
 }
 
@@ -416,9 +480,32 @@ static int L_tostringall(lua_State* L)
     int n = lua_gettop(L);
     for (int i = 1; i <= n; i++)
     {
-        const char* s = lua_tolstring(L, i, nullptr);
-        lua_remove(L, i);
-        lua_insert(L, i);
+        if (lua_isstring(L, i))
+        {
+            // Already a string or number (auto-coerced), leave it
+        }
+        else if (lua_isnil(L, i))
+        {
+            lua_remove(L, i);
+            lua_pushstring(L, "nil");
+            lua_insert(L, i);
+        }
+        else if (lua_isboolean(L, i))
+        {
+            bool val = lua_toboolean(L, i) != 0;
+            lua_remove(L, i);
+            lua_pushstring(L, val ? "true" : "false");
+            lua_insert(L, i);
+        }
+        else
+        {
+            // Use tostring() for tables, userdata, functions etc.
+            lua_getglobal(L, "tostring");
+            lua_pushvalue(L, i);
+            lua_call(L, 1, 1);
+            lua_remove(L, i);
+            lua_insert(L, i);
+        }
     }
     return n;
 }
@@ -466,6 +553,83 @@ static void RegisterMathAliases(lua_State* L)
     lua_pop(L, 1); // pop math table
 }
 
+// ─── Bit library (proper C implementation) ──────────────────────────────────
+static int L_bit_band(lua_State* L)
+{
+    int n = lua_gettop(L);
+    uint32 Result = 0xFFFFFFFF;
+    for (int i = 1; i <= n; i++)
+        Result &= static_cast<uint32>(static_cast<int64>(lua_tonumber(L, i)));
+    lua_pushnumber(L, static_cast<double>(Result));
+    return 1;
+}
+static int L_bit_bor(lua_State* L)
+{
+    int n = lua_gettop(L);
+    uint32 Result = 0;
+    for (int i = 1; i <= n; i++)
+        Result |= static_cast<uint32>(static_cast<int64>(lua_tonumber(L, i)));
+    lua_pushnumber(L, static_cast<double>(Result));
+    return 1;
+}
+static int L_bit_bxor(lua_State* L)
+{
+    int n = lua_gettop(L);
+    uint32 Result = 0;
+    for (int i = 1; i <= n; i++)
+        Result ^= static_cast<uint32>(static_cast<int64>(lua_tonumber(L, i)));
+    lua_pushnumber(L, static_cast<double>(Result));
+    return 1;
+}
+static int L_bit_bnot(lua_State* L)
+{
+    uint32 A = static_cast<uint32>(static_cast<int64>(lua_tonumber(L, 1)));
+    lua_pushnumber(L, static_cast<double>(~A));
+    return 1;
+}
+static int L_bit_lshift(lua_State* L)
+{
+    uint32 A = static_cast<uint32>(static_cast<int64>(lua_tonumber(L, 1)));
+    int B = static_cast<int>(lua_tonumber(L, 2));
+    lua_pushnumber(L, static_cast<double>(A << B));
+    return 1;
+}
+static int L_bit_rshift(lua_State* L)
+{
+    uint32 A = static_cast<uint32>(static_cast<int64>(lua_tonumber(L, 1)));
+    int B = static_cast<int>(lua_tonumber(L, 2));
+    lua_pushnumber(L, static_cast<double>(A >> B));
+    return 1;
+}
+static int L_bit_mod(lua_State* L)
+{
+    int64 A = static_cast<int64>(lua_tonumber(L, 1));
+    int64 B = static_cast<int64>(lua_tonumber(L, 2));
+    if (B == 0) { lua_pushnumber(L, 0); return 1; }
+    lua_pushnumber(L, static_cast<double>(A % B));
+    return 1;
+}
+
+static void RegisterBitLibrary(lua_State* L)
+{
+    lua_getglobal(L, "bit");
+    if (lua_isnil(L, -1))
+    {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setglobal(L, "bit");
+    }
+    lua_pushcfunction(L, L_bit_band);  lua_setfield(L, -2, "band");
+    lua_pushcfunction(L, L_bit_bor);   lua_setfield(L, -2, "bor");
+    lua_pushcfunction(L, L_bit_bxor);  lua_setfield(L, -2, "bxor");
+    lua_pushcfunction(L, L_bit_bnot);  lua_setfield(L, -2, "bnot");
+    lua_pushcfunction(L, L_bit_lshift); lua_setfield(L, -2, "lshift");
+    lua_pushcfunction(L, L_bit_rshift); lua_setfield(L, -2, "rshift");
+    lua_pushcfunction(L, L_bit_mod);   lua_setfield(L, -2, "mod");
+    lua_pop(L, 1);
+}
+
 // ─── Registration ───────────────────────────────────────────────────────────────
 
 void WowLuaApi::RegisterGlobals(lua_State* L)
@@ -474,6 +638,10 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
     lua_register(L, "format", L_format);
     lua_register(L, "strsplit", L_strsplit);
     lua_register(L, "strtrim", L_strtrim);
+    lua_register(L, "strjoin", L_strjoin);
+    lua_register(L, "tconcat", L_tconcat);
+    lua_register(L, "getglobal", L_getglobal);
+    lua_register(L, "setglobal", L_setglobal);
 
     // String aliases
     lua_register(L, "strbyte", L_strbyte);
@@ -522,8 +690,456 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
 
     // Math aliases
     RegisterMathAliases(L);
+    RegisterBitLibrary(L);
 
-    UE_LOG(LogWowLuaApi, Log, TEXT("Registered WoW Lua globals (Phase 1 bootstrap)"));
+    // WoW FrameXML expects many global tables and constants to exist before scripts run.
+    // Define them here so FrameXML scripts don't error out on nil globals.
+    const char* BootstrapLua = R"LUA(
+        -- Required global tables
+        SlashCmdList = SlashCmdList or {}
+        AUTOCOMPLETE_LIST = AUTOCOMPLETE_LIST or {}
+        AUTOCOMPLETE_LIST_TEMPLATES = AUTOCOMPLETE_LIST_TEMPLATES or {}
+        QuestDifficultyColors = QuestDifficultyColors or {
+            header = {r=0.7, g=0.7, b=0.1},
+            trivial = {r=0.5, g=0.5, b=0.5},
+            standard = {r=0.25, g=0.75, b=0.25},
+            difficult = {r=1, g=1, b=0},
+            verydifficult = {r=1, g=0.5, b=0.25},
+            impossible = {r=1, g=0.1, b=0.1},
+        }
+        ITEM_QUALITY_COLORS = ITEM_QUALITY_COLORS or {
+            [0] = {r=0.62, g=0.62, b=0.62, hex="|cff9d9d9d"},
+            [1] = {r=1.0, g=1.0, b=1.0, hex="|cffffffff"},
+            [2] = {r=0.12, g=1.0, b=0.0, hex="|cff1eff00"},
+            [3] = {r=0.0, g=0.44, b=0.87, hex="|cff0070dd"},
+            [4] = {r=0.64, g=0.21, b=0.93, hex="|cffa335ee"},
+            [5] = {r=1.0, g=0.5, b=0.0, hex="|cffff8000"},
+            [6] = {r=0.9, g=0.8, b=0.5, hex="|cffe6cc80"},
+            [7] = {r=0.0, g=0.8, b=1.0, hex="|cff00ccff"},
+        }
+        RAID_CLASS_COLORS = RAID_CLASS_COLORS or {
+            WARRIOR = {r=0.78, g=0.61, b=0.43},
+            PALADIN = {r=0.96, g=0.55, b=0.73},
+            HUNTER = {r=0.67, g=0.83, b=0.45},
+            ROGUE = {r=1.0, g=0.96, b=0.41},
+            PRIEST = {r=1.0, g=1.0, b=1.0},
+            DEATHKNIGHT = {r=0.77, g=0.12, b=0.23},
+            SHAMAN = {r=0.0, g=0.44, b=0.87},
+            MAGE = {r=0.41, g=0.8, b=0.94},
+            WARLOCK = {r=0.58, g=0.51, b=0.79},
+            DRUID = {r=1.0, g=0.49, b=0.04},
+        }
+        FACTION_BAR_COLORS = FACTION_BAR_COLORS or {
+            [1] = {r=0.8, g=0.13, b=0.13}, [2] = {r=1.0, g=0.0, b=0.0},
+            [3] = {r=0.93, g=0.4, b=0.13}, [4] = {r=1.0, g=1.0, b=0.0},
+            [5] = {r=0.0, g=0.7, b=0.0}, [6] = {r=0.0, g=1.0, b=0.0},
+            [7] = {r=0.0, g=0.6, b=1.0}, [8] = {r=0.0, g=1.0, b=1.0},
+        }
+        NORMAL_FONT_COLOR = NORMAL_FONT_COLOR or {r=1.0, g=0.82, b=0}
+        HIGHLIGHT_FONT_COLOR = HIGHLIGHT_FONT_COLOR or {r=1.0, g=1.0, b=1.0}
+        RED_FONT_COLOR = RED_FONT_COLOR or {r=1.0, g=0.1, b=0.1}
+        GREEN_FONT_COLOR = GREEN_FONT_COLOR or {r=0.1, g=1.0, b=0.1}
+        GRAY_FONT_COLOR = GRAY_FONT_COLOR or {r=0.5, g=0.5, b=0.5}
+        YELLOW_FONT_COLOR = YELLOW_FONT_COLOR or {r=1.0, g=1.0, b=0.0}
+        NORMAL_FONT_COLOR_CODE = NORMAL_FONT_COLOR_CODE or "|cffffd200"
+        HIGHLIGHT_FONT_COLOR_CODE = HIGHLIGHT_FONT_COLOR_CODE or "|cffffffff"
+        FONT_COLOR_CODE_CLOSE = FONT_COLOR_CODE_CLOSE or "|r"
+        PI = math.pi
+        MAX_PLAYER_LEVEL = 80
+        MAX_PARTY_MEMBERS = 4
+        MAX_RAID_MEMBERS = 40
+        INVSLOT_FIRST_EQUIPPED = 1
+        INVSLOT_LAST_EQUIPPED = 19
+        NUM_BAG_SLOTS = 4
+        NUM_BANKBAGSLOTS = 7
+        MAX_SKILLLINE_TABS = 8
+        COPPER_PER_SILVER = 100
+        SILVER_PER_GOLD = 100
+        COPPER_PER_GOLD = 10000
+        MAX_TALENT_TABS = 3
+        MAX_NUM_TALENTS = 30
+        SHOW_TALENT_LEVEL = 10
+        NUM_CHAT_WINDOWS = 10
+        DEFAULT_CHAT_FRAME = {
+            AddMessage = function(self, msg) end,
+            GetName = function() return "ChatFrame1" end
+        }
+        SELECTED_CHAT_FRAME = nil
+        CHAT_CATEGORY_LIST = {}
+        CHAT_FRAMES = { "ChatFrame1" }
+        CHAT_TIMESTAMP_FORMAT = nil
+        ChatTypeGroup = ChatTypeGroup or {}
+        ChatTypeInfo = ChatTypeInfo or {}
+        COMBAT_LOG_EVENT_LIST = {}
+        hash_SlashCmdList = hash_SlashCmdList or {}
+
+        -- Additional missing global tables and constants
+        TOOLTIP_DEFAULT_COLOR = {r=1, g=1, b=1}
+        TOOLTIP_DEFAULT_BACKGROUND_COLOR = {r=0, g=0, b=0}
+        ATTACHMENTS_MAX_SEND = 12
+        MAX_PLAYER_LEVEL_TABLE = { 80 }
+
+        -- UI Dropdown menu globals
+        UIDROPDOWNMENU_OPEN_MENU = nil
+        UIDROPDOWNMENU_INIT_MENU = nil
+        UIDROPDOWNMENU_MENU_LEVEL = 1
+        UIDROPDOWNMENU_MENU_VALUE = nil
+
+        -- Static popup globals
+        STATICPOPUP_NUMDIALOGS = 4
+        StaticPopupDialogs = {}
+
+        -- Spell book constants
+        BOOKTYPE_SPELL = "spell"
+        BOOKTYPE_PET = "pet"
+
+        -- Party category constants
+        LE_PARTY_CATEGORY_HOME = 1
+        LE_PARTY_CATEGORY_INSTANCE = 2
+
+        -- Stub functions that FrameXML expects
+        function GetItemQualityColor(quality)
+            local c = ITEM_QUALITY_COLORS[quality] or ITEM_QUALITY_COLORS[1]
+            return c.r, c.g, c.b, c.hex
+        end
+        function GetExpansionLevel() return 2 end -- WotLK
+        function BNGetMaxPlayersInConversation() return 10 end
+        function BNGetInfo() return 0, "", "", "", 0, false end
+        function BNGetNumFriends() return 0, 0 end
+        function BNFeaturesEnabledAndConnected() return false end
+        function IsTrialAccount() return false end
+        function GetCVarBool(name) return false end
+        function GetCVar(name) return "0" end
+        function SetCVar(name, value) end
+        function RegisterCVar(name, value) end
+        function GetCurrentRegion() return 1 end
+        function GetCurrentResolution() return 1 end
+        function GetScreenResolutions() return "1920x1080" end
+        function GetBillingTimeRested() return 0, 0, 0, 0 end
+        function GetRestState() return 1, "", 1 end
+        function IsXPUserDisabled() return false end
+        -- UnitXP, UnitXPMax, GetXPExhaustion now implemented in C++ (LuaStubs.cpp)
+        function GetWatchedFactionInfo() return nil end
+        function TextStatusBar_Initialize(bar) end
+        function TextStatusBar_UpdateTextString(bar) end
+        function TextStatusBar_UpdateTextStringWithValues(bar, ...) end
+
+        -- Missing string constants from error logs
+        WIDESCREEN_TAG = " (Widescreen)"
+        LARGE_NUMBER_SEPERATOR = ","
+        DECIMAL_SEPERATOR = "."
+        QUEST_TAG_DUNGEON = "Dungeon"
+        QUEST_TAG_RAID = "Raid"
+        QUEST_TAG_PVP = "PvP"
+        QUEST_TAG_GROUP = "Group"
+        QUEST_TAG_HEROIC = "Heroic"
+        QUEST_TAG_DAILY = "Daily"
+        QUEST_TAG_WEEKLY = "Weekly"
+
+        -- Bit library placeholder table (real functions registered from C)
+        bit = bit or {}
+
+        -- FrameXML localized string constants (GlobalStrings.lua)
+        -- These are normally loaded from GlobalStrings.lua in the MPQ but we need
+        -- fallbacks for any that aren't loaded yet when OnLoad fires.
+        -- Options panels
+        BRIGHTNESS = BRIGHTNESS or "Brightness"
+        GAMMA = GAMMA or "Gamma"
+        QUALITY = QUALITY or "Quality"
+        SOUND_VOLUME = SOUND_VOLUME or "Sound Volume"
+        MUSIC_VOLUME = MUSIC_VOLUME or "Music Volume"
+        AMBIENCE_VOLUME = AMBIENCE_VOLUME or "Ambience Volume"
+        MASTER_VOLUME = MASTER_VOLUME or "Master Volume"
+        ENABLE_HARDWARE = ENABLE_HARDWARE or "Enable Hardware"
+        ENABLE_SOUNDFX = ENABLE_SOUNDFX or "Sound Effects"
+        ENABLE_MUSIC = ENABLE_MUSIC or "Enable Music"
+        ENABLE_AMBIENCE = ENABLE_AMBIENCE or "Enable Ambience"
+        SOUND_PLAYBACK = SOUND_PLAYBACK or "Sound Playback"
+        SOUND_HARDWARE = SOUND_HARDWARE or "Sound Hardware"
+        VOICE_CHAT = VOICE_CHAT or "Voice Chat"
+        HERTZ = HERTZ or "Hz"
+        RESOLUTION = RESOLUTION or "Resolution"
+        REFRESH_RATE = REFRESH_RATE or "Refresh Rate"
+        MULTISAMPLE_FORMAT = MULTISAMPLE_FORMAT or "Multisampling"
+        WINDOWED_MODE = WINDOWED_MODE or "Windowed Mode"
+
+        -- Battle Score headers
+        SCORE = SCORE or "Score"
+        KILLS = KILLS or "Kills"
+        KILLING_BLOWS = KILLING_BLOWS or "Killing Blows"
+        DEATHS = DEATHS or "Deaths"
+        HONOR = HONOR or "Honor"
+        DAMAGE = DAMAGE or "Damage"
+        HEALING = HEALING or "Healing"
+        TEAM = TEAM or "Team"
+        NAME = NAME or "Name"
+        SKILL = SKILL or "Skill"
+
+        -- Quest/Map
+        TRACK_QUEST = TRACK_QUEST or "Show Quest Objectives"
+        SHOW_QUEST_OBJECTIVES_ON_MAP = SHOW_QUEST_OBJECTIVES_ON_MAP or "Show Objectives on Map"
+
+        -- Tabard
+        TABARDFRAME_CUSTOMIZATION1 = TABARDFRAME_CUSTOMIZATION1 or "Icon"
+        TABARDFRAME_CUSTOMIZATION2 = TABARDFRAME_CUSTOMIZATION2 or "Icon Border"
+        TABARDFRAME_CUSTOMIZATION3 = TABARDFRAME_CUSTOMIZATION3 or "Icon Color"
+        TABARDFRAME_CUSTOMIZATION4 = TABARDFRAME_CUSTOMIZATION4 or "Border Color"
+        TABARDFRAME_CUSTOMIZATION5 = TABARDFRAME_CUSTOMIZATION5 or "Background"
+
+        -- Token / Currency
+        TOKEN_FILTER_LABEL = TOKEN_FILTER_LABEL or "Show on Backpack"
+        TOKEN_INACTIVE = TOKEN_INACTIVE or "Inactive"
+
+        -- Skill frame
+        COLLAPSE = COLLAPSE or "Collapse"
+
+        -- Character Stats
+        STAT_STRENGTH = STAT_STRENGTH or "Strength"
+        STAT_AGILITY = STAT_AGILITY or "Agility"
+        STAT_STAMINA = STAT_STAMINA or "Stamina"
+        STAT_INTELLECT = STAT_INTELLECT or "Intellect"
+        STAT_SPIRIT = STAT_SPIRIT or "Spirit"
+        ARMOR = ARMOR or "Armor"
+
+        -- Chat
+        CHAT_MSG_PREFIX = CHAT_MSG_PREFIX or ""
+        CHAT_FRAME_DEFAULT_FONT_SIZE = CHAT_FRAME_DEFAULT_FONT_SIZE or 14
+
+        -- Interface options
+        CONTROLS_LABEL = CONTROLS_LABEL or "Controls"
+        COMBAT_LABEL = COMBAT_LABEL or "Combat"
+        DISPLAY_LABEL = DISPLAY_LABEL or "Display"
+        SOCIAL_LABEL = SOCIAL_LABEL or "Social"
+        ACTIONBARS_LABEL = ACTIONBARS_LABEL or "Action Bars"
+        NAMES_LABEL = NAMES_LABEL or "Names"
+        CAMERA_LABEL = CAMERA_LABEL or "Camera"
+        MOUSE_LABEL = MOUSE_LABEL or "Mouse"
+        BINDING_HEADER_OTHER = BINDING_HEADER_OTHER or "Other"
+        AUTO_LOOT_DEFAULT_TEXT = AUTO_LOOT_DEFAULT_TEXT or "Auto Loot"
+
+        -- Reputation panel
+        REPUTATION_AT_WAR = REPUTATION_AT_WAR or "At War"
+        REPUTATION_INACTIVE = REPUTATION_INACTIVE or "Inactive"
+        REPUTATION_SHOW_AS_EXPERIENCE_BAR = REPUTATION_SHOW_AS_EXPERIENCE_BAR or "Show as Experience Bar"
+
+        -- Channel frame
+        CHAT_BATTLEGROUND = CHAT_BATTLEGROUND or "Battleground"
+        CHAT_PARTY = CHAT_PARTY or "Party"
+
+        -- Combat config
+        COMBAT_CONFIG_SHOW_QUICKBUTTON = COMBAT_CONFIG_SHOW_QUICKBUTTON or "Show Quick Button"
+        COMBAT_CONFIG_SOLO = COMBAT_CONFIG_SOLO or "Solo"
+        COMBAT_CONFIG_SHOW_TIMESTAMP = COMBAT_CONFIG_SHOW_TIMESTAMP or "Show Timestamps"
+        COMBAT_CONFIG_SHOW_BRACES = COMBAT_CONFIG_SHOW_BRACES or "Show Braces"
+        COMBAT_CONFIG_UNIT_NAMES = COMBAT_CONFIG_UNIT_NAMES or "Unit Names"
+        COMBAT_CONFIG_SPELL_NAMES = COMBAT_CONFIG_SPELL_NAMES or "Spell Names"
+        COMBAT_CONFIG_ITEM_NAMES = COMBAT_CONFIG_ITEM_NAMES or "Item Names"
+        COMBAT_CONFIG_FULL_TEXT = COMBAT_CONFIG_FULL_TEXT or "Full Text"
+        COMBAT_CONFIG_COLORIZE_UNIT_NAME = COMBAT_CONFIG_COLORIZE_UNIT_NAME or "Unit Name"
+        COMBAT_CONFIG_COLORIZE_SPELL_NAMES = COMBAT_CONFIG_COLORIZE_SPELL_NAMES or "Spell Names"
+        COMBAT_CONFIG_COLORIZE_SPELL_NAMES_SCHOOL = COMBAT_CONFIG_COLORIZE_SPELL_NAMES_SCHOOL or "By School"
+        COMBAT_CONFIG_COLORIZE_DAMAGE_NUMBER = COMBAT_CONFIG_COLORIZE_DAMAGE_NUMBER or "Damage Number"
+        COMBAT_CONFIG_COLORIZE_DAMAGE_NUMBER_SCHOOL = COMBAT_CONFIG_COLORIZE_DAMAGE_NUMBER_SCHOOL or "By School"
+        COMBAT_CONFIG_COLORIZE_DAMAGE_SCHOOL = COMBAT_CONFIG_COLORIZE_DAMAGE_SCHOOL or "Damage School"
+        COMBAT_CONFIG_COLORIZE_ENTIRE_LINE = COMBAT_CONFIG_COLORIZE_ENTIRE_LINE or "Entire Line"
+        COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_SOURCE = COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_SOURCE or "By Source"
+        COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_TARGET = COMBAT_CONFIG_COLORIZE_ENTIRE_LINE_BY_TARGET or "By Target"
+        COMBAT_CONFIG_HIGHLIGHT_LINE = COMBAT_CONFIG_HIGHLIGHT_LINE or "Line"
+        COMBAT_CONFIG_HIGHLIGHT_ABILITY = COMBAT_CONFIG_HIGHLIGHT_ABILITY or "Ability"
+        COMBAT_CONFIG_HIGHLIGHT_DAMAGE = COMBAT_CONFIG_HIGHLIGHT_DAMAGE or "Damage"
+        COMBAT_CONFIG_HIGHLIGHT_SCHOOL = COMBAT_CONFIG_HIGHLIGHT_SCHOOL or "School"
+
+        -- Ignore list
+        IGNORE_LABEL = IGNORE_LABEL or "Ignore"
+
+        -- Friends
+        FRIENDS_ONLINE = FRIENDS_ONLINE or "Online"
+        WHO_NUM_RESULTS = WHO_NUM_RESULTS or "%d players found"
+
+        -- Raid info
+        RAID_ID = RAID_ID or "Raid ID"
+        RAID_INSTANCE = RAID_INSTANCE or "Instance"
+
+        -- Spellbook
+        SHOW_ALL_SPELL_RANKS = SHOW_ALL_SPELL_RANKS or "Show All Spell Ranks"
+
+        -- PVP
+        PVP_BANNER_EMBLEM = PVP_BANNER_EMBLEM or "Emblem"
+        PVP_BANNER_BORDER = PVP_BANNER_BORDER or "Border"
+
+        -- Help frame
+        HELP_REPORT_ISSUE_BULLET1 = HELP_REPORT_ISSUE_BULLET1 or "Describe the issue"
+        HELP_REPORT_ISSUE_BULLET2 = HELP_REPORT_ISSUE_BULLET2 or "Include details"
+
+        -- Send mail
+        SEND_MAIL_COD_LABEL = SEND_MAIL_COD_LABEL or "C.O.D."
+        SEND_MAIL_MONEY_LABEL = SEND_MAIL_MONEY_LABEL or "Send Money"
+
+        -- World map
+        WORLD_MAP_TRACK_QUEST = WORLD_MAP_TRACK_QUEST or "Track Quest"
+
+        -- Mac options
+        MAC_OPTIONS_MOVIE_RECORDING = MAC_OPTIONS_MOVIE_RECORDING or "Movie Recording"
+        MAC_OPTIONS_ITUNES_REMOTE = MAC_OPTIONS_ITUNES_REMOTE or "iTunes Remote"
+
+        -- Token popup
+        TOKEN_SHOW_ON_BACKPACK = TOKEN_SHOW_ON_BACKPACK or "Show on Backpack"
+
+        -- Interface options display
+        SHOW_CLOAK = SHOW_CLOAK or "Show Cloak"
+        SHOW_HELM = SHOW_HELM or "Show Helm"
+
+        -- Toast duration
+        BN_TOAST_DURATION = BN_TOAST_DURATION or "Toast Duration"
+
+        -- Chat config class colors
+        CLASS_COLORS = CLASS_COLORS or {}
+        CLASS_SORT_ORDER = CLASS_SORT_ORDER or {"WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST","DEATHKNIGHT","SHAMAN","MAGE","WARLOCK","DRUID"}
+
+        -- Localized class names (used by ChatConfig class color legend)
+        LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE or {
+            WARRIOR = "Warrior", PALADIN = "Paladin", HUNTER = "Hunter",
+            ROGUE = "Rogue", PRIEST = "Priest", DEATHKNIGHT = "Death Knight",
+            SHAMAN = "Shaman", MAGE = "Mage", WARLOCK = "Warlock", DRUID = "Druid"
+        }
+        LOCALIZED_CLASS_NAMES_FEMALE = LOCALIZED_CLASS_NAMES_FEMALE or LOCALIZED_CLASS_NAMES_MALE
+
+        -- Tutorial
+        TUTORIALS = TUTORIALS or {}
+
+        -- FriendsFrame
+        FRIENDS_BUTTON_TYPE_WOW = FRIENDS_BUTTON_TYPE_WOW or 1
+        FRIENDS_BUTTON_TYPE_BNET = FRIENDS_BUTTON_TYPE_BNET or 2
+        FRIENDS_BUTTON_TYPE_DIVIDER = FRIENDS_BUTTON_TYPE_DIVIDER or 3
+
+        -- Tutorial system
+        TUTORIALS = TUTORIALS or {}
+        NUM_TUTORIAL_FRAMES = NUM_TUTORIAL_FRAMES or 0
+
+        -- Rune frame (Death Knight) — only active for DK class
+        RUNETYPE_BLOOD = RUNETYPE_BLOOD or 1
+        RUNETYPE_UNHOLY = RUNETYPE_UNHOLY or 2
+        RUNETYPE_FROST = RUNETYPE_FROST or 3
+        RUNETYPE_DEATH = RUNETYPE_DEATH or 4
+
+        -- Chat config settings
+        CHAT_CONFIG_CHAT_LEFT = CHAT_CONFIG_CHAT_LEFT or "ChatConfigChatSettings"
+        CHAT_CONFIG_CHANNEL_LEFT = CHAT_CONFIG_CHANNEL_LEFT or "ChatConfigChannelSettings"
+
+        -- Voice chat mode global
+        VOICE_CHAT_MODE = VOICE_CHAT_MODE or 0
+
+        -- SetFormattedText helper (WoW provides this on FontStrings/Frames)
+        -- Add to all frame metatable stubs that might call it
+
+        -- WoW-specific error/debug functions
+        if not debugstack then
+            function debugstack(start, count1, count2)
+                return ""
+            end
+        end
+        function debugprofilestart() end
+        function issecure() return true end
+        function pcallaliases() end
+
+        -- string.join (WoW FrameXML expects this)
+        string.join = strjoin
+
+        -- Additional constants needed by FrameXML
+        NONE = "NONE"
+        UNKNOWN = "UNKNOWN"
+        ACCEPT = "Accept"
+        CANCEL = "Cancel"
+        OKAY = "Okay"
+        YES = "Yes"
+        NO = "No"
+        CONTINUE = "Continue"
+        GUILD = "Guild"
+        WHISPER = "Whisper"
+        SAY = "Say"
+        YELL = "Yell"
+        PARTY = "Party"
+        RAID = "Raid"
+        OFFICER = "Officer"
+        CHANNEL = "Channel"
+        EMOTE = "Emote"
+        SYSTEM_MESSAGES = "System"
+
+        -- Chat type info table used by chat frame system
+        for _, v in ipairs({"SAY","YELL","EMOTE","WHISPER","PARTY","RAID","GUILD","OFFICER","CHANNEL","SYSTEM","LOOT","MONEY","COMBAT_XP_GAIN","COMBAT_HONOR_GAIN"}) do
+            ChatTypeInfo[v] = ChatTypeInfo[v] or {r=1, g=1, b=1, sticky=0}
+        end
+
+        -- Missing event table entries
+        CHAT_CATEGORY_LIST["BN_WHISPER"] = "BN_WHISPER"
+        CHAT_CATEGORY_LIST["BN_CONVERSATION"] = "BN_CONVERSATION"
+
+        -- Addon count table for GetNumAddOns
+        WOW_LOADED_ADDONS = WOW_LOADED_ADDONS or {}
+
+        -- UIParent strata constants (used by FrameXML for z-ordering)
+        UIPARENT_LEVEL = 0
+        UIPARENT_MANAGED_FRAME_POSITIONS = UIPARENT_MANAGED_FRAME_POSITIONS or {}
+        UISpecialFrames = UISpecialFrames or {}
+        UIPanelWindows = UIPanelWindows or {}
+
+        -- Money frame helpers
+        MONEY_ICON_WIDTH = 13
+        MONEY_ICON_WIDTH_SMALL = 13
+
+        -- ActionBar constants
+        NUM_ACTIONBAR_BUTTONS = 12
+        NUM_OVERRIDE_BUTTONS = 6
+        NUM_PET_ACTION_SLOTS = 10
+        NUM_STANCE_SLOTS = 10
+        NUM_POSSESS_SLOTS = 2
+        RANGE_INDICATOR = "●"
+
+        -- Inventory constants
+        NUM_CONTAINER_FRAMES = 5
+        MAX_CONTAINER_ITEMS = 36
+        CONTAINER_OFFSET_X = 0
+        CONTAINER_OFFSET_Y = 70
+        CONTAINER_SCALE = 0.75
+        CONTAINER_WIDTH = 192
+
+        -- Additional missing globals from FrameXML
+        ATTACK_BUTTON_FLASH_TIME = 0.4
+        CASTING_BAR_ALPHA_STEP = 0.05
+        CASTING_BAR_FLASH_STEP = 0.2
+        CASTING_BAR_HOLD_TIME = 1
+
+        -- Minimap constants
+        MINIMAPPING_TIMER = 5.5
+        MINIMAP_BOTTOM_EDGE_EXTENT = 192
+
+        -- Unit reaction colors
+        FACTION_BAR_COLORS = FACTION_BAR_COLORS or {
+            [1] = {r=0.8, g=0.13, b=0.13}, [2] = {r=1.0, g=0.0, b=0.0},
+            [3] = {r=0.93, g=0.4, b=0.13}, [4] = {r=1.0, g=1.0, b=0.0},
+            [5] = {r=0.0, g=0.7, b=0.0}, [6] = {r=0.0, g=1.0, b=0.0},
+            [7] = {r=0.0, g=0.6, b=1.0}, [8] = {r=0.0, g=1.0, b=1.0},
+        }
+
+        -- Power type colors
+        PowerBarColor = PowerBarColor or {
+            [0] = {r=0.0, g=0.0, b=1.0},   -- Mana
+            [1] = {r=1.0, g=0.0, b=0.0},   -- Rage
+            [2] = {r=1.0, g=0.5, b=0.25},  -- Focus
+            [3] = {r=1.0, g=1.0, b=0.0},   -- Energy
+            [4] = {r=0.0, g=1.0, b=1.0},   -- Happiness
+            [5] = {r=0.5, g=0.5, b=0.5},   -- Runes
+            [6] = {r=0.0, g=0.82, b=1.0},  -- Runic Power
+        }
+    )LUA";
+
+    if (luaL_dostring(L, BootstrapLua) != 0)
+    {
+        UE_LOG(LogWowLuaApi, Error, TEXT("Bootstrap Lua error: %hs"), lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+
+    UE_LOG(LogWowLuaApi, Log, TEXT("Registered WoW Lua globals (Phase 1 bootstrap + FrameXML globals)"));
 }
 
 #else

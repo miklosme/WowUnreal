@@ -35,6 +35,9 @@ private:
     FSlateColor GetSlotBorderColor() const;
     FSlateColor GetItemQualityColor() const;
     FText GetStackCountText() const;
+
+    /** Create a tooltip widget for the given item slot */
+    TSharedPtr<class SToolTip> CreateItemTooltip(const struct FWowItemSlot* ItemSlot) const;
 };
 
 // Main bag window widget

@@ -277,7 +277,13 @@ USoundWave* AWowAudioManager::LoadSoundFromMpq(const FString& FilePath)
     {
         // MP3: store raw compressed data for UE to decode
         FSharedBuffer SharedBuf = FSharedBuffer::Clone(RawData.GetData(), RawData.Num());
-        SoundWave->RawData.UpdatePayload(SharedBuf);
+
+#if 0
+        // TODO: UE 5.7 removed USoundWave::RawData - need to find correct API for setting raw compressed audio data
+        // Original code: SoundWave->RawData.UpdatePayload(SharedBuf);
+        // Attempted: SoundWave->SetImportedSoundWaveData() - doesn't exist
+        UE_LOG(LogWowAudio, Warning, TEXT("MP3 loading disabled - UE 5.7 API change needed for compressed audio"));
+#endif
 
         SoundWave->SetSampleRate(44100);
         SoundWave->NumChannels = 2;

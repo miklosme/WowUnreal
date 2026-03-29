@@ -36,6 +36,9 @@ public:
     /** Show the vendor window with the given data */
     void ShowVendorWindow(uint64 VendorGuid, const TArray<FWowVendorItem>& Items);
 
+    /** Update vendor window with player inventory for sell functionality */
+    void UpdateVendorPlayerInventory(const TArray<FWowItem>& Items);
+
     /** Hide the vendor window */
     void HideVendorWindow();
 
@@ -63,6 +66,7 @@ private:
     void OnLootAll();
     void OnCloseLoot();
     void OnBuyItem(uint64 VendorGuid, uint32 ItemId, int32 Count);
+    void OnSellItem(uint64 VendorGuid, uint64 ItemGuid, uint8 Count);
     void OnCloseVendor();
     void OnQuestAccept(uint64 QuestGiverGuid, uint32 QuestId);
     void OnQuestComplete(uint64 QuestGiverGuid, uint32 QuestId, int32 RewardChoice);

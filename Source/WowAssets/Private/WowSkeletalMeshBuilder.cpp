@@ -8,6 +8,7 @@
 #include "Coord/WowCoordinate.h"
 #include "Animation/Skeleton.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimData/IAnimationDataController.h"
 #include "Engine/SkeletalMesh.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -16,6 +17,10 @@
 #include "BoneWeights.h"
 #include "Rendering/SkeletalMeshModel.h"
 #include "Rendering/SkeletalMeshLODModel.h"
+#include "Rendering/SkeletalMeshRenderData.h"
+#include "IMeshBuilderModule.h"
+#include "Interfaces/ITargetPlatform.h"
+#include "Interfaces/ITargetPlatformManagerModule.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowSkelMesh, Log, All);
 
@@ -156,7 +161,7 @@ USkeleton* FWowSkeletalMeshBuilder::CreateSkeleton(const FM2Data& Data, const FS
 			FMeshBoneInfo BoneInfo;
 			BoneInfo.Name = BoneName;
 			BoneInfo.ParentIndex = ParentIdx;
-			BoneInfo.ExportName = BoneName.ToString();
+			// UE 5.7: ExportName removed, Name is already an FName
 
 			SkelMod.Add(BoneInfo, BoneTransform);
 		}
@@ -237,14 +242,9 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	LODInfo.ReductionSettings.NumOfTrianglesPercentage = 1.0f;
 	LODInfo.ReductionSettings.NumOfVertPercentage = 1.0f;
 
-	FMeshDescription* MeshDescPtr = SkelMesh->CreateMeshDescription(0);
-	if (!MeshDescPtr)
-	{
-		UE_LOG(LogWowSkelMesh, Error, TEXT("Failed to create mesh description for '%s'"), *ModelName);
-		return nullptr;
-	}
-
-	FMeshDescription& MeshDesc = *MeshDescPtr;
+	// UE 5.7: CreateMeshDescription() removed, create FMeshDescription directly
+	FMeshDescription MeshDesc;
+	// Register skeletal mesh attributes
 	FSkeletalMeshAttributes SkelAttrs(MeshDesc);
 	SkelAttrs.Register();
 
@@ -485,16 +485,7 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		}
 	}
 
-	// The LODModel MUST exist in ImportedModel BEFORE CommitMeshDescription is called.
-	// CommitMeshDescription accesses LODModels[InLODIndex] to store bulk data IDs,
-	// and Build() iterates LODModels to call BuildLODModel for each LOD.
-	FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel();
-	check(ImportedModel);
-	if (!ImportedModel->LODModels.IsValidIndex(0))
-	{
-		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
-	}
-
+	// UE 5.7: Use mesh description and MeshBuilderModule instead of the removed Build() pipeline
 	// Configure build settings to preserve our M2 per-vertex normals (smooth shading)
 	if (FSkeletalMeshLODInfo* LOD0Info = SkelMesh->GetLODInfo(0))
 	{
@@ -503,6 +494,7 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		LOD0Info->BuildSettings.bUseMikkTSpace = false;
 	}
 
+	// Commit the mesh description for LOD 0
 	SkelMesh->CommitMeshDescription(0);
 
 	// Set bounds BEFORE Build() so the build pipeline has valid bounds data.
@@ -523,9 +515,37 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	// CalculateInvRefMatrices must run before Build() so the build has valid inverse reference matrices.
 	SkelMesh->CalculateInvRefMatrices();
 
-	// Build() calls BuildLODModel (which uses IMeshBuilderModule to convert mesh description to render data),
-	// then FinishBuildInternal calls InitResources(). Do NOT call InitResources() again after Build().
-	SkelMesh->Build();
+	// UE 5.7: Use new render data pipeline with MeshBuilderModule
+	// AllocateResourceForRendering creates FSkeletalMeshRenderData
+	SkelMesh->AllocateResourceForRendering();
+
+	// Get the render data and build it using the MeshBuilderModule
+	FSkeletalMeshRenderData* RenderData = SkelMesh->GetResourceForRendering();
+	if (RenderData)
+	{
+		// Cache derived data for the current platform
+		ITargetPlatform* RunningPlatform = GetTargetPlatformManagerRef().GetRunningTargetPlatform();
+		check(RunningPlatform);
+
+		// Build parameters for the mesh builder
+		FSkeletalMeshBuildParameters BuildParams(SkelMesh, RunningPlatform, 0, false);
+
+		// Use MeshBuilderModule to build the render data from the mesh description
+		IMeshBuilderModule& MeshBuilderModule = IMeshBuilderModule::GetForPlatform(RunningPlatform);
+		if (!MeshBuilderModule.BuildSkeletalMesh(*RenderData, BuildParams))
+		{
+			UE_LOG(LogWowSkelMesh, Error, TEXT("Failed to build skeletal mesh render data for '%s'"), *ModelName);
+			return nullptr;
+		}
+
+		// Initialize rendering resources
+		RenderData->InitResources(false, SkelMesh);
+	}
+	else
+	{
+		UE_LOG(LogWowSkelMesh, Error, TEXT("Failed to allocate render data for skeletal mesh '%s'"), *ModelName);
+		return nullptr;
+	}
 
 	UE_LOG(LogWowSkelMesh, Log, TEXT("Created skeletal mesh '%s' with %d verts, %d tris, %d bones"),
 		*ModelName, NumVerts, NumTris, NumBones);
@@ -606,6 +626,7 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 
 		const float DurationSec = AnimData.Duration / 1000.0f;
 
+#if WITH_EDITOR
 		IAnimationDataController& Controller = AnimSeq->GetController();
 		Controller.InitializeModel();
 		Controller.OpenBracket(FText::FromString(TEXT("ImportM2Anim")));
@@ -687,6 +708,9 @@ TArray<UAnimSequence*> FWowSkeletalMeshBuilder::CreateAnimations(const FM2Data& 
 
 		Controller.CloseBracket();
 		Controller.NotifyPopulated();
+#else
+		UE_LOG(LogWowSkelMesh, Warning, TEXT("  Skipping animation '%s' — GetController() requires editor"), *AnimName);
+#endif // WITH_EDITOR
 		Result.Add(AnimSeq);
 
 		UE_LOG(LogWowSkelMesh, Log, TEXT("  Created animation '%s' (%.2fs, %s)"),

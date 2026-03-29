@@ -50,6 +50,13 @@ void UWowAnimationController::UpdateAnimationState(const FWowMovementInfo& Movem
         return;
     }
 
+    // Don't override one-shot animations (attack, wound) until they finish
+    if (IsPlayingOneShot())
+    {
+        return;
+    }
+    bPlayingOneShot = false;
+
     EWowAnimState NewState = DetermineAnimationState(MovementInfo, bIsInCombat, bIsCasting);
 
     // Handle jump sequence timing
@@ -88,6 +95,13 @@ void UWowAnimationController::UpdateLocalPlayerState(ACharacter* PlayerCharacter
     {
         return;
     }
+
+    // Don't override one-shot animations (attack, wound) until they finish
+    if (IsPlayingOneShot())
+    {
+        return;
+    }
+    bPlayingOneShot = false;
 
     EWowAnimState NewState = DetermineLocalPlayerState(PlayerCharacter);
 
@@ -259,11 +273,11 @@ EWowAnimId UWowAnimationController::GetAnimationForState(EWowAnimState State) co
         case EWowAnimState::Falling:
             return EWowAnimId::Fall;
         case EWowAnimState::Combat:
-            return EWowAnimId::Run; // Use run animation for combat movement
+            return EWowAnimId::Run;
         case EWowAnimState::Casting:
-            return EWowAnimId::SpellCast;
+            return EWowAnimId::SpellCastDirected;
         case EWowAnimState::Channeling:
-            return EWowAnimId::SpellChannel;
+            return EWowAnimId::ChannelCast;
         case EWowAnimState::Dead:
             return EWowAnimId::Death;
         default:
@@ -277,6 +291,10 @@ void UWowAnimationController::SetAnimationState(EWowAnimState NewState)
     {
         return;
     }
+
+    // State machine transitions always clear one-shot lock — one-shots are only
+    // for explicit combat animations (attack/wound) triggered outside the state machine
+    bPlayingOneShot = false;
 
     CurrentState = NewState;
     EWowAnimId AnimId = GetAnimationForState(NewState);
@@ -349,27 +367,62 @@ bool UWowAnimationController::PlayAnimationById(EWowAnimId AnimId, bool bLooping
     if (!MeshComponent) return false;
 
     int32 Id = static_cast<int32>(AnimId);
+    UAnimSequence* AnimToPlay = nullptr;
 
     // Try AnimationCache first (mapped by M2 animation ID)
     if (TObjectPtr<UAnimSequence>* Found = AnimationCache.Find(Id))
     {
         if (*Found)
         {
-            MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-            MeshComponent->PlayAnimation(*Found, bLooping);
-            CurrentAnimation = *Found;
-            return true;
+            AnimToPlay = *Found;
         }
     }
 
     // Fallback: if AnimId 0 (idle) and we have any animations, play the first one
-    if (Id == 0 && AllAnimations.Num() > 0 && AllAnimations[0])
+    if (!AnimToPlay && Id == 0 && AllAnimations.Num() > 0 && AllAnimations[0])
     {
-        MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
-        MeshComponent->PlayAnimation(AllAnimations[0], bLooping);
-        CurrentAnimation = AllAnimations[0];
-        return true;
+        AnimToPlay = AllAnimations[0];
     }
 
+    if (!AnimToPlay) return false;
+
+    MeshComponent->SetAnimationMode(EAnimationMode::AnimationSingleNode);
+    MeshComponent->PlayAnimation(AnimToPlay, bLooping);
+    CurrentAnimation = AnimToPlay;
+
+    // Track one-shot animations so state machine doesn't override them
+    if (!bLooping)
+    {
+        bPlayingOneShot = true;
+        float AnimDuration = AnimToPlay->GetPlayLength();
+        OneShotEndTime = FPlatformTime::Seconds() + AnimDuration;
+    }
+    else
+    {
+        bPlayingOneShot = false;
+    }
+
+    return true;
+}
+
+bool UWowAnimationController::PlayAttackAnimation()
+{
+    // Try attack animations in order of preference until one succeeds
+    if (PlayAnimationById(EWowAnimId::Attack1H, false)) return true;
+    if (PlayAnimationById(EWowAnimId::AttackUnarmed, false)) return true;
+    if (PlayAnimationById(EWowAnimId::Attack2H, false)) return true;
+    if (PlayAnimationById(EWowAnimId::Spell, false)) return true;
+
+    UE_LOG(LogWowAnim, Warning, TEXT("PlayAttackAnimation: No attack animations available"));
+    return false;
+}
+
+bool UWowAnimationController::PlayWoundAnimation()
+{
+    // Try wound animations in order of preference until one succeeds
+    if (PlayAnimationById(EWowAnimId::CombatWound, false)) return true;
+    if (PlayAnimationById(EWowAnimId::StandWound, false)) return true;
+
+    UE_LOG(LogWowAnim, Warning, TEXT("PlayWoundAnimation: No wound animations available"));
     return false;
 }

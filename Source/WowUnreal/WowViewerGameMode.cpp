@@ -205,10 +205,8 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
     // Spawn audio manager
     if (WorldManager && WorldManager->GetMpqManager())
     {
-        FActorSpawnParameters AudioParams;
-        AudioParams.Name = FName(TEXT("WowAudioManager"));
         AWowAudioManager* AudioMgr = World->SpawnActor<AWowAudioManager>(
-            AWowAudioManager::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, AudioParams);
+            AWowAudioManager::StaticClass());
         if (AudioMgr)
         {
             AudioMgr->SetMpqManager(WorldManager->GetMpqManager());
@@ -233,7 +231,7 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
                     UE_LOG(LogWowGameMode, Log, TEXT("Created root canvas for WoW UI"));
                 }
 
-                UIManager->LoadUI(WorldManager->GetMpqManager());
+                UIManager->LoadUI(WorldManager->GetMpqManager(), WorldManager->GetAssetCache());
             }
         }
     }
@@ -392,7 +390,7 @@ void AWowViewerGameMode::SetupUITestScene(UWorld* World)
         {
             if (UWowUIManager* UIManager = GI->GetSubsystem<UWowUIManager>())
             {
-                UIManager->LoadUI(WM->GetMpqManager());
+                UIManager->LoadUI(WM->GetMpqManager(), WM->GetAssetCache());
             }
         }
     }

@@ -2,6 +2,12 @@
 #include "Mpq/MpqManager.h"
 #include "XmlParser.h"
 
+#if HAS_PUGIXML
+THIRD_PARTY_INCLUDES_START
+#include "pugixml.hpp"
+THIRD_PARTY_INCLUDES_END
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogWowXml, Log, All);
 
 // ─── Enum parsers ──────────────────────────────────────────────────────────────
@@ -400,6 +406,325 @@ static bool IsFrameTypeTag(const FString& Tag)
 
 static FWowFrameDef ParseFrameNode(const FXmlNode* Node);
 
+#if HAS_PUGIXML
+static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
+{
+	FWowFrameDef Def;
+	Def.Type = FWowFrameXmlParser::ParseFrameType(UTF8_TO_TCHAR(Node.name()));
+	Def.Name = UTF8_TO_TCHAR(Node.attribute("name").as_string());
+	Def.Parent = UTF8_TO_TCHAR(Node.attribute("parent").as_string());
+	Def.Inherits = UTF8_TO_TCHAR(Node.attribute("inherits").as_string());
+	Def.bVirtual = Node.attribute("virtual").as_bool(false);
+	Def.bHidden = Node.attribute("hidden").as_bool(false);
+	Def.bSetAllPoints = Node.attribute("setAllPoints").as_bool(false);
+
+	const char* Strata = Node.attribute("frameStrata").as_string("");
+	if (Strata[0]) Def.Strata = FWowFrameXmlParser::ParseStrata(UTF8_TO_TCHAR(Strata));
+
+	Def.FrameLevel = Node.attribute("frameLevel").as_int(0);
+	Def.FrameID = Node.attribute("id").as_int(0);
+	Def.MinValue = Node.attribute("minValue").as_float(0.0f);
+	Def.MaxValue = Node.attribute("maxValue").as_float(100.0f);
+	Def.DefaultValue = Node.attribute("defaultValue").as_float(0.0f);
+
+	// Parse child elements
+	for (pugi::xml_node Child = Node.first_child(); Child; Child = Child.next_sibling())
+	{
+		if (Child.type() != pugi::node_element) continue;
+		FString Tag = UTF8_TO_TCHAR(Child.name());
+
+		if (Tag == TEXT("Size"))
+		{
+			pugi::xml_node AbsDim = Child.child("AbsDimension");
+			if (AbsDim)
+			{
+				Def.Width = AbsDim.attribute("x").as_float(0.0f);
+				Def.Height = AbsDim.attribute("y").as_float(0.0f);
+			}
+		}
+		else if (Tag == TEXT("Anchors"))
+		{
+			for (pugi::xml_node Anchor = Child.child("Anchor"); Anchor; Anchor = Anchor.next_sibling("Anchor"))
+			{
+				FWowAnchor A;
+				A.Point = FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(Anchor.attribute("point").as_string()));
+				A.RelativeTo = UTF8_TO_TCHAR(Anchor.attribute("relativeTo").as_string());
+				// WoW default: if relativePoint not specified, it equals point
+				const char* RelPointStr = Anchor.attribute("relativePoint").as_string("");
+				A.RelativePoint = (RelPointStr[0] != '\0')
+					? FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(RelPointStr))
+					: A.Point;
+				pugi::xml_node Offset = Anchor.child("Offset");
+				if (Offset)
+				{
+					// Handle nested: <Offset><AbsDimension x="..." y="..."/></Offset>
+					pugi::xml_node OffAbsDim = Offset.child("AbsDimension");
+					if (OffAbsDim)
+					{
+						A.OffsetX = OffAbsDim.attribute("x").as_float(0.0f);
+						A.OffsetY = OffAbsDim.attribute("y").as_float(0.0f);
+					}
+					else
+					{
+						// Direct: <Offset x="..." y="..."/>
+						A.OffsetX = Offset.attribute("x").as_float(0.0f);
+						A.OffsetY = Offset.attribute("y").as_float(0.0f);
+					}
+				}
+				else
+				{
+					// Direct AbsDimension: <AbsDimension x="..." y="..."/>
+					pugi::xml_node DirectAbsDim = Anchor.child("AbsDimension");
+					if (DirectAbsDim)
+					{
+						A.OffsetX = DirectAbsDim.attribute("x").as_float(0.0f);
+						A.OffsetY = DirectAbsDim.attribute("y").as_float(0.0f);
+					}
+				}
+				Def.Anchors.Add(A);
+			}
+		}
+		else if (Tag == TEXT("Layers"))
+		{
+			for (pugi::xml_node Layer = Child.child("Layer"); Layer; Layer = Layer.next_sibling("Layer"))
+			{
+				FWowLayer L;
+				L.Level = FWowFrameXmlParser::ParseDrawLayer(UTF8_TO_TCHAR(Layer.attribute("level").as_string("ARTWORK")));
+				for (pugi::xml_node Tex = Layer.first_child(); Tex; Tex = Tex.next_sibling())
+				{
+					if (Tex.type() != pugi::node_element) continue;
+					FString TexTag = UTF8_TO_TCHAR(Tex.name());
+					if (TexTag == TEXT("Texture"))
+					{
+						FWowTextureElement T;
+						T.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
+						T.File = UTF8_TO_TCHAR(Tex.attribute("file").as_string());
+						T.bSetAllPoints = Tex.attribute("setAllPoints").as_bool(false);
+						T.bHidden = Tex.attribute("hidden").as_bool(false);
+
+						// Size
+						pugi::xml_node TexSize = Tex.child("Size");
+						if (TexSize)
+						{
+							pugi::xml_node TexAbsDim = TexSize.child("AbsDimension");
+							if (TexAbsDim)
+							{
+								T.Width = TexAbsDim.attribute("x").as_float(0.0f);
+								T.Height = TexAbsDim.attribute("y").as_float(0.0f);
+							}
+						}
+
+						// Anchors
+						pugi::xml_node TexAnchors = Tex.child("Anchors");
+						if (TexAnchors)
+						{
+							for (pugi::xml_node TexAnchor = TexAnchors.child("Anchor"); TexAnchor; TexAnchor = TexAnchor.next_sibling("Anchor"))
+							{
+								FWowAnchor A;
+								A.Point = FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(TexAnchor.attribute("point").as_string()));
+								A.RelativeTo = UTF8_TO_TCHAR(TexAnchor.attribute("relativeTo").as_string());
+								const char* TexRelPoint = TexAnchor.attribute("relativePoint").as_string("");
+								A.RelativePoint = (TexRelPoint[0] != '\0')
+									? FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(TexRelPoint))
+									: A.Point;
+								pugi::xml_node TexOffset = TexAnchor.child("Offset");
+								if (TexOffset)
+								{
+									pugi::xml_node TexOffAbsDim = TexOffset.child("AbsDimension");
+									if (TexOffAbsDim)
+									{
+										A.OffsetX = TexOffAbsDim.attribute("x").as_float(0.0f);
+										A.OffsetY = TexOffAbsDim.attribute("y").as_float(0.0f);
+									}
+									else
+									{
+										A.OffsetX = TexOffset.attribute("x").as_float(0.0f);
+										A.OffsetY = TexOffset.attribute("y").as_float(0.0f);
+									}
+								}
+								else
+								{
+									pugi::xml_node TexDirectAbsDim = TexAnchor.child("AbsDimension");
+									if (TexDirectAbsDim)
+									{
+										A.OffsetX = TexDirectAbsDim.attribute("x").as_float(0.0f);
+										A.OffsetY = TexDirectAbsDim.attribute("y").as_float(0.0f);
+									}
+								}
+								T.Anchors.Add(A);
+							}
+						}
+
+						// TexCoords
+						pugi::xml_node TexCoords = Tex.child("TexCoords");
+						if (TexCoords)
+						{
+							T.Left = TexCoords.attribute("left").as_float(0.0f);
+							T.Right = TexCoords.attribute("right").as_float(1.0f);
+							T.Top = TexCoords.attribute("top").as_float(0.0f);
+							T.Bottom = TexCoords.attribute("bottom").as_float(1.0f);
+						}
+
+						// Color
+						pugi::xml_node TexColor = Tex.child("Color");
+						if (TexColor)
+						{
+							T.VertexColor = FLinearColor(
+								TexColor.attribute("r").as_float(1.0f),
+								TexColor.attribute("g").as_float(1.0f),
+								TexColor.attribute("b").as_float(1.0f),
+								TexColor.attribute("a").as_float(1.0f));
+						}
+
+						L.Textures.Add(T);
+					}
+					else if (TexTag == TEXT("FontString"))
+					{
+						FWowFontStringElement FS;
+						FS.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
+						FS.Text = UTF8_TO_TCHAR(Tex.attribute("text").as_string());
+						FS.Inherits = UTF8_TO_TCHAR(Tex.attribute("inherits").as_string());
+						FS.JustifyH = UTF8_TO_TCHAR(Tex.attribute("justifyH").as_string("LEFT"));
+
+						// Size
+						pugi::xml_node FSSize = Tex.child("Size");
+						if (FSSize)
+						{
+							pugi::xml_node FSAbsDim = FSSize.child("AbsDimension");
+							if (FSAbsDim)
+							{
+								FS.Width = FSAbsDim.attribute("x").as_float(0.0f);
+								FS.Height = FSAbsDim.attribute("y").as_float(0.0f);
+							}
+						}
+
+						// Anchors
+						pugi::xml_node FSAnchors = Tex.child("Anchors");
+						if (FSAnchors)
+						{
+							for (pugi::xml_node FSAnchor = FSAnchors.child("Anchor"); FSAnchor; FSAnchor = FSAnchor.next_sibling("Anchor"))
+							{
+								FWowAnchor A;
+								A.Point = FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(FSAnchor.attribute("point").as_string()));
+								A.RelativeTo = UTF8_TO_TCHAR(FSAnchor.attribute("relativeTo").as_string());
+								const char* FSRelPoint = FSAnchor.attribute("relativePoint").as_string("");
+								A.RelativePoint = (FSRelPoint[0] != '\0')
+									? FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(FSRelPoint))
+									: A.Point;
+								pugi::xml_node FSOffset = FSAnchor.child("Offset");
+								if (FSOffset)
+								{
+									pugi::xml_node FSOffAbsDim = FSOffset.child("AbsDimension");
+									if (FSOffAbsDim)
+									{
+										A.OffsetX = FSOffAbsDim.attribute("x").as_float(0.0f);
+										A.OffsetY = FSOffAbsDim.attribute("y").as_float(0.0f);
+									}
+									else
+									{
+										A.OffsetX = FSOffset.attribute("x").as_float(0.0f);
+										A.OffsetY = FSOffset.attribute("y").as_float(0.0f);
+									}
+								}
+								else
+								{
+									pugi::xml_node FSDirectAbsDim = FSAnchor.child("AbsDimension");
+									if (FSDirectAbsDim)
+									{
+										A.OffsetX = FSDirectAbsDim.attribute("x").as_float(0.0f);
+										A.OffsetY = FSDirectAbsDim.attribute("y").as_float(0.0f);
+									}
+								}
+								FS.Anchors.Add(A);
+							}
+						}
+
+						pugi::xml_node FH = Tex.child("FontHeight");
+						if (FH)
+						{
+							pugi::xml_node AbsVal = FH.child("AbsValue");
+							if (AbsVal) FS.FontHeight = AbsVal.attribute("val").as_float(12.0f);
+						}
+						pugi::xml_node Color = Tex.child("Color");
+						if (Color)
+						{
+							FS.Color = FLinearColor(
+								Color.attribute("r").as_float(1.0f),
+								Color.attribute("g").as_float(1.0f),
+								Color.attribute("b").as_float(1.0f),
+								Color.attribute("a").as_float(1.0f));
+						}
+						L.FontStrings.Add(FS);
+					}
+				}
+				Def.Layers.Add(L);
+			}
+		}
+		else if (Tag == TEXT("Scripts"))
+		{
+			for (pugi::xml_node Script = Child.first_child(); Script; Script = Script.next_sibling())
+			{
+				if (Script.type() != pugi::node_element) continue;
+				FWowScriptHandler SH;
+				SH.Event = UTF8_TO_TCHAR(Script.name());
+				SH.Code = UTF8_TO_TCHAR(Script.child_value());
+				if (!SH.Code.IsEmpty())
+				{
+					Def.Scripts.Add(SH);
+				}
+			}
+		}
+		else if (Tag == TEXT("Frames"))
+		{
+			for (pugi::xml_node ChildFrame = Child.first_child(); ChildFrame; ChildFrame = ChildFrame.next_sibling())
+			{
+				if (ChildFrame.type() != pugi::node_element) continue;
+				Def.Children.Add(ParseFrameNode_Pugi(ChildFrame));
+			}
+		}
+		else if (Tag == TEXT("Backdrop"))
+		{
+			FWowBackdrop BD;
+			BD.BgFile = UTF8_TO_TCHAR(Child.attribute("bgFile").as_string());
+			BD.EdgeFile = UTF8_TO_TCHAR(Child.attribute("edgeFile").as_string());
+			BD.Tile = Child.attribute("tile").as_bool(false);
+			pugi::xml_node ES = Child.child("EdgeSize");
+			if (ES) BD.EdgeSize = ES.attribute("val").as_int(0);
+			pugi::xml_node TS = Child.child("TileSize");
+			if (TS) BD.TileSize = TS.attribute("val").as_int(0);
+			Def.Backdrop = BD;
+		}
+		else if (Tag == TEXT("NormalTexture"))
+		{
+			Def.NormalTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+			Def.NormalTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+		}
+		else if (Tag == TEXT("PushedTexture"))
+		{
+			Def.PushedTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+			Def.PushedTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+		}
+		else if (Tag == TEXT("HighlightTexture"))
+		{
+			Def.HighlightTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+			Def.HighlightTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+		}
+		else if (Tag == TEXT("DisabledTexture"))
+		{
+			Def.DisabledTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+			Def.DisabledTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+		}
+		else if (Tag == TEXT("ButtonText"))
+		{
+			pugi::xml_node FS = Child.child("FontString");
+			Def.ButtonText = FS ? UTF8_TO_TCHAR(FS.attribute("text").as_string()) : UTF8_TO_TCHAR(Child.child_value());
+		}
+	}
+
+	return Def;
+}
+#endif
+
 // ─── Parse a frame node recursively ────────────────────────────────────────────
 
 static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
@@ -424,6 +749,9 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 
 	FString LevelStr = Node->GetAttribute(TEXT("frameLevel"));
 	if (!LevelStr.IsEmpty()) Def.FrameLevel = FCString::Atoi(*LevelStr);
+
+	FString IdStr = Node->GetAttribute(TEXT("id"));
+	if (!IdStr.IsEmpty()) Def.FrameID = FCString::Atoi(*IdStr);
 
 	// Type-specific attributes
 	FString Orientation = Node->GetAttribute(TEXT("orientation"));
@@ -525,6 +853,94 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 		XmlContent = FString(Conv.Length(), Conv.Get());
 	}
 
+#if HAS_PUGIXML
+	// Use pugixml for robust WoW XML parsing (handles namespaces, entities, comments, CDATA)
+	pugi::xml_document Doc;
+	pugi::xml_parse_result ParseResult = Doc.load_buffer(Data.GetData(), Data.Num(),
+		pugi::parse_default | pugi::parse_comments | pugi::parse_declaration);
+
+	if (!ParseResult)
+	{
+		UE_LOG(LogWowXml, Warning, TEXT("Failed to parse XML: %s - %hs (offset %d)"),
+			*FileName, ParseResult.description(), static_cast<int32>(ParseResult.offset));
+		return Directives;
+	}
+
+	// Find the <Ui> root (may be nested under xml declaration)
+	pugi::xml_node Root = Doc.child("Ui");
+	if (!Root)
+	{
+		// Try first child element
+		for (pugi::xml_node N = Doc.first_child(); N; N = N.next_sibling())
+		{
+			if (N.type() == pugi::node_element)
+			{
+				Root = N;
+				break;
+			}
+		}
+	}
+
+	if (!Root)
+	{
+		UE_LOG(LogWowXml, Warning, TEXT("No root element in XML: %s"), *FileName);
+		return Directives;
+	}
+
+	// Process children of root
+	for (pugi::xml_node Child = Root.first_child(); Child; Child = Child.next_sibling())
+	{
+		if (Child.type() != pugi::node_element) continue;
+
+		FString TagName = UTF8_TO_TCHAR(Child.name());
+
+		if (TagName == TEXT("Script"))
+		{
+			FString File = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+			if (!File.IsEmpty())
+			{
+				FWowXmlDirective Dir;
+				Dir.Type = FWowXmlDirective::EType::Script;
+				Dir.FilePath = File;
+				Directives.Add(Dir);
+			}
+		}
+		else if (TagName == TEXT("Include"))
+		{
+			FString File = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+			if (!File.IsEmpty())
+			{
+				FWowXmlDirective Dir;
+				Dir.Type = FWowXmlDirective::EType::Include;
+				Dir.FilePath = File;
+				Directives.Add(Dir);
+			}
+		}
+		else if (TagName == TEXT("Font"))
+		{
+			FWowXmlDirective Dir;
+			Dir.Type = FWowXmlDirective::EType::Font;
+			Dir.FilePath = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			Directives.Add(Dir);
+		}
+		else
+		{
+			// Frame definition — parse it
+			FWowFrameDef Def = ParseFrameNode_Pugi(Child);
+			if (!Def.Name.IsEmpty() || Def.Type != EWowFrameType::Frame)
+			{
+				FWowXmlDirective Dir;
+				Dir.Type = FWowXmlDirective::EType::Frame;
+				Dir.FrameDef = MoveTemp(Def);
+				Directives.Add(Dir);
+			}
+		}
+	}
+
+	UE_LOG(LogWowXml, Log, TEXT("Parsed XML: %s (%d directives)"), *FileName, Directives.Num());
+
+#else
+	// Fallback: FXmlFile parser (doesn't handle WoW XML well)
 	FXmlFile XmlFile;
 	if (!XmlFile.LoadFile(XmlContent, EConstructMethod::ConstructFromBuffer))
 	{
@@ -539,7 +955,6 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 		return Directives;
 	}
 
-	// The root should be <Ui> but we'll accept anything
 	for (const FXmlNode* Child = Root->GetFirstChildNode(); Child; Child = Child->GetNextNode())
 	{
 		FString Tag = Child->GetTag();
@@ -592,6 +1007,8 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 	}
 
 	UE_LOG(LogWowXml, Log, TEXT("Parsed %s: %d directives"), *FileName, Directives.Num());
+#endif // !HAS_PUGIXML fallback end
+
 	return Directives;
 }
 
@@ -605,12 +1022,24 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::LoadFrameXml(FMpqManager* Mpq)
 		return AllDirectives;
 	}
 
-	// Read the FrameXML.toc
+	// Read the FrameXML.toc - try both slash styles
 	TArray<uint8> TocData;
 	if (!Mpq->ReadFile(TEXT("Interface\\FrameXML\\FrameXML.toc"), TocData))
 	{
-		UE_LOG(LogWowXml, Error, TEXT("Failed to read Interface\\FrameXML\\FrameXML.toc"));
-		return AllDirectives;
+		// Try forward slashes
+		if (!Mpq->ReadFile(TEXT("Interface/FrameXML/FrameXML.toc"), TocData))
+		{
+			UE_LOG(LogWowXml, Error, TEXT("Failed to read Interface\\FrameXML\\FrameXML.toc (tried both slash styles)"));
+			return AllDirectives;
+		}
+		else
+		{
+			UE_LOG(LogWowXml, Warning, TEXT("Found FrameXML.toc using forward slashes"));
+		}
+	}
+	else
+	{
+		UE_LOG(LogWowXml, Warning, TEXT("Found FrameXML.toc using backslashes"));
 	}
 
 	// Parse TOC lines

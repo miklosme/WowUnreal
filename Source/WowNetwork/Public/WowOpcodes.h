@@ -15,6 +15,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_CAST_SPELL             = 0x012E;
     inline constexpr uint16 CMSG_ATTACKSWING            = 0x0141;
     inline constexpr uint16 CMSG_ATTACKSTOP             = 0x0142;
+    inline constexpr uint16 CMSG_TEXT_EMOTE             = 0x0104;
     inline constexpr uint16 CMSG_AUTH_SESSION            = 0x01ED;
     inline constexpr uint16 CMSG_SET_ACTIVE_MOVER       = 0x026A;
     inline constexpr uint16 CMSG_MOVE_TIME_SKIPPED      = 0x02CE;
@@ -62,6 +63,8 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_UPDATE_OBJECT           = 0x00A9;
     inline constexpr uint16 SMSG_DESTROY_OBJECT          = 0x00AA;
     inline constexpr uint16 SMSG_MONSTER_MOVE            = 0x00DD;
+    inline constexpr uint16 SMSG_EMOTE                   = 0x0103;
+    inline constexpr uint16 SMSG_TEXT_EMOTE              = 0x0105;
     inline constexpr uint16 SMSG_TUTORIAL_FLAGS          = 0x00FD;
     inline constexpr uint16 SMSG_ACTION_BUTTONS          = 0x0129;
     inline constexpr uint16 SMSG_INITIAL_SPELLS          = 0x012A;
@@ -81,11 +84,29 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_AURA_UPDATE             = 0x0495;
     inline constexpr uint16 SMSG_ATTACKERSTATEUPDATE     = 0x014A;
     inline constexpr uint16 SMSG_SPELL_FAILURE           = 0x0133;
+    inline constexpr uint16 SMSG_SPELL_COOLDOWN          = 0x0130;
+    inline constexpr uint16 SMSG_COOLDOWN_EVENT          = 0x0135;
     inline constexpr uint16 SMSG_CHAR_CREATE              = 0x003A;
     inline constexpr uint16 SMSG_CHAR_ENUM               = 0x003B;
     inline constexpr uint16 SMSG_CHAR_DELETE              = 0x003C;
     inline constexpr uint16 SMSG_TRANSFER_PENDING        = 0x003F;
     inline constexpr uint16 SMSG_NEW_WORLD               = 0x003E;
+
+    // Player progression opcodes
+    inline constexpr uint16 SMSG_LEVELUP_INFO            = 0x01D4;
+    inline constexpr uint16 SMSG_LOG_XPGAIN              = 0x01D0;
+    inline constexpr uint16 SMSG_EXPLORATION_EXPERIENCE  = 0x01F8;
+    inline constexpr uint16 SMSG_ENVIRONMENTAL_DAMAGE_LOG = 0x01FC;
+    inline constexpr uint16 SMSG_BINDPOINTUPDATE         = 0x0155;
+    inline constexpr uint16 SMSG_PLAYED_TIME             = 0x01CD;
+
+    // World state opcodes
+    inline constexpr uint16 SMSG_WEATHER                 = 0x02F4;
+    inline constexpr uint16 SMSG_INIT_WORLD_STATES       = 0x02C2;
+    inline constexpr uint16 SMSG_UPDATE_WORLD_STATE      = 0x02C3;
+
+    // Party opcodes
+    inline constexpr uint16 SMSG_PARTY_MEMBER_STATS      = 0x007E;
 
     // Inventory system opcodes
     inline constexpr uint16 CMSG_AUTOEQUIP_ITEM          = 0x010A;
@@ -102,9 +123,16 @@ namespace WowOpcode
 
     // Vendor opcodes
     inline constexpr uint16 SMSG_LIST_INVENTORY          = 0x019F;
+    inline constexpr uint16 CMSG_SELL_ITEM               = 0x01A0;
     inline constexpr uint16 SMSG_SELL_ITEM               = 0x01A1;
     inline constexpr uint16 CMSG_BUY_ITEM                = 0x01A2;
     inline constexpr uint16 SMSG_BUY_ITEM                = 0x01A2;
+
+    // NPC interaction opcodes
+    inline constexpr uint16 CMSG_GOSSIP_HELLO            = 0x017B;
+    inline constexpr uint16 SMSG_GOSSIP_MESSAGE          = 0x017D;
+    inline constexpr uint16 CMSG_GOSSIP_SELECT_OPTION    = 0x017C;
+    inline constexpr uint16 SMSG_GOSSIP_COMPLETE         = 0x017E;
 
     // Quest system opcodes
     inline constexpr uint16 CMSG_QUESTGIVER_HELLO        = 0x0182;
@@ -170,6 +198,15 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_RESURRECT_REQUEST      = 0x015C;
     inline constexpr uint16 CMSG_RESURRECT_RESPONSE     = 0x015F;
     inline constexpr uint16 SMSG_MOVE_TELEPORT          = 0x02F0;
+
+    // ── Mail System ─────────────────────────────────────────────────────────────
+    inline constexpr uint16 CMSG_GET_MAIL_LIST         = 0x023A;
+    inline constexpr uint16 SMSG_MAIL_LIST_RESULT      = 0x023B;
+    inline constexpr uint16 CMSG_SEND_MAIL              = 0x0238;
+
+    // ── Bank System ─────────────────────────────────────────────────────────────
+    inline constexpr uint16 CMSG_BANKER_ACTIVATE       = 0x01B5;
+    inline constexpr uint16 SMSG_SHOW_BANK              = 0x01B8;
 
     // Auth result codes
     inline constexpr uint8 AUTH_OK = 0x0C;

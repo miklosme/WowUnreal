@@ -15,6 +15,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Animation/AnimSequence.h"
+#include "Animation/AnimData/IAnimationDataController.h"
 #include "Animation/Skeleton.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
@@ -245,6 +246,7 @@ UAnimSequence* CreateReferencePoseAnimation(USkeleton* Skeleton, const FString& 
     UAnimSequence* AnimSeq = NewObject<UAnimSequence>();
     AnimSeq->SetSkeleton(Skeleton);
 
+#if WITH_EDITOR
     IAnimationDataController& Controller = AnimSeq->GetController();
     Controller.InitializeModel();
     Controller.OpenBracket(FText::FromString(TEXT("CreateReferencePoseAnimation")));
@@ -268,6 +270,9 @@ UAnimSequence* CreateReferencePoseAnimation(USkeleton* Skeleton, const FString& 
 
     Controller.CloseBracket();
     Controller.NotifyPopulated();
+#else
+    UE_LOG(LogWowCharacter, Warning, TEXT("Skipping reference-pose anim setup — GetController() requires editor"));
+#endif
 
     UE_LOG(LogWowCharacter, Log, TEXT("Created reference-pose animation for %s"), *ModelName);
     return AnimSeq;

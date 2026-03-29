@@ -48,11 +48,23 @@ public:
     /** Stop melee attack */
     UFUNCTION(BlueprintCallable) void SendAttackStop();
 
+    /** Send loot request (right-click corpse to open loot window) */
+    UFUNCTION(BlueprintCallable) void SendLoot(int64 CorpseGuid);
+
+    /** Send loot release (close loot window) */
+    UFUNCTION(BlueprintCallable) void SendLootRelease(int64 CorpseGuid);
+
     /** Send loot item command */
     UFUNCTION(BlueprintCallable) void SendLootItem(int32 LootSlot);
 
     /** Send buy item from vendor command */
     UFUNCTION(BlueprintCallable) void SendBuyItem(int64 VendorGuid, int32 ItemId, int32 Count = 1);
+
+    /** Send sell item to vendor command */
+    UFUNCTION(BlueprintCallable) void SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8 Count = 1);
+
+    /** Send gossip/questgiver hello to initiate NPC interaction */
+    UFUNCTION(BlueprintCallable) void SendGossipHello(int64 NpcGuid);
 
     /** Send quest accept command */
     UFUNCTION(BlueprintCallable) void SendQuestAccept(int64 QuestGiverGuid, int32 QuestId);
@@ -82,6 +94,12 @@ public:
 
     /** Send creature query for an NPC */
     UFUNCTION(BlueprintCallable) void SendCreatureQuery(int32 Entry, int64 Guid);
+
+    /** Send text emote command */
+    UFUNCTION(BlueprintCallable) void SendTextEmote(int32 EmoteTextId, int64 TargetGuid = 0);
+
+    /** Send learn talent command */
+    UFUNCTION(BlueprintCallable) void SendLearnTalent(int32 TalentId, int32 RequestedRank);
 
     /** Get the cached character list (valid after WorldHaveCharList state) */
     UFUNCTION(BlueprintCallable) TArray<FWowCharacterInfo> GetCachedCharacters() const { return CachedCharacters; }

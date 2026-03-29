@@ -376,8 +376,14 @@ void AWowWorldManager::BeginPlay()
     }
     UE_LOG(LogWowWorld, Log, TEXT("World Manager ready: %s"), *MapName);
 
-    // Load DBC tables
+    // Load essential DBC tables (Tier 1) synchronously
     FDbcStore::Get().LoadAll(*MpqManager);
+
+    // Load deferred DBC tables (Tier 2) on background thread
+    Async(EAsyncExecution::Thread, [this]()
+    {
+        FDbcStore::Get().LoadDeferred(*MpqManager);
+    });
 
     // Check if a test scene mode wants MPQ-only (no terrain loading)
     FString TestScene;
@@ -833,7 +839,7 @@ void AWowWorldManager::ProcessPendingLoads()
     // During initial load (loading screen), finalize all ready tiles at once.
     // After initial load, limit to 1 per tick to avoid frame hitches.
     const bool bBulkLoad = (InitialTilesQueued > 0 && InitialTilesLoaded < InitialTilesQueued);
-    const int32 MaxPerTick = bBulkLoad ? 100 : 1;
+    const int32 MaxPerTick = bBulkLoad ? 4 : 1;
 
     int32 Finalized = 0;
     for (int32 i = PendingLoads.Num() - 1; i >= 0; --i)
@@ -1198,7 +1204,11 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     if (Mat)
     {
         Mat->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.3f, 0.4f, 0.2f, 1.0f));
-        SM->SetMaterial(0, Mat);
+        if (SM->GetStaticMaterials().Num() <= 0)
+        {
+            SM->GetStaticMaterials().SetNum(1);
+        }
+        SM->GetStaticMaterials()[0].MaterialInterface = Mat;
     }
 
     // Spawn actor with UStaticMeshComponent

@@ -246,6 +246,7 @@ void AWowSkyManager::CreateSkydomeMesh()
 	UStaticMesh* Mesh = BuildDomeMesh(this, Verts, Indices, Colors);
 
 	// Create skydome material: unlit, two-sided, vertex color R = height blend
+#if WITH_EDITOR
 	UMaterial* BaseMat = NewObject<UMaterial>(this, TEXT("SkydomeMat_Base"));
 	BaseMat->SetShadingModel(MSM_Unlit);
 	BaseMat->TwoSided = true;
@@ -310,10 +311,23 @@ void AWowSkyManager::CreateSkydomeMesh()
 	BaseMat->PostEditChange();
 
 	SkydomeMaterial = UMaterialInstanceDynamic::Create(BaseMat, this, TEXT("SkydomeMID"));
+#else
+	// Runtime fallback: use simple unlit material with vertex colors
+	UMaterial* DefaultUnlitMat = UMaterial::GetDefaultMaterial(MD_Surface);
+	SkydomeMaterial = UMaterialInstanceDynamic::Create(DefaultUnlitMat, this, TEXT("SkydomeMID"));
+	if (SkydomeMaterial)
+	{
+		// Set a sky blue color as fallback
+		SkydomeMaterial->SetVectorParameterValue(TEXT("BaseColor"), FLinearColor(0.4f, 0.6f, 1.0f, 1.0f));
+	}
+#endif
 
 	SkydomeMesh = NewObject<UStaticMeshComponent>(this, TEXT("SkydomeComp"));
 	SkydomeMesh->SetStaticMesh(Mesh);
-	SkydomeMesh->SetMaterial(0, SkydomeMaterial);
+	if (SkydomeMaterial)
+	{
+		SkydomeMesh->SetMaterial(0, SkydomeMaterial);
+	}
 	SkydomeMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SkydomeMesh->SetCastShadow(false);
 	SkydomeMesh->bAffectDistanceFieldLighting = false;
@@ -370,6 +384,7 @@ void AWowSkyManager::CreateCloudMesh()
 	UStaticMesh* Mesh = BuildDomeMesh(this, Verts, Indices, Colors);
 
 	// Cloud material: translucent, unlit, scrolling procedural noise
+#if WITH_EDITOR
 	UMaterial* BaseMat = NewObject<UMaterial>(this, TEXT("CloudMat_Base"));
 	BaseMat->SetShadingModel(MSM_Unlit);
 	BaseMat->TwoSided = true;
@@ -411,6 +426,17 @@ void AWowSkyManager::CreateCloudMesh()
 	BaseMat->PostEditChange();
 
 	CloudMaterial = UMaterialInstanceDynamic::Create(BaseMat, this, TEXT("CloudMID"));
+#else
+	// Runtime fallback: use simple translucent material
+	UMaterial* DefaultTranslucentMat = UMaterial::GetDefaultMaterial(MD_Surface);
+	CloudMaterial = UMaterialInstanceDynamic::Create(DefaultTranslucentMat, this, TEXT("CloudMID"));
+	if (CloudMaterial)
+	{
+		// Set cloud-like parameters
+		CloudMaterial->SetVectorParameterValue(TEXT("CloudColor"), FLinearColor(0.9f, 0.92f, 0.95f));
+		CloudMaterial->SetScalarParameterValue(TEXT("CloudOpacity"), 0.3f);
+	}
+#endif
 
 	CloudMesh = NewObject<UStaticMeshComponent>(this, TEXT("CloudComp"));
 	CloudMesh->SetStaticMesh(Mesh);
@@ -460,6 +486,7 @@ void AWowSkyManager::CreateCelestialDiscs()
 	// Create emissive material for sun disc
 	auto MakeDiscMaterial = [this](const FName& MatName, const FLinearColor& DefaultColor) -> UMaterialInstanceDynamic*
 	{
+#if WITH_EDITOR
 		UMaterial* BaseMat = NewObject<UMaterial>(this, MatName);
 		BaseMat->SetShadingModel(MSM_Unlit);
 		BaseMat->TwoSided = true;
@@ -475,6 +502,17 @@ void AWowSkyManager::CreateCelestialDiscs()
 		BaseMat->PostEditChange();
 
 		return UMaterialInstanceDynamic::Create(BaseMat, this);
+#else
+		// Runtime fallback: use simple additive material
+		UMaterial* DefaultMat = UMaterial::GetDefaultMaterial(MD_Surface);
+		UMaterialInstanceDynamic* MID = UMaterialInstanceDynamic::Create(DefaultMat, this);
+		if (MID)
+		{
+			// Set disc color parameter
+			MID->SetVectorParameterValue(TEXT("DiscColor"), DefaultColor);
+		}
+		return MID;
+#endif
 	};
 
 	// Sun disc

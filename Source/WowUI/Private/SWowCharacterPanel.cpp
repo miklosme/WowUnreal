@@ -1,5 +1,7 @@
 #include "SWowCharacterPanel.h"
 #include "WowInventoryManager.h"
+#include "WowConnectionManager.h"
+#include "WowEntity.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
@@ -105,9 +107,10 @@ FText SWowEquipmentSlot::GetSlotText() const
     return FText::AsNumber(ItemSlot->ItemEntry);
 }
 
-void SWowCharacterPanel::Construct(const FArguments& InArgs, TSharedPtr<FWowInventoryManager> InInventoryManager)
+void SWowCharacterPanel::Construct(const FArguments& InArgs, TSharedPtr<FWowInventoryManager> InInventoryManager, UWowConnectionManager* InConnectionManager)
 {
     InventoryManager = InInventoryManager;
+    ConnectionManager = InConnectionManager;
 
     // Equipment slot layout (simplified)
     TSharedPtr<SVerticalBox> MainLayout;
@@ -121,16 +124,29 @@ void SWowCharacterPanel::Construct(const FArguments& InArgs, TSharedPtr<FWowInve
         [
             SAssignNew(MainLayout, SVerticalBox)
 
-            // Title bar
+            // Character name and level
             + SVerticalBox::Slot()
             .AutoHeight()
             .Padding(0, 0, 0, 5)
             [
-                SNew(STextBlock)
-                .Text(NSLOCTEXT("WowUI", "CharacterTitle", "Character"))
-                .Font(FAppStyle::GetFontStyle("NormalFont"))
-                .ColorAndOpacity(FLinearColor::White)
-                .Justification(ETextJustify::Center)
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .HAlign(HAlign_Center)
+                [
+                    SAssignNew(CharacterNameText, STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "CharacterName", "Character"))
+                    .Font(FAppStyle::GetFontStyle("NormalFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .Padding(5, 0, 0, 0)
+                [
+                    SAssignNew(CharacterLevelText, STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Level", "Level 1"))
+                    .Font(FAppStyle::GetFontStyle("SmallFont"))
+                    .ColorAndOpacity(FLinearColor::Yellow)
+                ]
             ]
         ]
     ];
@@ -187,6 +203,377 @@ void SWowCharacterPanel::Construct(const FArguments& InArgs, TSharedPtr<FWowInve
         EquipmentSlots.Add(EquipmentSlot);
     }
 
+    // Add stats section
+    MainLayout->AddSlot()
+    .AutoHeight()
+    .Padding(0, 10, 0, 0)
+    [
+        SNew(SHorizontalBox)
+
+        // Left column: Basic stats
+        + SHorizontalBox::Slot()
+        .FillWidth(1.0f)
+        .Padding(0, 0, 5, 0)
+        [
+            SNew(SVerticalBox)
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            [
+                SNew(STextBlock)
+                .Text(NSLOCTEXT("WowUI", "BasicStats", "Basic Stats"))
+                .Font(FAppStyle::GetFontStyle("SmallFont"))
+                .ColorAndOpacity(FLinearColor::Yellow)
+                .Justification(ETextJustify::Center)
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 2, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Strength", "Strength: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(StrengthText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Agility", "Agility: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(AgilityText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Stamina", "Stamina: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(StaminaText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Intellect", "Intellect: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(IntellectText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Spirit", "Spirit: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(SpiritText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+        ]
+
+        // Right column: Resistances
+        + SHorizontalBox::Slot()
+        .FillWidth(1.0f)
+        .Padding(5, 0, 0, 0)
+        [
+            SNew(SVerticalBox)
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            [
+                SNew(STextBlock)
+                .Text(NSLOCTEXT("WowUI", "Resistances", "Resistances"))
+                .Font(FAppStyle::GetFontStyle("SmallFont"))
+                .ColorAndOpacity(FLinearColor::Yellow)
+                .Justification(ETextJustify::Center)
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 2, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Armor", "Armor: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::Gray)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(ArmorText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Holy", "Holy: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::Yellow)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(HolyResText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Fire", "Fire: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::Red)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(FireResText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Nature", "Nature: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::Green)
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(NatureResText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Frost", "Frost: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor(0.0f, 1.0f, 1.0f, 1.0f)) // Cyan
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(FrostResText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Shadow", "Shadow: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor(0.5f, 0.0f, 1.0f))
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(ShadowResText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 1, 0, 1)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(STextBlock)
+                    .Text(NSLOCTEXT("WowUI", "Arcane", "Arcane: "))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor(1.0f, 0.0f, 1.0f))
+                ]
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                [
+                    SAssignNew(ArcaneResText, STextBlock)
+                    .Text(FText::AsNumber(0))
+                    .Font(FAppStyle::GetFontStyle("TinyFont"))
+                    .ColorAndOpacity(FLinearColor::White)
+                    .Justification(ETextJustify::Right)
+                ]
+            ]
+        ]
+    ];
+
+    // Add attack power section
+    MainLayout->AddSlot()
+    .AutoHeight()
+    .Padding(0, 5, 0, 0)
+    [
+        SNew(SHorizontalBox)
+        + SHorizontalBox::Slot()
+        .FillWidth(1.0f)
+        [
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            [
+                SNew(STextBlock)
+                .Text(NSLOCTEXT("WowUI", "AttackPower", "Attack Power: "))
+                .Font(FAppStyle::GetFontStyle("TinyFont"))
+                .ColorAndOpacity(FLinearColor::White)
+            ]
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            [
+                SAssignNew(AttackPowerText, STextBlock)
+                .Text(FText::AsNumber(0))
+                .Font(FAppStyle::GetFontStyle("TinyFont"))
+                .ColorAndOpacity(FLinearColor::White)
+                .Justification(ETextJustify::Right)
+            ]
+        ]
+        + SHorizontalBox::Slot()
+        .FillWidth(1.0f)
+        .Padding(5, 0, 0, 0)
+        [
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot()
+            .AutoWidth()
+            [
+                SNew(STextBlock)
+                .Text(NSLOCTEXT("WowUI", "RangedAttackPower", "Ranged AP: "))
+                .Font(FAppStyle::GetFontStyle("TinyFont"))
+                .ColorAndOpacity(FLinearColor::White)
+            ]
+            + SHorizontalBox::Slot()
+            .FillWidth(1.0f)
+            [
+                SAssignNew(RangedAttackPowerText, STextBlock)
+                .Text(FText::AsNumber(0))
+                .Font(FAppStyle::GetFontStyle("TinyFont"))
+                .ColorAndOpacity(FLinearColor::White)
+                .Justification(ETextJustify::Right)
+            ]
+        ]
+    ];
+
     // Bind to inventory changes
     if (InventoryManager.IsValid())
     {
@@ -207,6 +594,7 @@ void SWowCharacterPanel::ToggleVisibility()
     if (CurrentVisibility == EVisibility::Hidden)
     {
         SetPanelVisibility(EVisibility::SelfHitTestInvisible);
+        UpdateStats(); // Refresh stats when panel is shown
     }
     else
     {
@@ -229,4 +617,113 @@ void SWowCharacterPanel::OnInventoryChanged()
             EquipmentSlot->UpdateSlotDisplay();
         }
     }
+}
+
+void SWowCharacterPanel::UpdateStats()
+{
+    if (!ConnectionManager)
+    {
+        return;
+    }
+
+    const FWowPlayerEntity* LocalPlayer = ConnectionManager->PacketHandler.EntityManager.GetLocalPlayer();
+    if (!LocalPlayer)
+    {
+        return;
+    }
+
+    // Update character name and level
+    if (CharacterNameText.IsValid())
+    {
+        // Try to get player name from cache, fallback to "Player"
+        FString PlayerName = TEXT("Player");
+        if (const FString* FoundName = ConnectionManager->PacketHandler.PlayerNameCache.Find(LocalPlayer->Guid))
+        {
+            PlayerName = *FoundName;
+        }
+        CharacterNameText->SetText(FText::FromString(PlayerName));
+    }
+
+    if (CharacterLevelText.IsValid())
+    {
+        CharacterLevelText->SetText(FText::Format(NSLOCTEXT("WowUI", "LevelFormat", "Level {0}"), FText::AsNumber(LocalPlayer->GetLevel())));
+    }
+
+    // Update basic stats
+    if (StrengthText.IsValid())
+    {
+        StrengthText->SetText(FText::AsNumber(LocalPlayer->GetStrength()));
+    }
+
+    if (AgilityText.IsValid())
+    {
+        AgilityText->SetText(FText::AsNumber(LocalPlayer->GetAgility()));
+    }
+
+    if (StaminaText.IsValid())
+    {
+        StaminaText->SetText(FText::AsNumber(LocalPlayer->GetStamina()));
+    }
+
+    if (IntellectText.IsValid())
+    {
+        IntellectText->SetText(FText::AsNumber(LocalPlayer->GetIntellect()));
+    }
+
+    if (SpiritText.IsValid())
+    {
+        SpiritText->SetText(FText::AsNumber(LocalPlayer->GetSpirit()));
+    }
+
+    // Update resistances
+    if (ArmorText.IsValid())
+    {
+        ArmorText->SetText(FText::AsNumber(LocalPlayer->GetArmor()));
+    }
+
+    if (HolyResText.IsValid())
+    {
+        HolyResText->SetText(FText::AsNumber(LocalPlayer->GetResistance(1))); // Holy = index 1
+    }
+
+    if (FireResText.IsValid())
+    {
+        FireResText->SetText(FText::AsNumber(LocalPlayer->GetResistance(2))); // Fire = index 2
+    }
+
+    if (NatureResText.IsValid())
+    {
+        NatureResText->SetText(FText::AsNumber(LocalPlayer->GetResistance(3))); // Nature = index 3
+    }
+
+    if (FrostResText.IsValid())
+    {
+        FrostResText->SetText(FText::AsNumber(LocalPlayer->GetResistance(4))); // Frost = index 4
+    }
+
+    if (ShadowResText.IsValid())
+    {
+        ShadowResText->SetText(FText::AsNumber(LocalPlayer->GetResistance(5))); // Shadow = index 5
+    }
+
+    if (ArcaneResText.IsValid())
+    {
+        ArcaneResText->SetText(FText::AsNumber(LocalPlayer->GetResistance(6))); // Arcane = index 6
+    }
+
+    // Update attack power
+    if (AttackPowerText.IsValid())
+    {
+        AttackPowerText->SetText(FText::AsNumber(LocalPlayer->GetAttackPower()));
+    }
+
+    if (RangedAttackPowerText.IsValid())
+    {
+        RangedAttackPowerText->SetText(FText::AsNumber(LocalPlayer->GetRangedAttackPower()));
+    }
+}
+
+void SWowCharacterPanel::SetConnectionManager(UWowConnectionManager* InConnectionManager)
+{
+    ConnectionManager = InConnectionManager;
 }

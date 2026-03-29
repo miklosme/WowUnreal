@@ -10,6 +10,7 @@
 #include "Components/CanvasPanel.h"
 #include "WowEntity.h"
 #include "WowEntityManager.h"
+#include "WowConnectionManager.h"
 #include "Widgets/SOverlay.h"
 #include "Framework/Application/SlateApplication.h"
 
@@ -80,11 +81,11 @@ void UWowUIManager::Deinitialize()
 }
 
 
-void UWowUIManager::LoadUI(FMpqManager* Mpq)
+void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 {
-	if (!Mpq || !LuaVM || !LuaVM->IsInitialized())
+	if (!Mpq || !AssetCache || !LuaVM || !LuaVM->IsInitialized())
 	{
-		UE_LOG(LogWowUIManager, Error, TEXT("Cannot load UI: null MPQ or Lua VM not initialized"));
+		UE_LOG(LogWowUIManager, Error, TEXT("Cannot load UI: null MPQ/AssetCache or Lua VM not initialized"));
 		return;
 	}
 
@@ -103,11 +104,14 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq)
 		return;
 	}
 
-	// Wire font manager to frame manager
+	// Wire dependencies to frame manager
 	FrameManager->SetFontManager(FontManager.Get());
+	FrameManager->SetMpqManager(Mpq);
+	FrameManager->SetAssetCache(AssetCache);
 
 	// 1. Load FrameXML (Interface/FrameXML/FrameXML.toc) — the core UI system
 	TArray<FWowXmlDirective> FrameXmlDirectives = FWowFrameXmlParser::LoadFrameXml(Mpq);
+	UE_LOG(LogWowUIManager, Warning, TEXT("LoadFrameXml returned %d directives"), FrameXmlDirectives.Num());
 
 	int32 FrameCount = 0;
 	for (const FWowXmlDirective& Dir : FrameXmlDirectives)
@@ -196,6 +200,12 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq)
 
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI loaded successfully (%d frames total)"),
 		FrameManager ? FrameManager->GetFrameCount() : 0);
+
+	// Dump key frame layout for debugging
+	if (FrameManager)
+	{
+		FrameManager->DebugDumpLayout();
+	}
 }
 
 void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
@@ -224,7 +234,8 @@ void UWowUIManager::SetRootCanvas(UCanvasPanel* Canvas)
 		];
 
 		// Create character panel (left side, padded from edge)
-		CharacterPanel = SNew(SWowCharacterPanel, InventoryManager);
+		// ConnectionManager is set later via SetConnectionManager, for now pass nullptr
+		CharacterPanel = SNew(SWowCharacterPanel, InventoryManager, nullptr);
 		UIOverlay->AddSlot()
 		.HAlign(HAlign_Left)
 		.VAlign(VAlign_Center)
@@ -269,4 +280,21 @@ void UWowUIManager::UpdateInventory()
 	FWowEntityManager DummyEntityManager;
 
 	InventoryManager->UpdateFromPlayerEntity(DummyPlayer, DummyEntityManager);
+}
+
+void UWowUIManager::SetConnectionManager(UWowConnectionManager* InConnectionManager)
+{
+	ConnectionManager = InConnectionManager;
+
+	// Update the Lua context with connection manager and entity manager
+	if (UIContext && ConnectionManager)
+	{
+		UIContext->ConnectionManager = ConnectionManager;
+		UIContext->EntityManager = &ConnectionManager->PacketHandler.EntityManager;
+
+		UE_LOG(LogWowUIManager, Log, TEXT("Updated Lua context with ConnectionManager and EntityManager"));
+	}
+
+	// Character panel connection manager is set when the panel is created
+	// in WowGameplayController, not here.
 }

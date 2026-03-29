@@ -9,6 +9,14 @@
 #include "Components/Slider.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
+#include "Engine/Texture2D.h"
+#include "Slate/SlateBrushAsset.h"
+#include "Mpq/MpqManager.h"
+#include "WowAssetCache.h"
+#include "Formats/BlpParser.h"
+#include "WowTextureFactory.h"
+#include "Styling/CoreStyle.h"
+#include "Slate/WidgetTransform.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowFrame, Log, All);
 
@@ -19,7 +27,72 @@ FWowFrameManager::FWowFrameManager()
 void FWowFrameManager::Initialize(UCanvasPanel* InRootCanvas)
 {
 	RootCanvas = InRootCanvas;
-	UE_LOG(LogWowFrame, Log, TEXT("Frame manager initialized"));
+
+	if (InRootCanvas)
+	{
+		// WoW's base UI height (the reference for scaling)
+		const float WowBaseHeight = 768.0f;
+
+		// Get actual viewport size
+		FVector2D ViewportSize = FVector2D(1024.0f, 768.0f); // Default fallback
+
+		if (GEngine && GEngine->GameViewport)
+		{
+			GEngine->GameViewport->GetViewportSize(ViewportSize);
+		}
+
+		// Guard against viewport not ready (returns 0,0 early in startup)
+		if (ViewportSize.X < 100.f || ViewportSize.Y < 100.f)
+		{
+			ViewportSize = FVector2D(1920.0f, 1080.0f); // Sensible default
+			UE_LOG(LogWowFrame, Warning, TEXT("Viewport size not available yet, defaulting to %.0fx%.0f"), ViewportSize.X, ViewportSize.Y);
+		}
+
+		// WoW scales by screen HEIGHT only — UIParent stretches to fill the full
+		// viewport width.  This means on a 1920×1080 screen the UI scale is
+		// 1080/768 = 1.40625 and UIParent is 1365×768 in WoW-coordinate units.
+		// Using min(ScaleX, ScaleY) would letterbox on widescreen monitors.
+		UIScale = ViewportSize.Y / WowBaseHeight;
+
+		// UIParent dimensions in WoW coordinate units (covers the full viewport)
+		float UIParentW = ViewportSize.X / UIScale;
+		float UIParentH = WowBaseHeight;
+
+		UE_LOG(LogWowFrame, Log, TEXT("UI Scale: Viewport (%.0fx%.0f) -> UIParent %.1fx%.1f, scale %.3f"),
+			ViewportSize.X, ViewportSize.Y, UIParentW, UIParentH, UIScale);
+
+		// Initialize UIParent as a virtual frame that represents the screen
+		// UIParent doesn't get a widget - it's just a coordinate reference point
+		FWowFrameDef UIParentDef;
+		UIParentDef.Name = TEXT("UIParent");
+		UIParentDef.Type = EWowFrameType::Frame;
+		UIParentDef.Width = UIParentW;   // Full viewport width in WoW units
+		UIParentDef.Height = UIParentH;  // Always 768 WoW units tall
+		UIParentDef.bVirtual = true; // Don't create a widget for this
+		UIParentDef.Strata = EWowFrameStrata::MEDIUM;
+		UIParentDef.FrameLevel = 0;
+
+		// Register UIParent as a virtual frame and store its rect
+		RegisterTemplate(TEXT("UIParent"), UIParentDef);
+
+		// Store the rect so anchor lookups use the correct full-screen dimensions
+		FrameRects.Add(TEXT("UIParent"), FFrameRect(0.0f, 0.0f, UIParentW, UIParentH));
+
+		// Create a handle for UIParent but without a widget
+		int64 UIParentHandle = NextHandle++;
+		FFrameEntry UIParentEntry;
+		UIParentEntry.Def = UIParentDef;
+		UIParentEntry.Widget = nullptr; // No widget for virtual frames
+		UIParentEntry.ParentHandle = -1;
+
+		Frames.Add(UIParentHandle, MoveTemp(UIParentEntry));
+		NameToHandle.Add(TEXT("UIParent"), UIParentHandle);
+
+		UE_LOG(LogWowFrame, Warning, TEXT("Initialized UIParent virtual frame (%.1fx%.1f WoW coordinates, viewport %.0fx%.0f, scale %.3f)"),
+			UIParentW, UIParentH, ViewportSize.X, ViewportSize.Y, UIScale);
+	}
+
+	UE_LOG(LogWowFrame, Warning, TEXT("Frame manager initialized - WoW anchor positioning system ready"));
 }
 
 void FWowFrameManager::RegisterTemplate(const FString& Name, const FWowFrameDef& Def)
@@ -55,7 +128,37 @@ void FWowFrameManager::SetFrameVisible(int64 Handle, bool bVisible)
 
 	if (Entry->Widget.IsValid())
 	{
-		Entry->Widget->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+		if (bVisible)
+		{
+			Entry->Widget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+		else
+		{
+			Entry->Widget->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+
+	// Propagate visibility recursively to ALL descendant frames
+	TArray<int64> ToPropagate;
+	ToPropagate.Add(Handle);
+	while (ToPropagate.Num() > 0)
+	{
+		int64 Current = ToPropagate.Pop();
+		for (auto& Pair : Frames)
+		{
+			if (Pair.Value.ParentHandle == Current && Pair.Value.Widget.IsValid())
+			{
+				if (!bVisible)
+				{
+					Pair.Value.Widget->SetVisibility(ESlateVisibility::Collapsed);
+				}
+				else if (!Pair.Value.Def.bHidden)
+				{
+					Pair.Value.Widget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+				}
+				ToPropagate.Add(Pair.Key);
+			}
+		}
 	}
 }
 
@@ -79,12 +182,16 @@ void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
 	Entry->Def.Width = W;
 	Entry->Def.Height = H;
 
+	// Clear cached frame rect since size changed
+	if (!Entry->Def.Name.IsEmpty())
+	{
+		FrameRects.Remove(Entry->Def.Name);
+	}
+
 	if (Entry->Widget.IsValid())
 	{
-		if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Entry->Widget->Slot))
-		{
-			Slot->SetSize(FVector2D(W, H));
-		}
+		// Re-apply anchors to recalculate position with new size
+		ApplyAnchors(Entry->Widget.Get(), Entry->Def);
 	}
 }
 
@@ -95,6 +202,12 @@ void FWowFrameManager::SetFrameAnchors(int64 Handle, const TArray<FWowAnchor>& N
 
 	Entry->Def.Anchors = NewAnchors;
 	Entry->Def.bSetAllPoints = false;
+
+	// Clear cached frame rect since position will change
+	if (!Entry->Def.Name.IsEmpty())
+	{
+		FrameRects.Remove(Entry->Def.Name);
+	}
 
 	if (Entry->Widget.IsValid())
 	{
@@ -173,6 +286,12 @@ TArray<int64> FWowFrameManager::GetChildHandles(int64 Handle) const
 	return Children;
 }
 
+UWidget* FWowFrameManager::GetWidgetForHandle(int64 Handle) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	return Entry && Entry->Widget.IsValid() ? Entry->Widget.Get() : nullptr;
+}
+
 // ── Template Inheritance ──────────────────────────────────────────────────────
 
 void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& Template)
@@ -246,10 +365,10 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 
 	// Type-specific properties — use template values if target is empty
 	if (Target.ButtonText.IsEmpty()) Target.ButtonText = Template.ButtonText;
-	if (Target.NormalTexture.IsEmpty()) Target.NormalTexture = Template.NormalTexture;
-	if (Target.PushedTexture.IsEmpty()) Target.PushedTexture = Template.PushedTexture;
-	if (Target.HighlightTexture.IsEmpty()) Target.HighlightTexture = Template.HighlightTexture;
-	if (Target.DisabledTexture.IsEmpty()) Target.DisabledTexture = Template.DisabledTexture;
+	if (Target.NormalTexture.IsEmpty()) { Target.NormalTexture = Template.NormalTexture; Target.NormalTextureName = Template.NormalTextureName; }
+	if (Target.PushedTexture.IsEmpty()) { Target.PushedTexture = Template.PushedTexture; Target.PushedTextureName = Template.PushedTextureName; }
+	if (Target.HighlightTexture.IsEmpty()) { Target.HighlightTexture = Template.HighlightTexture; Target.HighlightTextureName = Template.HighlightTextureName; }
+	if (Target.DisabledTexture.IsEmpty()) { Target.DisabledTexture = Template.DisabledTexture; Target.DisabledTextureName = Template.DisabledTextureName; }
 	if (Target.Orientation.IsEmpty()) Target.Orientation = Template.Orientation;
 }
 
@@ -290,21 +409,88 @@ FWowFrameDef FWowFrameManager::ResolveInherits(const FWowFrameDef& Def) const
 
 // ── Anchor Positioning ────────────────────────────────────────────────────────
 
-static FVector2D AnchorPointToAlignment(EWowAnchorPoint Point)
+/** Get the screen position offset of an anchor point on a frame */
+FVector2D FWowFrameManager::GetAnchorPointOffset(EWowAnchorPoint Point, float Width, float Height)
 {
 	switch (Point)
 	{
-	case EWowAnchorPoint::TOPLEFT:     return FVector2D(0.0, 0.0);
-	case EWowAnchorPoint::TOP:         return FVector2D(0.5, 0.0);
-	case EWowAnchorPoint::TOPRIGHT:    return FVector2D(1.0, 0.0);
-	case EWowAnchorPoint::LEFT:        return FVector2D(0.0, 0.5);
-	case EWowAnchorPoint::CENTER:      return FVector2D(0.5, 0.5);
-	case EWowAnchorPoint::RIGHT:       return FVector2D(1.0, 0.5);
-	case EWowAnchorPoint::BOTTOMLEFT:  return FVector2D(0.0, 1.0);
-	case EWowAnchorPoint::BOTTOM:      return FVector2D(0.5, 1.0);
-	case EWowAnchorPoint::BOTTOMRIGHT: return FVector2D(1.0, 1.0);
-	default: return FVector2D(0.5, 0.5);
+	case EWowAnchorPoint::TOPLEFT:     return FVector2D(0.0f, 0.0f);
+	case EWowAnchorPoint::TOP:         return FVector2D(Width * 0.5f, 0.0f);
+	case EWowAnchorPoint::TOPRIGHT:    return FVector2D(Width, 0.0f);
+	case EWowAnchorPoint::LEFT:        return FVector2D(0.0f, Height * 0.5f);
+	case EWowAnchorPoint::CENTER:      return FVector2D(Width * 0.5f, Height * 0.5f);
+	case EWowAnchorPoint::RIGHT:       return FVector2D(Width, Height * 0.5f);
+	case EWowAnchorPoint::BOTTOMLEFT:  return FVector2D(0.0f, Height);
+	case EWowAnchorPoint::BOTTOM:      return FVector2D(Width * 0.5f, Height);
+	case EWowAnchorPoint::BOTTOMRIGHT: return FVector2D(Width, Height);
+	default: return FVector2D(Width * 0.5f, Height * 0.5f);
 	}
+}
+
+/** Get the frame rect for a named frame, or UIParent default */
+FWowFrameManager::FFrameRect FWowFrameManager::GetFrameRect(const FString& FrameName)
+{
+	if (FrameName.IsEmpty() || FrameName == TEXT("UIParent"))
+	{
+		// UIParent covers the entire screen in WoW coordinates
+		if (FrameRects.Contains(TEXT("UIParent")))
+		{
+			return FrameRects[TEXT("UIParent")];
+		}
+
+		// Initialize UIParent rect if not set — use actual viewport-based dimensions
+		float FallbackW = 1024.0f;
+		float FallbackH = 768.0f;
+		if (UIScale > 0.f && GEngine && GEngine->GameViewport)
+		{
+			FVector2D VP;
+			GEngine->GameViewport->GetViewportSize(VP);
+			FallbackW = VP.X / UIScale;
+			FallbackH = 768.0f;
+		}
+		FFrameRect UIParentRect(0.0f, 0.0f, FallbackW, FallbackH);
+		FrameRects.Add(TEXT("UIParent"), UIParentRect);
+		return UIParentRect;
+	}
+
+	if (FrameRects.Contains(FrameName))
+	{
+		return FrameRects[FrameName];
+	}
+
+	// Try to look up the frame and calculate its rect
+	int64 Handle = FindFrame(FrameName);
+	if (Handle != -1)
+	{
+		const FWowFrameDef* Def = GetFrameDef(Handle);
+		if (Def)
+		{
+			// Calculate rect based on frame's definition
+			FFrameRect Rect(0.0f, 0.0f, Def->Width, Def->Height);
+
+			if (!Def->Anchors.IsEmpty())
+			{
+				const FWowAnchor& Anchor = Def->Anchors[0];
+				FFrameRect ParentRect = GetFrameRect(Anchor.RelativeTo.IsEmpty() ? Def->Parent : Anchor.RelativeTo);
+				FVector2D ParentAnchorPos = FVector2D(ParentRect.X, ParentRect.Y) +
+					GetAnchorPointOffset(Anchor.RelativePoint, ParentRect.W, ParentRect.H);
+				FVector2D FrameAnchorOffset = GetAnchorPointOffset(Anchor.Point, Rect.W, Rect.H);
+
+				Rect.X = ParentAnchorPos.X + Anchor.OffsetX - FrameAnchorOffset.X;
+				Rect.Y = ParentAnchorPos.Y + Anchor.OffsetY - FrameAnchorOffset.Y;
+			}
+
+			// Cache the calculated rect
+			FrameRects.Add(FrameName, Rect);
+			return Rect;
+		}
+	}
+
+	// Fallback to center of screen
+	UE_LOG(LogWowFrame, Warning, TEXT("Frame '%s' not found, using default rect"), *FrameName);
+	FFrameRect DefaultRect(400.0f, 300.0f, 200.0f, 100.0f);
+	FrameRects.Add(FrameName, DefaultRect);
+	return DefaultRect;
 }
 
 void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
@@ -312,102 +498,232 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 	if (!Widget) return;
 
 	UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Widget->Slot);
-	if (!Slot) return;
-
-	if (Def.bSetAllPoints)
+	if (!Slot)
 	{
-		// Fill parent
-		Slot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
-		Slot->SetOffsets(FMargin(0));
+		UE_LOG(LogWowFrame, Error, TEXT("  ApplyAnchors: No canvas slot for %s"), *Def.Name);
 		return;
 	}
 
-	if (Def.Anchors.IsEmpty()) return;
+	if (Def.bSetAllPoints)
+	{
+		// Fill parent completely
+		Slot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+		Slot->SetOffsets(FMargin(0));
 
-	// Use first anchor for positioning
+		// Store frame rect for children to reference
+		FFrameRect ParentRect = GetFrameRect(Def.Parent);
+		FrameRects.Add(Def.Name, ParentRect);
+
+		UE_LOG(LogWowFrame, Log, TEXT("  %s: SetAllPoints (fill parent %.1fx%.1f)"), *Def.Name, ParentRect.W, ParentRect.H);
+		return;
+	}
+
+	float FrameWidth = Def.Width;
+	float FrameHeight = Def.Height;
+
+	// Get the canvas owner's absolute position — we need to convert absolute WoW coords
+	// to relative coords within the parent canvas. In WoW, all positions are absolute
+	// screen coords, but UMG canvas slots use parent-relative positioning.
+	FFrameRect CanvasOwnerRect = GetFrameRect(Def.Parent);
+	float CanvasOffX = CanvasOwnerRect.X;
+	float CanvasOffY = CanvasOwnerRect.Y;
+
+	if (Def.Anchors.IsEmpty())
+	{
+		// Default positioning - center of parent with explicit size
+		float PosX = (CanvasOwnerRect.W * 0.5f) - (FrameWidth * 0.5f);
+		float PosY = (CanvasOwnerRect.H * 0.5f) - (FrameHeight * 0.5f);
+
+		// Store ABSOLUTE rect for child lookups
+		float AbsX = CanvasOffX + PosX;
+		float AbsY = CanvasOffY + PosY;
+
+		Slot->SetAnchors(FAnchors(0.0f, 0.0f));
+		Slot->SetAlignment(FVector2D(0.0f, 0.0f));
+
+		if (FrameWidth > 0.f && FrameHeight > 0.f)
+		{
+			Slot->SetPosition(FVector2D(PosX * UIScale, PosY * UIScale));
+			Slot->SetSize(FVector2D(FrameWidth * UIScale, FrameHeight * UIScale));
+			FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, FrameWidth, FrameHeight));
+		}
+		else
+		{
+			Slot->SetAutoSize(true);
+		}
+		return;
+	}
+
+	// Handle single anchor positioning
 	const FWowAnchor& Anchor = Def.Anchors[0];
 
-	// Map WoW anchor point to UMG anchor
-	FVector2D UmgAnchor = AnchorPointToAlignment(Anchor.RelativePoint);
-	Slot->SetAnchors(FAnchors(UmgAnchor.X, UmgAnchor.Y));
+	// Get anchor reference frame rect (absolute coords)
+	FString AnchorParentName = Anchor.RelativeTo.IsEmpty() ? Def.Parent : Anchor.RelativeTo;
+	FFrameRect AnchorParentRect = GetFrameRect(AnchorParentName);
 
-	// Widget alignment from the point
-	FVector2D Alignment = AnchorPointToAlignment(Anchor.Point);
-	Slot->SetAlignment(Alignment);
+	// Calculate anchor position in absolute WoW coordinates
+	FVector2D ParentAnchorPos = FVector2D(AnchorParentRect.X, AnchorParentRect.Y) +
+		GetAnchorPointOffset(Anchor.RelativePoint, AnchorParentRect.W, AnchorParentRect.H);
 
-	// Position with offsets
-	Slot->SetPosition(FVector2D(Anchor.OffsetX, Anchor.OffsetY));
+	FVector2D FrameAnchorOffset = GetAnchorPointOffset(Anchor.Point, FrameWidth, FrameHeight);
 
-	// Size
-	if (Def.Width > 0.f && Def.Height > 0.f)
+	// WoW offset Y is inverted: positive Y = UP in WoW, but DOWN in canvas
+	float AbsX = ParentAnchorPos.X + Anchor.OffsetX - FrameAnchorOffset.X;
+	float AbsY = ParentAnchorPos.Y - Anchor.OffsetY - FrameAnchorOffset.Y;
+
+	// Convert absolute position to relative (within parent canvas)
+	float RelX = AbsX - CanvasOffX;
+	float RelY = AbsY - CanvasOffY;
+
+	// Debug log for key frames
+	if (Def.Name.Contains(TEXT("Party")) || Def.Name.Contains(TEXT("Target")) || Def.Name.Contains(TEXT("Pet"))
+		|| Def.Name.Contains(TEXT("Player")) || Def.Name.Contains(TEXT("MainMenu")) || Def.Name.Contains(TEXT("Minimap")))
 	{
-		Slot->SetSize(FVector2D(Def.Width, Def.Height));
+		UE_LOG(LogWowFrame, Warning, TEXT("ANCHOR %s: point=%d relPoint=%d relTo='%s' offset=(%.1f,%.1f) -> abs=(%.1f,%.1f) rel=(%.1f,%.1f) frameSize=(%.1f,%.1f) parentRect=(%.1f,%.1f,%.1f,%.1f)"),
+			*Def.Name, (int)Anchor.Point, (int)Anchor.RelativePoint, *AnchorParentName,
+			Anchor.OffsetX, Anchor.OffsetY, AbsX, AbsY, RelX, RelY,
+			FrameWidth, FrameHeight, AnchorParentRect.X, AnchorParentRect.Y, AnchorParentRect.W, AnchorParentRect.H);
+	}
+
+	// Handle two-anchor stretching
+	if (Def.Anchors.Num() >= 2)
+	{
+		const FWowAnchor& Anchor2 = Def.Anchors[1];
+		FFrameRect Parent2Rect = GetFrameRect(Anchor2.RelativeTo.IsEmpty() ? Def.Parent : Anchor2.RelativeTo);
+
+		FVector2D Parent2AnchorPos = FVector2D(Parent2Rect.X, Parent2Rect.Y) +
+			GetAnchorPointOffset(Anchor2.RelativePoint, Parent2Rect.W, Parent2Rect.H);
+		FVector2D Frame2AnchorOffset = GetAnchorPointOffset(Anchor2.Point, FrameWidth, FrameHeight);
+
+		float Abs2X = Parent2AnchorPos.X + Anchor2.OffsetX - Frame2AnchorOffset.X;
+		float Abs2Y = Parent2AnchorPos.Y - Anchor2.OffsetY - Frame2AnchorOffset.Y;
+
+		float StretchWidth = Abs2X - AbsX + Frame2AnchorOffset.X - FrameAnchorOffset.X;
+		float StretchHeight = Abs2Y - AbsY + Frame2AnchorOffset.Y - FrameAnchorOffset.Y;
+
+		Slot->SetAnchors(FAnchors(0.0f, 0.0f));
+		Slot->SetAlignment(FVector2D(0.0f, 0.0f));
+		Slot->SetPosition(FVector2D(RelX * UIScale, RelY * UIScale));
+		Slot->SetSize(FVector2D(StretchWidth * UIScale, StretchHeight * UIScale));
+
+		// Store ABSOLUTE rect for other frames to anchor to
+		FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, StretchWidth, StretchHeight));
 	}
 	else
 	{
-		Slot->SetAutoSize(true);
-	}
+		// Single anchor positioning
+		Slot->SetAnchors(FAnchors(0.0f, 0.0f));
+		Slot->SetAlignment(FVector2D(0.0f, 0.0f));
+		Slot->SetPosition(FVector2D(RelX * UIScale, RelY * UIScale));
 
-	// If two anchors, use them to define stretch
-	if (Def.Anchors.Num() >= 2)
-	{
-		const FWowAnchor& A2 = Def.Anchors[1];
-		FVector2D SecondAnchor = AnchorPointToAlignment(A2.RelativePoint);
+		if (FrameWidth > 0.f && FrameHeight > 0.f)
+		{
+			Slot->SetSize(FVector2D(FrameWidth * UIScale, FrameHeight * UIScale));
+		}
+		else
+		{
+			Slot->SetAutoSize(true);
+		}
 
-		// Two-anchor stretch
-		Slot->SetAnchors(FAnchors(UmgAnchor.X, UmgAnchor.Y, SecondAnchor.X, SecondAnchor.Y));
-		Slot->SetOffsets(FMargin(
-			Anchor.OffsetX, Anchor.OffsetY,
-			-A2.OffsetX, -A2.OffsetY
-		));
+		// Store ABSOLUTE rect for other frames to anchor to
+		FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, FrameWidth, FrameHeight));
 	}
 }
 
 // ── Layer Content (Textures & FontStrings) ───────────────────────────────────
 
 void FWowFrameManager::ApplyElementAnchors(UWidget* Widget, UCanvasPanel* Parent,
-	const TArray<FWowAnchor>& Anchors, float Width, float Height)
+	const TArray<FWowAnchor>& Anchors, float Width, float Height, bool bSetAllPoints,
+	float ParentFrameW, float ParentFrameH)
 {
 	UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Widget->Slot);
 	if (!Slot) return;
 
-	if (Anchors.IsEmpty())
+	// Use passed-in parent dimensions (WoW coords) — GetDesiredSize() returns 0 at creation time
+	float ParentW = ParentFrameW;
+	float ParentH = ParentFrameH;
+
+	if (bSetAllPoints || Anchors.IsEmpty())
 	{
-		// Default: fill parent
-		Slot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
-		Slot->SetOffsets(FMargin(0));
+		// Fill parent: use EXPLICIT size instead of anchor stretching.
+		// UCanvasPanel children with (0,0,1,1) anchors don't reliably stretch
+		// to the parent's slot size at creation time.
+		Slot->SetAnchors(FAnchors(0.0f, 0.0f));
+		Slot->SetAlignment(FVector2D(0.0f, 0.0f));
+		Slot->SetPosition(FVector2D(0.0f, 0.0f));
+		if (ParentW > 0.f && ParentH > 0.f)
+		{
+			Slot->SetSize(FVector2D(ParentW * UIScale, ParentH * UIScale));
+		}
+		else
+		{
+			Slot->SetAutoSize(true);
+		}
 		return;
 	}
 
+	// For layer elements, positioning is relative to the parent frame (which is a canvas)
 	const FWowAnchor& Anchor = Anchors[0];
-	FVector2D UmgAnchor = AnchorPointToAlignment(Anchor.RelativePoint);
-	FVector2D Alignment = AnchorPointToAlignment(Anchor.Point);
 
-	Slot->SetAnchors(FAnchors(UmgAnchor.X, UmgAnchor.Y));
-	Slot->SetAlignment(Alignment);
-	Slot->SetPosition(FVector2D(Anchor.OffsetX, Anchor.OffsetY));
+	// Calculate parent anchor position (relative to parent's top-left)
+	FVector2D ParentAnchorPos = GetAnchorPointOffset(Anchor.RelativePoint, ParentW, ParentH);
+
+	// Calculate element anchor offset
+	FVector2D ElementAnchorOffset = GetAnchorPointOffset(Anchor.Point, Width, Height);
+
+	// Calculate final element position: parent_anchor + wow_offset - element_anchor_offset
+	// WoW convention: positive Y = UP, but UMG canvas Y increases downward, so negate OffsetY
+	float FinalX = ParentAnchorPos.X + Anchor.OffsetX - ElementAnchorOffset.X;
+	float FinalY = ParentAnchorPos.Y - Anchor.OffsetY - ElementAnchorOffset.Y;
+
+	// Apply positioning
+	Slot->SetAnchors(FAnchors(0.0f, 0.0f));
+	Slot->SetAlignment(FVector2D(0.0f, 0.0f));
+	Slot->SetPosition(FVector2D(FinalX * UIScale, FinalY * UIScale));
 
 	if (Width > 0.f && Height > 0.f)
 	{
-		Slot->SetSize(FVector2D(Width, Height));
+		Slot->SetSize(FVector2D(Width * UIScale, Height * UIScale));
 	}
 	else
 	{
+		// No explicit size — auto-size to texture's native dimensions.
+		// ClipToBounds on the parent canvas prevents overflow.
 		Slot->SetAutoSize(true);
 	}
 
+	// Handle two-anchor stretching for layer elements
 	if (Anchors.Num() >= 2)
 	{
-		const FWowAnchor& A2 = Anchors[1];
-		FVector2D SecondAnchor = AnchorPointToAlignment(A2.RelativePoint);
-		Slot->SetAnchors(FAnchors(UmgAnchor.X, UmgAnchor.Y, SecondAnchor.X, SecondAnchor.Y));
-		Slot->SetOffsets(FMargin(Anchor.OffsetX, Anchor.OffsetY, -A2.OffsetX, -A2.OffsetY));
+		const FWowAnchor& Anchor2 = Anchors[1];
+
+		// Calculate second anchor positions
+		FVector2D Parent2AnchorPos = GetAnchorPointOffset(Anchor2.RelativePoint, ParentW, ParentH);
+		FVector2D Element2AnchorOffset = GetAnchorPointOffset(Anchor2.Point, Width, Height);
+
+		float Final2X = Parent2AnchorPos.X + Anchor2.OffsetX - Element2AnchorOffset.X;
+		float Final2Y = Parent2AnchorPos.Y - Anchor2.OffsetY - Element2AnchorOffset.Y;
+
+		// Element stretches between the two positions
+		float StretchWidth = Final2X - FinalX + Element2AnchorOffset.X - ElementAnchorOffset.X;
+		float StretchHeight = Final2Y - FinalY + Element2AnchorOffset.Y - ElementAnchorOffset.Y;
+
+		Slot->SetPosition(FVector2D(FinalX * UIScale, FinalY * UIScale));
+		Slot->SetSize(FVector2D(StretchWidth * UIScale, StretchHeight * UIScale));
 	}
 }
 
 void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def)
 {
 	if (!Container) return;
+
+	int32 TotalTextures = 0, TotalFontStrings = 0, NamedTextures = 0;
+	for (const FWowLayer& L : Def.Layers) { TotalTextures += L.Textures.Num(); TotalFontStrings += L.FontStrings.Num(); for (const auto& T : L.Textures) { if (!T.Name.IsEmpty()) NamedTextures++; } }
+	if (TotalTextures > 0 || TotalFontStrings > 0)
+	{
+		UE_LOG(LogWowFrame, Verbose, TEXT("CreateLayerContent: %s — %d layers, %d textures (%d named), %d fontstrings"),
+			*Def.Name, Def.Layers.Num(), TotalTextures, NamedTextures, TotalFontStrings);
+	}
 
 	UObject* Outer = Container->GetOuter();
 	if (!Outer) Outer = GetTransientPackage();
@@ -424,6 +740,89 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 		{
 			UImage* ImgWidget = NewObject<UImage>(Outer);
 			ImgWidget->SetColorAndOpacity(Tex.VertexColor);
+			if (Tex.bHidden)
+			{
+				ImgWidget->SetVisibility(ESlateVisibility::Collapsed);
+			}
+
+			// Register named texture regions for Lua access + create Lua global
+			if (!Tex.Name.IsEmpty())
+			{
+				NamedTextureWidgets.Add(Tex.Name, ImgWidget);
+
+				// Create a Lua global table for this texture region so scripts can call
+				// MainMenuBarLeftEndCap:SetTexture("Interface\\...")
+				if (EventSystem)
+				{
+					EventSystem->CreateTextureRegionGlobal(Tex.Name);
+					UE_LOG(LogWowFrame, Verbose, TEXT("    Registered texture region global: %s"), *Tex.Name);
+				}
+				else
+				{
+					UE_LOG(LogWowFrame, Warning, TEXT("    NO EventSystem for texture region: %s"), *Tex.Name);
+				}
+			}
+
+			// If no file specified, hide until Lua sets a texture via SetTexture()
+			if (Tex.File.IsEmpty())
+			{
+				ImgWidget->SetRenderOpacity(0.0f);
+			}
+
+			// Load the BLP texture if specified
+			if (!Tex.File.IsEmpty())
+			{
+				UTexture2D* LoadedTexture = LoadUITexture(Tex.File);
+				if (LoadedTexture)
+				{
+					// Create slate brush with texture and UV coordinates
+					FSlateBrush SlateBrush;
+					SlateBrush.SetResourceObject(LoadedTexture);
+					SlateBrush.DrawAs = ESlateBrushDrawType::Image;
+					SlateBrush.ImageSize = FVector2D(LoadedTexture->GetSizeX(), LoadedTexture->GetSizeY());
+					SlateBrush.Tiling = ESlateBrushTileType::NoTile;
+
+					// Apply texture coordinates if specified (default is 0,0,1,1 for full texture)
+					if (Tex.Left != 0.0f || Tex.Right != 1.0f || Tex.Top != 0.0f || Tex.Bottom != 1.0f)
+					{
+						// WoW uses Left,Right,Top,Bottom UV coordinates.
+						// FBox2D expects Min < Max, but WoW uses Left > Right for horizontal flip
+						// and Top > Bottom for vertical flip.  Normalize the UVs and apply
+						// a RenderTransform to handle flipping.
+						float UVLeft  = FMath::Min(Tex.Left, Tex.Right);
+						float UVRight = FMath::Max(Tex.Left, Tex.Right);
+						float UVTop   = FMath::Min(Tex.Top, Tex.Bottom);
+						float UVBot   = FMath::Max(Tex.Top, Tex.Bottom);
+
+						FBox2D UVRegion(FVector2D(UVLeft, UVTop), FVector2D(UVRight, UVBot));
+						SlateBrush.SetUVRegion(UVRegion);
+
+						// Apply render transform for flipped texcoords
+						bool bFlipH = Tex.Left > Tex.Right;
+						bool bFlipV = Tex.Top > Tex.Bottom;
+						if (bFlipH || bFlipV)
+						{
+							FVector2D Scale(bFlipH ? -1.0f : 1.0f, bFlipV ? -1.0f : 1.0f);
+							ImgWidget->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+							ImgWidget->SetRenderTransform(FWidgetTransform(FVector2D::ZeroVector, Scale, FVector2D::ZeroVector, 0.0f));
+						}
+					}
+
+					ImgWidget->SetBrush(SlateBrush);
+					if (Tex.Left > Tex.Right || Tex.Top > Tex.Bottom)
+					{
+						UE_LOG(LogWowFrame, Warning, TEXT("  FLIPPED texture: %s in frame %s (UV: L=%.3f R=%.3f T=%.3f B=%.3f) flipH=%d flipV=%d"),
+							*Tex.File, *Def.Name, Tex.Left, Tex.Right, Tex.Top, Tex.Bottom,
+							Tex.Left > Tex.Right ? 1 : 0, Tex.Top > Tex.Bottom ? 1 : 0);
+					}
+					UE_LOG(LogWowFrame, Verbose, TEXT("  Applied texture: %s (UV: %.3f,%.3f to %.3f,%.3f)"),
+						*Tex.File, Tex.Left, Tex.Top, Tex.Right, Tex.Bottom);
+				}
+				else
+				{
+					UE_LOG(LogWowFrame, Warning, TEXT("  Failed to load texture: %s"), *Tex.File);
+				}
+			}
 
 			UCanvasPanelSlot* Slot = Container->AddChildToCanvas(ImgWidget);
 			if (Slot)
@@ -431,7 +830,24 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				Slot->SetZOrder(ZOrder++);
 			}
 
-			ApplyElementAnchors(ImgWidget, Container, Tex.Anchors, Tex.Width, Tex.Height);
+			ApplyElementAnchors(ImgWidget, Container, Tex.Anchors, Tex.Width, Tex.Height, Tex.bSetAllPoints, Def.Width, Def.Height);
+
+			// For textures with anchors but no explicit size that auto-sized,
+			// override with texture native size × UIScale (prevents oversized rendering)
+			if (Tex.Width <= 0.f && Tex.Height <= 0.f && !Tex.bSetAllPoints && Tex.Anchors.Num() > 0)
+			{
+				UCanvasPanelSlot* TexSlot = Cast<UCanvasPanelSlot>(ImgWidget->Slot);
+				if (TexSlot)
+				{
+					FSlateBrush CurrentBrush = ImgWidget->GetBrush();
+					FVector2D ImgSize = CurrentBrush.ImageSize;
+					if (ImgSize.X > 0.f && ImgSize.Y > 0.f)
+					{
+						TexSlot->SetAutoSize(false);
+						TexSlot->SetSize(FVector2D(ImgSize.X * UIScale, ImgSize.Y * UIScale));
+					}
+				}
+			}
 
 			// Register the texture element as a named sub-object
 			if (!Tex.Name.IsEmpty())
@@ -460,13 +876,15 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 			{
 				// Try to get the font based on inheritance or use default
 				FString FontName = FS.Inherits.IsEmpty() ? TEXT("GameFontNormal") : FS.Inherits;
-				FontInfo = FontManager->GetFont(FontName, static_cast<int32>(FS.FontHeight));
+				// Scale font size with UI scale for proper sizing
+				int32 ScaledFontSize = FMath::RoundToInt(FS.FontHeight * UIScale);
+				FontInfo = FontManager->GetFont(FontName, ScaledFontSize);
 			}
 			else
 			{
-				// Fallback to default UE font
+				// Fallback to default UE font (also scale the size)
 				FontInfo = TextWidget->GetFont();
-				FontInfo.Size = static_cast<int32>(FS.FontHeight);
+				FontInfo.Size = FMath::RoundToInt(FS.FontHeight * UIScale);
 			}
 			TextWidget->SetFont(FontInfo);
 
@@ -484,66 +902,146 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 				Slot->SetZOrder(ZOrder++);
 			}
 
-			ApplyElementAnchors(TextWidget, Container, FS.Anchors, FS.Width, FS.Height);
+			ApplyElementAnchors(TextWidget, Container, FS.Anchors, FS.Width, FS.Height, false, Def.Width, Def.Height);
 
 			if (!FS.Name.IsEmpty())
 			{
+				// Create a Lua global for this fontstring so scripts can access it
+				if (EventSystem)
+				{
+					EventSystem->CreateTextureRegionGlobal(FS.Name);
+				}
+				// Warn if fontstring name still contains unresolved $parent
+				if (FS.Name.Contains(TEXT("$parent")))
+				{
+					UE_LOG(LogWowFrame, Warning, TEXT("  UNRESOLVED $parent in fontstring: %s (frame: %s)"), *FS.Name, *Def.Name);
+				}
 				UE_LOG(LogWowFrame, Verbose, TEXT("  Layer fontstring: %s (text: %s)"), *FS.Name, *FS.Text);
 			}
 		}
 	}
 }
 
+// ── Backdrop Creation ────────────────────────────────────────────────────────
+
+void FWowFrameManager::CreateBackdrop(UCanvasPanel* Container, const FWowBackdrop& Backdrop)
+{
+	if (!Container) return;
+
+	UObject* Outer = Container->GetOuter();
+	if (!Outer) Outer = GetTransientPackage();
+
+	// For now, implement a simple backdrop that just renders the background texture
+	// A full 9-slice implementation would be more complex
+	if (!Backdrop.BgFile.IsEmpty())
+	{
+		UTexture2D* BgTexture = LoadUITexture(Backdrop.BgFile);
+		if (BgTexture)
+		{
+			UImage* BgImage = NewObject<UImage>(Outer);
+
+			FSlateBrush SlateBrush;
+			SlateBrush.SetResourceObject(BgTexture);
+			SlateBrush.DrawAs = ESlateBrushDrawType::Image;
+			BgImage->SetBrush(SlateBrush);
+
+			// Add as first child (lowest Z order) so it appears behind other content
+			UCanvasPanelSlot* Slot = Container->AddChildToCanvas(BgImage);
+			if (Slot)
+			{
+				Slot->SetZOrder(-1000); // Behind all other elements
+				// Fill the entire frame (insets are in WoW coords, scale them)
+				Slot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+				Slot->SetOffsets(FMargin(
+					Backdrop.InsetLeft * UIScale,
+					Backdrop.InsetTop * UIScale,
+					-Backdrop.InsetRight * UIScale,
+					-Backdrop.InsetBottom * UIScale
+				));
+			}
+
+			UE_LOG(LogWowFrame, Verbose, TEXT("Created backdrop with background: %s"), *Backdrop.BgFile);
+		}
+	}
+
+	// TODO: Implement edge textures for proper 9-slice rendering
+	// For now, we just render the background texture
+}
+
 // ── Widget Creation ──────────────────────────────────────────────────────────
 
-UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def)
+UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 Handle, int64 ParentHandle)
 {
 	UCanvasPanel* Canvas = RootCanvas.Get();
 	if (!Canvas)
 	{
-		UE_LOG(LogWowFrame, Warning, TEXT("No root canvas for frame creation"));
+		UE_LOG(LogWowFrame, Error, TEXT("No root canvas for frame creation"));
 		return nullptr;
 	}
 
-	UObject* Outer = Canvas->GetOuter();
+	bool bForceHidden = false; // Set to true for orphaned frames whose parent doesn't exist
+
+	// Determine parent canvas: use parent frame's canvas if it exists, otherwise root canvas
+	UCanvasPanel* ParentCanvas = Canvas; // Default to root canvas
+
+	if (ParentHandle != -1)
+	{
+		UWidget* ParentWidget = GetWidgetForHandle(ParentHandle);
+		if (ParentWidget)
+		{
+			if (UCanvasPanel* ParentCanvasPanel = Cast<UCanvasPanel>(ParentWidget))
+			{
+				ParentCanvas = ParentCanvasPanel;
+				UE_LOG(LogWowFrame, Verbose, TEXT("  %s: Using parent canvas from frame %lld"), *Def.Name, ParentHandle);
+			}
+			else
+			{
+				UE_LOG(LogWowFrame, Warning, TEXT("  %s: Parent frame %lld is not a canvas, using root canvas"), *Def.Name, ParentHandle);
+			}
+		}
+		else
+		{
+			// Parent frame exists but has no widget (like UIParent or other virtual frames)
+			// Use root canvas
+			const FFrameEntry* ParentEntry = Frames.Find(ParentHandle);
+			if (ParentEntry)
+			{
+				UE_LOG(LogWowFrame, Verbose, TEXT("  %s: Parent frame %lld (%s) is virtual, using root canvas"),
+					*Def.Name, ParentHandle, *ParentEntry->Def.Name);
+			}
+		}
+	}
+	else if (!Def.Parent.IsEmpty())
+	{
+		UE_LOG(LogWowFrame, Warning, TEXT("  %s: Parent '%s' not found, using root canvas (hidden)"), *Def.Name, *Def.Parent);
+		// Force-hide orphaned frames — they belong inside a container that doesn't exist yet
+		bForceHidden = true;
+	}
+
+	UE_LOG(LogWowFrame, Log, TEXT("CreateFrame: %s type=%d canvas=%p parent=%p hidden=%d"),
+		*Def.Name, (int32)Def.Type, Canvas, ParentCanvas, Def.bHidden);
+
+	UObject* Outer = ParentCanvas->GetOuter();
 	if (!Outer) Outer = GetTransientPackage();
 
 	UWidget* Widget = nullptr;
 
-	switch (Def.Type)
+	// WorldFrame is the 3D world viewport — skip widget creation (it's handled by UE5's viewport)
+	if (Def.Type == EWowFrameType::WorldFrame)
 	{
-	case EWowFrameType::Button:
-	case EWowFrameType::CheckButton:
-	{
-		UButton* Btn = NewObject<UButton>(Outer);
-		Widget = Btn;
-		break;
+		UE_LOG(LogWowFrame, Log, TEXT("  %s: WorldFrame type — skipping widget (3D viewport)"), *Def.Name);
+		return nullptr;
 	}
-	case EWowFrameType::EditBox:
+
+	// ALL frame types use UCanvasPanel so they can contain children (WoW allows children on any frame type).
+	// Button/EditBox/StatusBar/Slider behavior is handled through Lua scripts and event routing,
+	// not UMG widget types. Using non-canvas widgets (UButton etc.) breaks the parent-child hierarchy
+	// because UButton can't contain arbitrary positioned children.
 	{
-		UEditableTextBox* Edit = NewObject<UEditableTextBox>(Outer);
-		Widget = Edit;
-		break;
-	}
-	case EWowFrameType::StatusBar:
-	{
-		UProgressBar* Bar = NewObject<UProgressBar>(Outer);
-		Widget = Bar;
-		break;
-	}
-	case EWowFrameType::Slider:
-	{
-		USlider* Sldr = NewObject<USlider>(Outer);
-		Widget = Sldr;
-		break;
-	}
-	default:
-	{
-		// Frame and other types: use a canvas panel as a generic container
 		UCanvasPanel* Container = NewObject<UCanvasPanel>(Outer);
+		// Clip children to frame bounds — prevents textures from overflowing
+		Container->SetClipping(EWidgetClipping::ClipToBounds);
 		Widget = Container;
-		break;
-	}
 	}
 
 	if (!Widget)
@@ -551,53 +1049,213 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def)
 		return nullptr;
 	}
 
-	// Set visibility
-	if (Def.bHidden)
+	// Walk the full parent chain to check if ANY ancestor is hidden
+	bool bParentHidden = false;
+	{
+		int64 CheckHandle = ParentHandle;
+		int32 MaxDepth = 20; // prevent infinite loops
+		while (CheckHandle >= 0 && MaxDepth-- > 0)
+		{
+			const FFrameEntry* AncestorEntry = Frames.Find(CheckHandle);
+			if (!AncestorEntry) break;
+			if (AncestorEntry->Def.bHidden || (AncestorEntry->Widget.IsValid() &&
+				AncestorEntry->Widget->GetVisibility() == ESlateVisibility::Collapsed))
+			{
+				bParentHidden = true;
+				break;
+			}
+			CheckHandle = AncestorEntry->ParentHandle;
+		}
+	}
+
+	if (Def.bHidden || bForceHidden || bParentHidden)
 	{
 		Widget->SetVisibility(ESlateVisibility::Collapsed);
 	}
+	else
+	{
+		Widget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
 
-	// Add to root canvas (all top-level frames go to root)
-	UCanvasPanelSlot* Slot = Canvas->AddChildToCanvas(Widget);
+	// Add to parent canvas (may be root canvas or a parent frame's canvas)
+	UCanvasPanelSlot* Slot = ParentCanvas->AddChildToCanvas(Widget);
 
 	// Apply strata z-ordering (1000 per strata level + frame level offset)
 	if (Slot)
 	{
 		int32 ZOrder = static_cast<int32>(Def.Strata) * 1000 + Def.FrameLevel;
 		Slot->SetZOrder(ZOrder);
+		UE_LOG(LogWowFrame, Verbose, TEXT("  Added to canvas: slot=%p ZOrder=%d"), Slot, ZOrder);
+	}
+	else
+	{
+		UE_LOG(LogWowFrame, Error, TEXT("  Failed to add widget to canvas!"));
 	}
 
 	// Apply anchor positioning
 	ApplyAnchors(Widget, Def);
 
-	// Create layer content (textures and fontstrings) inside the frame
-	if (UCanvasPanel* Container = Cast<UCanvasPanel>(Widget))
+	// Ensure frame has minimum size if not auto-sizing
+	if (Slot && Def.Width > 0.f && Def.Height > 0.f)
 	{
-		CreateLayerContent(Container, Def);
+		// Double-check that size was set (in case ApplyAnchors didn't handle it)
+		FVector2D CurrentSize = Slot->GetSize();
+		if (CurrentSize.X == 0.f && CurrentSize.Y == 0.f)
+		{
+			Slot->SetSize(FVector2D(Def.Width * UIScale, Def.Height * UIScale));
+			UE_LOG(LogWowFrame, Warning, TEXT("  %s: Fallback size set to %.1fx%.1f (scaled)"), *Def.Name, Def.Width * UIScale, Def.Height * UIScale);
+		}
+	}
+
+	// Create UProgressBar child for StatusBar frames
+	if (Def.Type == EWowFrameType::StatusBar)
+	{
+		UProgressBar* Bar = NewObject<UProgressBar>(Widget);
+		// Style it - no border, fill color
+		Bar->SetFillColorAndOpacity(FLinearColor::Green); // default, Lua will override
+		Bar->SetPercent(0.0f);
+		UCanvasPanelSlot* BarSlot = Cast<UCanvasPanel>(Widget)->AddChildToCanvas(Bar);
+		if (BarSlot)
+		{
+			BarSlot->SetAnchors(FAnchors(0, 0));
+			BarSlot->SetPosition(FVector2D(0, 0));
+			BarSlot->SetSize(FVector2D(Def.Width * UIScale, Def.Height * UIScale));
+		}
+		StatusBarWidgets.Add(Handle, Bar);
+	}
+
+	// Create backdrop (9-slice background) if specified
+	if (Def.Backdrop.IsSet() && Cast<UCanvasPanel>(Widget))
+	{
+		CreateBackdrop(Cast<UCanvasPanel>(Widget), Def.Backdrop.GetValue());
+	}
+
+	// Create layer content (textures and fontstrings) inside the frame
+	if (Def.Layers.Num() > 0)
+	{
+		UCanvasPanel* Container = Cast<UCanvasPanel>(Widget);
+		// Only create layers for canvas-type frames; skip for buttons/statusbars/etc.
+		// to avoid dumping textures onto the root canvas where they'd fill the screen
+		if (Container)
+		{
+			CreateLayerContent(Container, Def);
+		}
 	}
 
 	return Widget;
+}
+
+// ── $parent Resolution ───────────────────────────────────────────────────────
+
+void FWowFrameManager::ResolveParentReferences(FWowFrameDef& Def, const FString& ParentName)
+{
+	// Resolve $parent in the frame name itself
+	if (Def.Name.StartsWith(TEXT("$parent")) && !ParentName.IsEmpty())
+	{
+		FString ResolvedName = Def.Name;
+		ResolvedName.ReplaceInline(TEXT("$parent"), *ParentName);
+		Def.Name = ResolvedName;
+
+		UE_LOG(LogWowFrame, Verbose, TEXT("Resolved frame name: $parent -> %s"), *Def.Name);
+	}
+
+	// Resolve $parent in anchor RelativeTo fields
+	for (FWowAnchor& Anchor : Def.Anchors)
+	{
+		if (Anchor.RelativeTo.StartsWith(TEXT("$parent")) && !ParentName.IsEmpty())
+		{
+			FString ResolvedRelativeTo = Anchor.RelativeTo;
+			ResolvedRelativeTo.ReplaceInline(TEXT("$parent"), *ParentName);
+			Anchor.RelativeTo = ResolvedRelativeTo;
+
+			UE_LOG(LogWowFrame, Verbose, TEXT("Resolved anchor RelativeTo: $parent -> %s"), *Anchor.RelativeTo);
+		}
+	}
+
+	// Resolve $parent in layer content (textures and fontstrings)
+	// $parent in layer content refers to the FRAME itself. For anonymous frames
+	// (no name), fall back to using ParentName (the frame's parent).
+	const FString& FrameName = Def.Name.IsEmpty() ? ParentName : Def.Name;
+	for (FWowLayer& Layer : Def.Layers)
+	{
+		// Resolve in texture elements
+		for (FWowTextureElement& Texture : Layer.Textures)
+		{
+			// Resolve texture name: $parentBorder → ActionButton1Border
+			if (Texture.Name.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
+			{
+				Texture.Name.ReplaceInline(TEXT("$parent"), *FrameName);
+			}
+
+			// Resolve texture anchor RelativeTo fields
+			for (FWowAnchor& TexAnchor : Texture.Anchors)
+			{
+				if (TexAnchor.RelativeTo.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
+				{
+					TexAnchor.RelativeTo.ReplaceInline(TEXT("$parent"), *FrameName);
+				}
+			}
+		}
+
+		// Resolve in fontstring elements
+		for (FWowFontStringElement& FontString : Layer.FontStrings)
+		{
+			// Resolve fontstring name: $parentName → PlayerFrameName
+			if (FontString.Name.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
+			{
+				FontString.Name.ReplaceInline(TEXT("$parent"), *FrameName);
+			}
+
+			// Resolve fontstring anchor RelativeTo fields
+			for (FWowAnchor& FSAnchor : FontString.Anchors)
+			{
+				if (FSAnchor.RelativeTo.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
+				{
+					FSAnchor.RelativeTo.ReplaceInline(TEXT("$parent"), *FrameName);
+				}
+			}
+		}
+	}
+
+	// Resolve $parent in button texture names (NormalTexture, PushedTexture, etc.)
+	if (!FrameName.IsEmpty())
+	{
+		if (Def.NormalTextureName.Contains(TEXT("$parent")))
+			Def.NormalTextureName.ReplaceInline(TEXT("$parent"), *FrameName);
+		if (Def.PushedTextureName.Contains(TEXT("$parent")))
+			Def.PushedTextureName.ReplaceInline(TEXT("$parent"), *FrameName);
+		if (Def.HighlightTextureName.Contains(TEXT("$parent")))
+			Def.HighlightTextureName.ReplaceInline(TEXT("$parent"), *FrameName);
+		if (Def.DisabledTextureName.Contains(TEXT("$parent")))
+			Def.DisabledTextureName.ReplaceInline(TEXT("$parent"), *FrameName);
+	}
+
+	// Recursively resolve $parent in child frames
+	for (FWowFrameDef& Child : Def.Children)
+	{
+		ResolveParentReferences(Child, Def.Name);
+	}
 }
 
 // ── Frame Creation ───────────────────────────────────────────────────────────
 
 int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 {
-	// Skip virtual frames - register as templates only
-	if (Def.bVirtual)
-	{
-		if (!Def.Name.IsEmpty())
-		{
-			RegisterTemplate(Def.Name, Def);
-		}
-		return -1;
-	}
-
-	// Resolve template inheritance
+	// Resolve template inheritance first
 	FWowFrameDef Resolved = ResolveInherits(Def);
 
-	int64 Handle = NextHandle++;
+	// Resolve $parent references in frame names and anchors.
+	// SKIP for virtual frames — they are templates whose children should keep
+	// $parent unresolved so it gets resolved during instantiation.
+	if (!Resolved.bVirtual)
+	{
+		// Always resolve, even if Parent is empty — layer content ($parent in
+		// texture/fontstring names) uses the frame's OWN name, not the parent.
+		FString ParentForResolution = Resolved.Parent.IsEmpty() ? Resolved.Name : Resolved.Parent;
+		ResolveParentReferences(Resolved, ParentForResolution);
+	}
 
+	int64 Handle = NextHandle++;
 	FFrameEntry Entry;
 	Entry.Def = Resolved;
 
@@ -605,10 +1263,31 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	if (!Resolved.Parent.IsEmpty())
 	{
 		Entry.ParentHandle = FindFrame(Resolved.Parent);
+		if (Entry.ParentHandle == -1)
+		{
+			UE_LOG(LogWowFrame, Warning, TEXT("Parent frame '%s' not found for frame '%s'"), *Resolved.Parent, *Resolved.Name);
+		}
 	}
 
-	// Create the widget
-	Entry.Widget = CreateWidgetForFrame(Resolved);
+	// Handle virtual frames (like templates and UIParent)
+	if (Resolved.bVirtual)
+	{
+		// Virtual frames don't get widgets but are stored for reference/inheritance
+		Entry.Widget = nullptr;
+		Frames.Add(Handle, MoveTemp(Entry));
+
+		if (!Resolved.Name.IsEmpty())
+		{
+			NameToHandle.Add(Resolved.Name, Handle);
+			RegisterTemplate(Resolved.Name, Resolved);
+		}
+
+		UE_LOG(LogWowFrame, Log, TEXT("Created virtual frame [%lld] %s"), Handle, *Resolved.Name);
+		return Handle;
+	}
+
+	// Create the widget for non-virtual frames
+	Entry.Widget = CreateWidgetForFrame(Resolved, Handle, Entry.ParentHandle);
 
 	Frames.Add(Handle, MoveTemp(Entry));
 
@@ -617,24 +1296,240 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 		NameToHandle.Add(Resolved.Name, Handle);
 	}
 
-	// Compile script handlers and create Lua frame object
-	if (EventSystem && Resolved.Scripts.Num() > 0)
+	// Register frame as Lua global FIRST (so children and scripts can find it)
+	if (EventSystem && !Resolved.Name.IsEmpty())
+	{
+		EventSystem->CreateFrameObject(Handle, Resolved.Name);
+
+		// Create Lua globals for button texture names (e.g., ActionButton1NormalTexture)
+		// These are needed by GetNormalTexture() etc.
+		if (!Resolved.NormalTextureName.IsEmpty())
+			EventSystem->CreateTextureRegionGlobal(Resolved.NormalTextureName);
+		if (!Resolved.PushedTextureName.IsEmpty())
+			EventSystem->CreateTextureRegionGlobal(Resolved.PushedTextureName);
+		if (!Resolved.HighlightTextureName.IsEmpty())
+			EventSystem->CreateTextureRegionGlobal(Resolved.HighlightTextureName);
+		if (!Resolved.DisabledTextureName.IsEmpty())
+			EventSystem->CreateTextureRegionGlobal(Resolved.DisabledTextureName);
+	}
+
+	// Create child frames BEFORE firing OnLoad (WoW creates children first,
+	// then fires parent OnLoad — scripts like ActionButton_OnLoad expect
+	// _G["ActionButton1Cooldown"] to exist when OnLoad runs)
+	for (const FWowFrameDef& ChildDef : Resolved.Children)
+	{
+		FWowFrameDef ChildWithParent = ChildDef;
+		if (ChildWithParent.Parent.IsEmpty() && !Resolved.Name.IsEmpty())
+		{
+			ChildWithParent.Parent = Resolved.Name;
+		}
+		CreateFrame(ChildWithParent);
+	}
+
+	// NOW compile and fire OnLoad — all children exist
+	// Always call CompileFrameScripts so child-field mapping and self.name are set,
+	// even for frames without scripts (they still need fields for parent scripts to access)
+	if (EventSystem)
 	{
 		EventSystem->CompileFrameScripts(Handle, Resolved);
 	}
-	else if (EventSystem && !Resolved.Name.IsEmpty())
-	{
-		// Even without scripts, create the Lua frame object for named frames
-		EventSystem->CreateFrameObject(Handle, Resolved.Name);
-	}
 
-	// Create child frames recursively
-	for (const FWowFrameDef& ChildDef : Resolved.Children)
-	{
-		CreateFrame(ChildDef);
-	}
-
-	UE_LOG(LogWowFrame, Verbose, TEXT("Created frame [%lld] %s (type %d, %d layers, %d children)"),
-		Handle, *Resolved.Name, (int32)Resolved.Type, Resolved.Layers.Num(), Resolved.Children.Num());
+	UE_LOG(LogWowFrame, Log, TEXT("Created frame [%lld] %s (type %d, %d layers, %d children, widget=%p)"),
+		Handle, *Resolved.Name, (int32)Resolved.Type, Resolved.Layers.Num(), Resolved.Children.Num(), Entry.Widget.Get());
 	return Handle;
 }
+
+// ── Texture Loading ──────────────────────────────────────────────────────
+
+UTexture2D* FWowFrameManager::LoadUITexture(const FString& TexturePath)
+{
+	if (TexturePath.IsEmpty() || !MpqManager || !AssetCache)
+	{
+		return nullptr;
+	}
+
+	// Check cache first
+	if (TWeakObjectPtr<UTexture2D>* CachedPtr = TextureCache.Find(TexturePath))
+	{
+		if (CachedPtr->IsValid())
+		{
+			return CachedPtr->Get();
+		}
+		else
+		{
+			// Remove stale entry
+			TextureCache.Remove(TexturePath);
+		}
+	}
+
+	// Check asset cache
+	UTexture2D* ExistingTexture = AssetCache->FindTexture(TexturePath);
+	if (ExistingTexture)
+	{
+		TextureCache.Add(TexturePath, ExistingTexture);
+		return ExistingTexture;
+	}
+
+	// Convert interface path to BLP file path
+	FString BlpPath = TexturePath;
+	// Replace known extensions with .blp
+	if (BlpPath.EndsWith(TEXT(".tga"), ESearchCase::IgnoreCase))
+	{
+		BlpPath = BlpPath.Left(BlpPath.Len() - 4) + TEXT(".blp");
+	}
+	else if (BlpPath.EndsWith(TEXT(".png"), ESearchCase::IgnoreCase))
+	{
+		BlpPath = BlpPath.Left(BlpPath.Len() - 4) + TEXT(".blp");
+	}
+	else if (!BlpPath.EndsWith(TEXT(".blp"), ESearchCase::IgnoreCase))
+	{
+		BlpPath += TEXT(".blp");
+	}
+
+	// Read BLP file from MPQ
+	TArray<uint8> BlpData;
+	if (!MpqManager->ReadFile(BlpPath, BlpData))
+	{
+		UE_LOG(LogWowFrame, Warning, TEXT("Failed to read UI texture: %s"), *BlpPath);
+		return nullptr;
+	}
+
+	// Parse BLP
+	FBlpTexture BlpTexture = FBlpParser::Parse(BlpData);
+	if (!BlpTexture.bIsValid)
+	{
+		UE_LOG(LogWowFrame, Warning, TEXT("Failed to parse UI texture: %s"), *BlpPath);
+		return nullptr;
+	}
+
+	// Create UTexture2D
+	UTexture2D* Texture = FWowTextureFactory::CreateTexture(BlpTexture, TexturePath);
+	if (!Texture)
+	{
+		UE_LOG(LogWowFrame, Warning, TEXT("Failed to create UI texture: %s"), *BlpPath);
+		return nullptr;
+	}
+
+	// Cache the texture
+	AssetCache->CacheTexture(TexturePath, Texture);
+	TextureCache.Add(TexturePath, Texture);
+
+	UE_LOG(LogWowFrame, Verbose, TEXT("Loaded UI texture: %s (%dx%d)"),
+		*TexturePath, Texture->GetSizeX(), Texture->GetSizeY());
+
+	return Texture;
+}
+
+int64 FWowFrameManager::CreateDebugFrame(const FString& Name, float Width, float Height, float X, float Y)
+{
+	// Create a simple debug frame with a background and text
+	FWowFrameDef DebugDef;
+	DebugDef.Name = Name;
+	DebugDef.Type = EWowFrameType::Frame;
+	DebugDef.Width = Width;
+	DebugDef.Height = Height;
+	DebugDef.Strata = EWowFrameStrata::DIALOG;
+	DebugDef.FrameLevel = 10;
+
+	// Add anchor to position it
+	FWowAnchor Anchor;
+	Anchor.Point = EWowAnchorPoint::TOPLEFT;
+	Anchor.RelativePoint = EWowAnchorPoint::TOPLEFT;
+	Anchor.OffsetX = X;
+	Anchor.OffsetY = Y;
+	DebugDef.Anchors.Add(Anchor);
+
+	// Add a backdrop for visual feedback
+	FWowBackdrop Backdrop;
+	// For now, create a debug frame without backdrop since we need texture files
+	// A real implementation would load Interface/DialogFrame/UI-DialogBox-Background.blp
+
+	// Add a text layer to show the frame name
+	FWowLayer TextLayer;
+	TextLayer.Level = EWowDrawLayer::OVERLAY;
+
+	FWowFontStringElement DebugText;
+	DebugText.Name = Name + TEXT("_Text");
+	DebugText.Text = Name + FString::Printf(TEXT(" (%.0fx%.0f)"), Width, Height);
+	DebugText.FontHeight = 12.f;
+	DebugText.Color = FLinearColor::Yellow;
+	DebugText.JustifyH = TEXT("CENTER");
+
+	// Center the text in the frame
+	FWowAnchor TextAnchor;
+	TextAnchor.Point = EWowAnchorPoint::CENTER;
+	TextAnchor.RelativePoint = EWowAnchorPoint::CENTER;
+	DebugText.Anchors.Add(TextAnchor);
+
+	TextLayer.FontStrings.Add(DebugText);
+	DebugDef.Layers.Add(TextLayer);
+
+	int64 Handle = CreateFrame(DebugDef);
+	UE_LOG(LogWowFrame, Warning, TEXT("Created debug frame '%s' [%lld] at (%.0f,%.0f) size %.0fx%.0f"),
+		*Name, Handle, X, Y, Width, Height);
+
+	return Handle;
+}
+
+void FWowFrameManager::DebugDumpLayout() const
+{
+	// Dump key WoW UI frames with expected vs actual sizes
+	static const TCHAR* KeyFrames[] = {
+		TEXT("UIParent"), TEXT("PlayerFrame"), TEXT("TargetFrame"),
+		TEXT("MainMenuBar"), TEXT("MainMenuBarArtFrame"), TEXT("MinimapCluster"),
+		TEXT("Minimap"), TEXT("ActionButton1"), TEXT("MultiBarBottomLeft"),
+		TEXT("ChatFrame1"), TEXT("BuffFrame"), TEXT("CastingBarFrame"),
+	};
+
+	UE_LOG(LogWowFrame, Warning, TEXT("═══════════ LAYOUT DEBUG DUMP ═══════════"));
+	UE_LOG(LogWowFrame, Warning, TEXT("UIScale=%.3f  RootCanvas=%p  TotalFrames=%d"),
+		UIScale, RootCanvas.Get(), Frames.Num());
+
+	for (const TCHAR* FrameName : KeyFrames)
+	{
+		const int64* HandlePtr = NameToHandle.Find(FrameName);
+		if (!HandlePtr) {
+			UE_LOG(LogWowFrame, Warning, TEXT("  %-25s  NOT FOUND"), FrameName);
+			continue;
+		}
+
+		const FFrameEntry* Entry = Frames.Find(*HandlePtr);
+		if (!Entry) continue;
+
+		const FWowFrameDef& Def = Entry->Def;
+		UWidget* W = Entry->Widget.IsValid() ? Entry->Widget.Get() : nullptr;
+
+		// Get stored rect
+		const FFrameRect* Rect = FrameRects.Find(FrameName);
+		float RX = Rect ? Rect->X : -1, RY = Rect ? Rect->Y : -1;
+		float RW = Rect ? Rect->W : -1, RH = Rect ? Rect->H : -1;
+
+		// Get actual slot info
+		FString SlotInfo = TEXT("no widget");
+		if (W)
+		{
+			UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(W->Slot);
+			if (Slot)
+			{
+				FVector2D Pos = Slot->GetPosition();
+				FVector2D Size = Slot->GetSize();
+				FAnchors Anch = Slot->GetAnchors();
+				SlotInfo = FString::Printf(TEXT("slot=(%.0f,%.0f) sz=(%.0f,%.0f) anch=(%.1f,%.1f,%.1f,%.1f) vis=%d clip=%d"),
+					Pos.X, Pos.Y, Size.X, Size.Y,
+					Anch.Minimum.X, Anch.Minimum.Y, Anch.Maximum.X, Anch.Maximum.Y,
+					(int32)W->GetVisibility(), (int32)W->GetClipping());
+			}
+			else
+			{
+				SlotInfo = TEXT("no slot");
+			}
+		}
+
+		UE_LOG(LogWowFrame, Warning, TEXT("  %-25s  rect=(%.0f,%.0f,%.0f,%.0f) hidden=%d setAll=%d parent='%s' %s"),
+			FrameName, RX, RY, RW, RH, Def.bHidden, Def.bSetAllPoints, *Def.Parent, *SlotInfo);
+	}
+
+	UE_LOG(LogWowFrame, Warning, TEXT("═══════════ END LAYOUT DUMP ═══════════"));
+}
+
+

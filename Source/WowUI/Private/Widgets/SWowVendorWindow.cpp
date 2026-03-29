@@ -12,6 +12,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowVendorWindow, Log, All);
 void SWowVendorWindow::Construct(const FArguments& InArgs)
 {
     OnBuyItem = InArgs._OnBuyItem;
+    OnSellItem = InArgs._OnSellItem;
     OnCloseVendor = InArgs._OnCloseVendor;
 
     ChildSlot
@@ -45,7 +46,48 @@ void SWowVendorWindow::Construct(const FArguments& InArgs)
                 ]
             ]
 
-            // Item list (scrollable)
+            // Player money display
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 4.0f)
+            [
+                SAssignNew(PlayerMoneyText, STextBlock)
+                .Text(FText::FromString(TEXT("0g 0s 0c")))
+                .Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+                .ColorAndOpacity(FLinearColor::Yellow)
+            ]
+
+            // Buy/Sell tabs
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0.0f, 4.0f)
+            [
+                SNew(SHorizontalBox)
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SButton)
+                    .Text(FText::FromString(TEXT("Buy")))
+                    .OnClicked_Lambda([this]()
+                    {
+                        OnTabChanged(0);
+                        return FReply::Handled();
+                    })
+                ]
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SButton)
+                    .Text(FText::FromString(TEXT("Sell")))
+                    .OnClicked_Lambda([this]()
+                    {
+                        OnTabChanged(1);
+                        return FReply::Handled();
+                    })
+                ]
+            ]
+
+            // Buy items list (scrollable)
             + SVerticalBox::Slot()
             .FillHeight(1.0f)
             .Padding(0.0f, 8.0f)
@@ -53,6 +95,17 @@ void SWowVendorWindow::Construct(const FArguments& InArgs)
                 SAssignNew(ItemList, SScrollBox)
                 .Orientation(Orient_Vertical)
                 .ScrollBarAlwaysVisible(false)
+            ]
+
+            // Sell items list (scrollable, initially hidden)
+            + SVerticalBox::Slot()
+            .FillHeight(1.0f)
+            .Padding(0.0f, 8.0f)
+            [
+                SAssignNew(SellItemList, SScrollBox)
+                .Orientation(Orient_Vertical)
+                .ScrollBarAlwaysVisible(false)
+                .Visibility(EVisibility::Collapsed)
             ]
         ]
     ];
@@ -65,11 +118,94 @@ void SWowVendorWindow::UpdateVendor(uint64 VendorGuid, const TArray<FWowVendorIt
     CurrentVendorGuid = VendorGuid;
     CurrentItems = Items;
 
-    // Clear existing items
+    // Reset to buy tab
+    CurrentTab = 0;
+    OnTabChanged(0);
+
+    RefreshBuyList();
+
+    SetVisibility(EVisibility::Visible);
+    UE_LOG(LogWowVendorWindow, Log, TEXT("Updated vendor window: %d items"), Items.Num());
+}
+
+void SWowVendorWindow::CloseVendor()
+{
+    CurrentVendorGuid = 0;
+    CurrentItems.Empty();
+    ItemList->ClearChildren();
+    SetVisibility(EVisibility::Collapsed);
+
+    UE_LOG(LogWowVendorWindow, Log, TEXT("Closed vendor window"));
+}
+
+FReply SWowVendorWindow::OnCloseClicked()
+{
+    CloseVendor();
+    if (OnCloseVendor.IsBound())
+    {
+        OnCloseVendor.Execute();
+    }
+    return FReply::Handled();
+}
+
+FReply SWowVendorWindow::OnBuyItemClicked(uint32 ItemId, int32 Count)
+{
+    if (OnBuyItem.IsBound())
+    {
+        OnBuyItem.Execute(CurrentVendorGuid, ItemId, Count);
+        UE_LOG(LogWowVendorWindow, Log, TEXT("Buy item %u (count=%d) from vendor %llu"), ItemId, Count, CurrentVendorGuid);
+    }
+    return FReply::Handled();
+}
+
+void SWowVendorWindow::UpdatePlayerInventory(const TArray<FWowItem>& Items)
+{
+    PlayerInventoryItems = Items;
+    RefreshSellList();
+
+    // Update money display
+    if (PlayerMoneyText.IsValid())
+    {
+        PlayerMoneyText->SetText(GetPriceText(PlayerMoney));
+    }
+}
+
+void SWowVendorWindow::OnTabChanged(int32 TabIndex)
+{
+    CurrentTab = TabIndex;
+
+    if (TabIndex == 0) // Buy tab
+    {
+        if (ItemList.IsValid())
+        {
+            ItemList->SetVisibility(EVisibility::Visible);
+        }
+        if (SellItemList.IsValid())
+        {
+            SellItemList->SetVisibility(EVisibility::Collapsed);
+        }
+    }
+    else // Sell tab
+    {
+        if (ItemList.IsValid())
+        {
+            ItemList->SetVisibility(EVisibility::Collapsed);
+        }
+        if (SellItemList.IsValid())
+        {
+            SellItemList->SetVisibility(EVisibility::Visible);
+        }
+        RefreshSellList();
+    }
+}
+
+void SWowVendorWindow::RefreshBuyList()
+{
+    if (!ItemList.IsValid()) return;
+
     ItemList->ClearChildren();
 
-    // Add items to list
-    for (const FWowVendorItem& Item : Items)
+    for (const FWowVendorItem& Item : CurrentItems)
     {
         ItemList->AddSlot()
         [
@@ -145,37 +281,92 @@ void SWowVendorWindow::UpdateVendor(uint64 VendorGuid, const TArray<FWowVendorIt
             ]
         ];
     }
-
-    SetVisibility(EVisibility::Visible);
-    UE_LOG(LogWowVendorWindow, Log, TEXT("Updated vendor window: %d items"), Items.Num());
 }
 
-void SWowVendorWindow::CloseVendor()
+void SWowVendorWindow::RefreshSellList()
 {
-    CurrentVendorGuid = 0;
-    CurrentItems.Empty();
-    ItemList->ClearChildren();
-    SetVisibility(EVisibility::Collapsed);
+    if (!SellItemList.IsValid()) return;
 
-    UE_LOG(LogWowVendorWindow, Log, TEXT("Closed vendor window"));
-}
+    SellItemList->ClearChildren();
 
-FReply SWowVendorWindow::OnCloseClicked()
-{
-    CloseVendor();
-    if (OnCloseVendor.IsBound())
+    for (const FWowItem& Item : PlayerInventoryItems)
     {
-        OnCloseVendor.Execute();
+        // Skip soulbound items or items that can't be sold (quality checks, etc.)
+        if (Item.Quality > 0) // Only sell grey items for simplicity
+        {
+            continue;
+        }
+
+        SellItemList->AddSlot()
+        [
+            SNew(SBorder)
+            .BorderBackgroundColor(FLinearColor(0.2f, 0.2f, 0.2f, 0.8f))
+            .Padding(8.0f)
+            [
+                SNew(SHorizontalBox)
+
+                // Icon placeholder
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                [
+                    SNew(SBox)
+                    .WidthOverride(32.0f)
+                    .HeightOverride(32.0f)
+                    [
+                        SNew(SBorder)
+                        .BorderBackgroundColor(FLinearColor::Gray)
+                        [
+                            SNew(STextBlock)
+                            .Text(FText::FromString(TEXT("?")))
+                            .Justification(ETextJustify::Center)
+                        ]
+                    ]
+                ]
+
+                // Item details
+                + SHorizontalBox::Slot()
+                .FillWidth(1.0f)
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(STextBlock)
+                        .Text(FText::FromString(FString::Printf(TEXT("Item %u"), Item.Entry)))
+                        .ColorAndOpacity(FLinearColor::White)
+                        .Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+                    ]
+                    + SVerticalBox::Slot()
+                    .AutoHeight()
+                    [
+                        SNew(STextBlock)
+                        .Text(FText::FromString(FString::Printf(TEXT("Count: %u"), Item.Count)))
+                        .ColorAndOpacity(FLinearColor::Gray)
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+                    ]
+                ]
+
+                // Sell button
+                + SHorizontalBox::Slot()
+                .AutoWidth()
+                .VAlign(VAlign_Center)
+                [
+                    SNew(SButton)
+                    .Text(FText::FromString(TEXT("Sell")))
+                    .OnClicked_Lambda([this, Item]() { return OnSellItemClicked(Item.Guid, 1); })
+                ]
+            ]
+        ];
     }
-    return FReply::Handled();
 }
 
-FReply SWowVendorWindow::OnBuyItemClicked(uint32 ItemId, int32 Count)
+FReply SWowVendorWindow::OnSellItemClicked(uint64 ItemGuid, uint8 Count)
 {
-    if (OnBuyItem.IsBound())
+    if (OnSellItem.IsBound())
     {
-        OnBuyItem.Execute(CurrentVendorGuid, ItemId, Count);
-        UE_LOG(LogWowVendorWindow, Log, TEXT("Buy item %u (count=%d) from vendor %llu"), ItemId, Count, CurrentVendorGuid);
+        OnSellItem.Execute(CurrentVendorGuid, ItemGuid, Count);
+        UE_LOG(LogWowVendorWindow, Log, TEXT("Sell item %llu (count=%d) to vendor %llu"), ItemGuid, Count, CurrentVendorGuid);
     }
     return FReply::Handled();
 }

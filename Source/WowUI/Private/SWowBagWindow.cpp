@@ -4,8 +4,10 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SToolTip.h"
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
+#include "Formats/Dbc/DbcStore.h"
 
 void SWowItemSlot::Construct(const FArguments& InArgs, TSharedPtr<FWowInventoryManager> InInventoryManager)
 {
@@ -74,13 +76,24 @@ void SWowItemSlot::OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent
 {
     bIsHovered = true;
 
-    // TODO: Show tooltip with item info
-    // For now, just update border color
+    // Show item tooltip if slot has an item
+    if (InventoryManager.IsValid())
+    {
+        const FWowItemSlot* ItemSlot = InventoryManager->GetBackpackItem(SlotIndex);
+        if (ItemSlot && !ItemSlot->IsEmpty())
+        {
+            TSharedPtr<SToolTip> ItemTooltip = CreateItemTooltip(ItemSlot);
+            SetToolTip(ItemTooltip);
+        }
+    }
 }
 
 void SWowItemSlot::OnMouseLeave(const FPointerEvent& MouseEvent)
 {
     bIsHovered = false;
+
+    // Clear tooltip
+    SetToolTip(nullptr);
 }
 
 void SWowItemSlot::UpdateSlotDisplay()
@@ -119,6 +132,87 @@ FText SWowItemSlot::GetStackCountText() const
         return FText::GetEmpty();
 
     return FText::AsNumber(ItemSlot->StackCount);
+}
+
+TSharedPtr<SToolTip> SWowItemSlot::CreateItemTooltip(const FWowItemSlot* ItemSlot) const
+{
+    if (!ItemSlot || ItemSlot->IsEmpty())
+    {
+        return nullptr;
+    }
+
+    // Get item display info from DBC if available (note: ItemDisplayInfo doesn't contain names)
+    FString ItemName;
+    // TODO: Look up item name from Item.dbc or server query cache when available
+    // For now, ItemDisplayInfo.dbc only contains display information, not names
+
+    // Fallback to Item #ID if no name found
+    if (ItemName.IsEmpty())
+    {
+        ItemName = FString::Printf(TEXT("Item #%u"), ItemSlot->ItemEntry);
+    }
+
+    // Get quality color
+    FLinearColor QualityColor = FWowInventoryManager::GetQualityColor(ItemSlot->Quality);
+
+    return SNew(SToolTip)
+    [
+        SNew(SBorder)
+        .BorderImage(FAppStyle::GetBrush("ToolPanel.DarkGroupBorder"))
+        .BorderBackgroundColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.95f))
+        .Padding(8.0f)
+        [
+            SNew(SVerticalBox)
+
+            // Item name with quality color
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            [
+                SNew(STextBlock)
+                .Text(FText::FromString(ItemName))
+                .ColorAndOpacity(QualityColor)
+                .Font(FAppStyle::GetFontStyle("NormalFont"))
+                .Justification(ETextJustify::Left)
+            ]
+
+            // Item ID
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 2, 0, 0)
+            [
+                SNew(STextBlock)
+                .Text(FText::FromString(FString::Printf(TEXT("Item ID: %u"), ItemSlot->ItemEntry)))
+                .ColorAndOpacity(FLinearColor(0.8f, 0.8f, 0.8f, 1.0f))
+                .Font(FAppStyle::GetFontStyle("SmallFont"))
+            ]
+
+            // Stack count (if > 1)
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 2, 0, 0)
+            [
+                SNew(STextBlock)
+                .Text(ItemSlot->StackCount > 1 ?
+                    FText::FromString(FString::Printf(TEXT("Count: %u"), ItemSlot->StackCount)) :
+                    FText::GetEmpty())
+                .ColorAndOpacity(FLinearColor(0.8f, 0.8f, 0.8f, 1.0f))
+                .Font(FAppStyle::GetFontStyle("SmallFont"))
+                .Visibility(ItemSlot->StackCount > 1 ? EVisibility::Visible : EVisibility::Collapsed)
+            ]
+
+            // Usage hint
+            + SVerticalBox::Slot()
+            .AutoHeight()
+            .Padding(0, 4, 0, 0)
+            [
+                SNew(STextBlock)
+                .Text(FText::FromString(TEXT("Right-click to use")))
+                .ColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f, 1.0f))
+                .Font(FAppStyle::GetFontStyle("SmallFont"))
+                .Justification(ETextJustify::Left)
+            ]
+        ]
+    ];
 }
 
 void SWowBagWindow::Construct(const FArguments& InArgs, TSharedPtr<FWowInventoryManager> InInventoryManager)

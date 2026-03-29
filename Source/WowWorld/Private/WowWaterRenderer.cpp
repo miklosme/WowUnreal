@@ -79,7 +79,11 @@ static UStaticMesh* BuildLiquidStaticMesh(
 
 	if (Material)
 	{
-		SM->SetMaterial(0, Material);
+		if (SM->GetStaticMaterials().Num() <= 0)
+		{
+			SM->GetStaticMaterials().SetNum(1);
+		}
+		SM->GetStaticMaterials()[0].MaterialInterface = Material;
 	}
 
 	return SM;

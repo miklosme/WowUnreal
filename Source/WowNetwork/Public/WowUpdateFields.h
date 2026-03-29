@@ -133,9 +133,29 @@ namespace UnitField
     inline constexpr uint16 FACTIONTEMPLATE      = BASE + 0x0031;
     inline constexpr uint16 FLAGS                = BASE + 0x0035;
     inline constexpr uint16 FLAGS_2              = BASE + 0x0036;
+    inline constexpr uint16 NPC_FLAGS            = BASE + 0x0037;
     inline constexpr uint16 DISPLAYID            = BASE + 0x003D;
     inline constexpr uint16 NATIVEDISPLAYID      = BASE + 0x003E;
     inline constexpr uint16 MOUNTDISPLAYID       = BASE + 0x003F;
+    inline constexpr uint16 BYTES_1              = BASE + 0x0044; // byte0=StandState, byte1=PetTalents, byte2=StandFlags, byte3=AnimTier
+    inline constexpr uint16 DYNAMIC_FLAGS        = BASE + 0x0049;
+    inline constexpr uint16 NPC_EMOTESTATE       = BASE + 0x004D;
+
+    // Stats (Strength, Agility, Stamina, Intellect, Spirit)
+    inline constexpr uint16 STAT0                = BASE + 0x004E; // Strength
+    inline constexpr uint16 STAT1                = BASE + 0x004F; // Agility
+    inline constexpr uint16 STAT2                = BASE + 0x0050; // Stamina
+    inline constexpr uint16 STAT3                = BASE + 0x0051; // Intellect
+    inline constexpr uint16 STAT4                = BASE + 0x0052; // Spirit
+
+    // Resistances (Physical/Armor, Holy, Fire, Nature, Frost, Shadow, Arcane)
+    inline constexpr uint16 RESISTANCES          = BASE + 0x005D; // 7 values
+
+    inline constexpr uint16 BYTES_2              = BASE + 0x0074; // byte0=SheathState, byte1=PvpFlags, byte2=PetFlags, byte3=ShapeshiftForm
+
+    // Attack Power
+    inline constexpr uint16 ATTACK_POWER         = BASE + 0x0075;
+    inline constexpr uint16 RANGED_ATTACK_POWER  = BASE + 0x0078;
 
     inline constexpr uint16 END = BASE + 0x008E;
 }
@@ -150,6 +170,9 @@ namespace PlayerField
     inline constexpr uint16 XP            = BASE + 0x01E6;
     inline constexpr uint16 NEXT_LEVEL_XP = BASE + 0x01E7;
     inline constexpr uint16 COINAGE       = BASE + 0x03FE;
+
+    // Combat ratings (crit, hit, haste, etc.) - 25 values starting at offset from UNIT_END
+    inline constexpr uint16 COMBAT_RATING_1 = BASE + 0x043B;
 
     // Equipment slots - visible items
     inline constexpr uint16 VISIBLE_ITEM_BASE = BASE + 0x0006; // Each slot = 2 GUIDs (item + enchant display)

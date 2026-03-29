@@ -3,6 +3,7 @@
 #include "HAL/PlatformFilemanager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Fonts/CompositeFont.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowFont, Log, All);
 
@@ -182,20 +183,29 @@ bool FWowFontManager::ExtractFont(FMpqManager* Mpq, const FString& MpqPath, cons
 
 FSlateFontInfo FWowFontManager::CreateFontFromFile(const FString& FilePath, int32 Size) const
 {
-	// Create a font info using UE5's standard approach
-	// Try to load as a system font first, fallback to file path
+	// Create a font info using UE5.7's new API
 	FSlateFontInfo FontInfo;
 
-	// Use the base filename as the font name (e.g., "FRIZQT__" from "FRIZQT__.TTF")
-	FString FontName = FPaths::GetBaseFilename(FilePath);
-
-	// Set up the font info - UE5 will handle loading
-	FontInfo.TypefaceFontName = FName(*FontName);
+	// Set the size first
 	FontInfo.Size = Size;
 
-	// If the system font doesn't work, UE5 will fallback to default fonts
-	// The TTF files extracted to Saved/Fonts may need to be installed system-wide
-	// or we may need to use a different approach like UFont assets
+	// Create a composite font with the TTF file
+	TSharedPtr<FCompositeFont> CompositeFont = MakeShared<FCompositeFont>();
+
+	FTypefaceEntry TypefaceEntry;
+	FString FontName = FPaths::GetBaseFilename(FilePath);
+	TypefaceEntry.Name = FName(*FontName);
+
+	// Create font data from the file path with default hinting and loading policy
+	TypefaceEntry.Font = FFontData(FilePath, EFontHinting::Default, EFontLoadingPolicy::LazyLoad);
+
+	CompositeFont->DefaultTypeface.Fonts.Add(TypefaceEntry);
+
+	FontInfo.CompositeFont = CompositeFont;
+	FontInfo.TypefaceFontName = FName(*FontName);
+
+	UE_LOG(LogWowFont, Verbose, TEXT("Created font info: %s (size %d) from file: %s"),
+		*FontName, Size, *FilePath);
 
 	return FontInfo;
 }

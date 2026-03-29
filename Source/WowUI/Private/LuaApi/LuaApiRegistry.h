@@ -5,6 +5,7 @@ class FWowEntityManager;
 class UWowConnectionManager;
 class FWowEventSystem;
 class FWowFrameManager;
+class FMpqManager;
 
 /** Context passed to Lua API functions so they can access game state */
 struct FWowLuaContext
@@ -30,6 +31,9 @@ namespace WowLuaApi
 
     /** Retrieve context from Lua registry (returns nullptr if not set) */
     FWowLuaContext* GetContext(lua_State* L);
+
+    /** Update the loaded addons list for GetNumAddOns/GetAddOnInfo */
+    void UpdateLoadedAddons(FMpqManager* Mpq);
 
     /** Key for the frame metatable in the Lua registry */
     extern const char* FRAME_METATABLE;

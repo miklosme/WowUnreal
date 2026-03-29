@@ -154,6 +154,37 @@ void FWowLuaVM::SandboxGlobals()
 {
 #if HAS_LUA
 	if (!L) return;
+
+	// Save safe os functions before removing the module
+	// WoW FrameXML needs: date(), time(), difftime(), clock()
+	lua_getglobal(L, "os");
+	if (lua_istable(L, -1))
+	{
+		// Save os.time, os.date, os.difftime, os.clock as globals
+		lua_getfield(L, -1, "time");
+		lua_setglobal(L, "time");
+
+		lua_getfield(L, -1, "date");
+		lua_setglobal(L, "date");
+
+		lua_getfield(L, -1, "difftime");
+		lua_setglobal(L, "difftime");
+
+		lua_getfield(L, -1, "clock");
+		lua_setglobal(L, "clock");
+	}
+	lua_pop(L, 1);
+
+	// Save debug.traceback before removing debug module
+	lua_getglobal(L, "debug");
+	if (lua_istable(L, -1))
+	{
+		lua_getfield(L, -1, "traceback");
+		lua_setglobal(L, "debugstack"); // WoW uses debugstack() instead of debug.traceback()
+	}
+	lua_pop(L, 1);
+
+	// Remove dangerous modules
 	for (const char* n : {"io","os","debug","loadfile","dofile","require","package"})
 	{ lua_pushnil(L); lua_setglobal(L, n); }
 #endif
