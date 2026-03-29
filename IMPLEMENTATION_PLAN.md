@@ -227,7 +227,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Font rendering with WoW .ttf fonts (in progress — P7 agent)
 - [x] FrameXML child `OnLoad` bootstrap stability (preserve frame Lua objects across creation/compile, seed parent IDs before child `OnLoad`, keep RuneFrame bootstrap alive without reintroducing Lua heap blowups)
 - [x] Secure attribute delegate dispatch for Blizzard dropdown bootstrap (`SetAttribute` now drives `OnAttributeChanged` so `UIDROPDOWNMENU_INIT_MENU`/unit popup dropdowns initialize)
-- [?] Unit relationship API parity for Blizzard unit popup bootstrap (`UnitCanCooperate` and shared friend/hostile resolution for party/target dropdown setup)
+- [x] Unit relationship API parity for Blizzard unit popup bootstrap (`UnitCanCooperate` and shared friend/hostile resolution for party/target dropdown setup)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
