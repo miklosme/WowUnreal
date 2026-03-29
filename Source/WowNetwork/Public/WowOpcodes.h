@@ -200,14 +200,18 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_RESURRECT_RESPONSE     = 0x015F;
     inline constexpr uint16 SMSG_MOVE_TELEPORT          = 0x02F0;
 
-    // ── Mail System ─────────────────────────────────────────────────────────────
+    // ── Mail System ─────────────────────────────────────────────────────────
+    inline constexpr uint16 CMSG_SEND_MAIL             = 0x0238;
     inline constexpr uint16 CMSG_GET_MAIL_LIST         = 0x023A;
     inline constexpr uint16 SMSG_MAIL_LIST_RESULT      = 0x023B;
-    inline constexpr uint16 CMSG_SEND_MAIL              = 0x0238;
+    inline constexpr uint16 SMSG_SHOW_MAILBOX          = 0x0297;
 
-    // ── Bank System ─────────────────────────────────────────────────────────────
+    // ── GameObject Interaction ─────────────────────────────────────────────
+    inline constexpr uint16 CMSG_GAMEOBJ_USE           = 0x00B1;
+
+    // ── Bank System ────────────────────────────────────────────────────────
     inline constexpr uint16 CMSG_BANKER_ACTIVATE       = 0x01B5;
-    inline constexpr uint16 SMSG_SHOW_BANK              = 0x01B8;
+    inline constexpr uint16 SMSG_SHOW_BANK             = 0x01B8;
 
     // Auth result codes
     inline constexpr uint8 AUTH_OK = 0x0C;
