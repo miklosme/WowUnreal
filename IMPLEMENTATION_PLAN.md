@@ -186,7 +186,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Mail system (SMSG_MAIL_LIST_RESULT)
 - [x] Trade window (SMSG_TRADE_STATUS)
 - [x] Group/party UI (invite, accept, leave, ready check)
-- [?] Raid UI (raid frames, marks, ready check)
+- [x] Raid UI (raid frames, marks, ready check)
 - [ ] Duel system (SMSG_DUEL_REQUESTED)
 - [ ] Pet/companion system (pet bar, pet actions)
 
