@@ -144,6 +144,204 @@ static FWowEntity* ResolveUnit(lua_State* L, int ArgIdx = 1)
     return Guid != 0 ? Ctx->EntityManager->Find(Guid) : nullptr;
 }
 
+enum class EWowUnitRelationship : uint8
+{
+    Hostile,
+    Neutral,
+    Friendly,
+};
+
+static bool IsAllianceRace(uint8 RaceId)
+{
+    switch (RaceId)
+    {
+    case 1:  // Human
+    case 3:  // Dwarf
+    case 4:  // Night Elf
+    case 7:  // Gnome
+    case 11: // Draenei
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool IsHordeRace(uint8 RaceId)
+{
+    switch (RaceId)
+    {
+    case 2:  // Orc
+    case 5:  // Undead
+    case 6:  // Tauren
+    case 8:  // Troll
+    case 10: // Blood Elf
+        return true;
+    default:
+        return false;
+    }
+}
+
+static uint64 ResolveControllingGuid(const FWowEntity* Entity)
+{
+    if (!Entity)
+    {
+        return 0;
+    }
+
+    if (!Entity->IsUnit())
+    {
+        return Entity->Guid;
+    }
+
+    const FWowUnitEntity* Unit = static_cast<const FWowUnitEntity*>(Entity);
+    const uint64 CharmedByGuid = Unit->GetField64(UnitField::CHARMEDBY);
+    if (CharmedByGuid != 0)
+    {
+        return CharmedByGuid;
+    }
+
+    const uint64 SummonedByGuid = Unit->GetField64(UnitField::SUMMONEDBY);
+    if (SummonedByGuid != 0)
+    {
+        return SummonedByGuid;
+    }
+
+    const uint64 CreatedByGuid = Unit->GetField64(UnitField::CREATEDBY);
+    if (CreatedByGuid != 0)
+    {
+        return CreatedByGuid;
+    }
+
+    return Entity->Guid;
+}
+
+static bool IsGuidInPlayerGroup(const FWowLuaContext* Ctx, uint64 Guid)
+{
+    if (!Ctx || !Ctx->EntityManager || Guid == 0)
+    {
+        return false;
+    }
+
+    if (Guid == Ctx->EntityManager->LocalPlayerGuid)
+    {
+        return true;
+    }
+
+    if (!Ctx->ConnectionManager)
+    {
+        return false;
+    }
+
+    const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+    return GroupInfo.FindMember(Guid) != nullptr;
+}
+
+static int32 GetPlayerTeam(const FWowLuaContext* Ctx, uint64 Guid)
+{
+    if (!Ctx || !Ctx->EntityManager || Guid == 0)
+    {
+        return 0;
+    }
+
+    const FWowEntity* Entity = Ctx->EntityManager->Find(Guid);
+    if (!Entity || !Entity->IsPlayer())
+    {
+        return 0;
+    }
+
+    const FWowUnitEntity* Unit = static_cast<const FWowUnitEntity*>(Entity);
+    const uint8 RaceId = Unit->GetRaceId();
+    if (IsAllianceRace(RaceId))
+    {
+        return 1;
+    }
+
+    if (IsHordeRace(RaceId))
+    {
+        return 2;
+    }
+
+    return 0;
+}
+
+static EWowUnitRelationship GetUnitRelationship(const FWowLuaContext* Ctx, const FWowEntity* Unit1, const FWowEntity* Unit2)
+{
+    if (!Ctx || !Unit1 || !Unit2)
+    {
+        return EWowUnitRelationship::Neutral;
+    }
+
+    const uint64 ControllerGuid1 = ResolveControllingGuid(Unit1);
+    const uint64 ControllerGuid2 = ResolveControllingGuid(Unit2);
+
+    if (ControllerGuid1 != 0 && ControllerGuid1 == ControllerGuid2)
+    {
+        return EWowUnitRelationship::Friendly;
+    }
+
+    if (IsGuidInPlayerGroup(Ctx, ControllerGuid1) && IsGuidInPlayerGroup(Ctx, ControllerGuid2))
+    {
+        return EWowUnitRelationship::Friendly;
+    }
+
+    const int32 Team1 = GetPlayerTeam(Ctx, ControllerGuid1);
+    const int32 Team2 = GetPlayerTeam(Ctx, ControllerGuid2);
+    if (Team1 != 0 && Team2 != 0)
+    {
+        return Team1 == Team2 ? EWowUnitRelationship::Friendly : EWowUnitRelationship::Hostile;
+    }
+
+    if (Unit1->IsUnit() && Unit2->IsUnit())
+    {
+        const uint32 FactionTemplate1 = static_cast<const FWowUnitEntity*>(Unit1)->GetFactionTemplate();
+        const uint32 FactionTemplate2 = static_cast<const FWowUnitEntity*>(Unit2)->GetFactionTemplate();
+
+        if (FactionTemplate1 != 0 && FactionTemplate2 != 0)
+        {
+            if (FactionTemplate1 == FactionTemplate2)
+            {
+                return EWowUnitRelationship::Friendly;
+            }
+
+            if (FactionTemplate1 == 2000 || FactionTemplate2 == 2000)
+            {
+                return EWowUnitRelationship::Neutral;
+            }
+        }
+
+        const bool bUnit1IsPlayerSide = IsGuidInPlayerGroup(Ctx, ControllerGuid1) || Team1 != 0;
+        const bool bUnit2IsPlayerSide = IsGuidInPlayerGroup(Ctx, ControllerGuid2) || Team2 != 0;
+        if (bUnit1IsPlayerSide != bUnit2IsPlayerSide)
+        {
+            const uint32 OtherFactionTemplate = bUnit1IsPlayerSide ? FactionTemplate2 : FactionTemplate1;
+            if (OtherFactionTemplate == 2000)
+            {
+                return EWowUnitRelationship::Neutral;
+            }
+
+            if (OtherFactionTemplate > 100)
+            {
+                return EWowUnitRelationship::Hostile;
+            }
+        }
+    }
+
+    return EWowUnitRelationship::Neutral;
+}
+
+static int32 GetUnitReactionRank(const FWowLuaContext* Ctx, const FWowEntity* Unit1, const FWowEntity* Unit2)
+{
+    switch (GetUnitRelationship(Ctx, Unit1, Unit2))
+    {
+    case EWowUnitRelationship::Friendly:
+        return 8;
+    case EWowUnitRelationship::Hostile:
+        return 2;
+    default:
+        return 4;
+    }
+}
+
 // ─── Instance / Group ───────────────────────────────────────────────────────────
 static int L_IsInInstance(lua_State* L)
 {
@@ -610,16 +808,43 @@ static int L_UnitIsDeadOrGhost(lua_State* L)
 
 static int L_UnitIsFriend(lua_State* L)
 {
-    // For now, assume player is friendly to self, enemies to others
-    const char* unit = luaL_optstring(L, 1, "player");
-    lua_pushboolean(L, strcmp(unit, "player") == 0 ? 1 : 0);
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    FWowEntity* Unit1 = nullptr;
+    FWowEntity* Unit2 = nullptr;
+
+    if (lua_gettop(L) >= 2)
+    {
+        Unit1 = ResolveUnit(L, 1);
+        Unit2 = ResolveUnit(L, 2);
+    }
+    else
+    {
+        Unit1 = Ctx && Ctx->EntityManager ? Ctx->EntityManager->Find(Ctx->EntityManager->LocalPlayerGuid) : nullptr;
+        Unit2 = ResolveUnit(L, 1);
+    }
+
+    lua_pushboolean(L, GetUnitRelationship(Ctx, Unit1, Unit2) == EWowUnitRelationship::Friendly ? 1 : 0);
     return 1;
 }
 
 static int L_UnitIsEnemy(lua_State* L)
 {
-    const char* unit = luaL_optstring(L, 1, "player");
-    lua_pushboolean(L, strcmp(unit, "player") != 0 ? 1 : 0);
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    FWowEntity* Unit1 = nullptr;
+    FWowEntity* Unit2 = nullptr;
+
+    if (lua_gettop(L) >= 2)
+    {
+        Unit1 = ResolveUnit(L, 1);
+        Unit2 = ResolveUnit(L, 2);
+    }
+    else
+    {
+        Unit1 = Ctx && Ctx->EntityManager ? Ctx->EntityManager->Find(Ctx->EntityManager->LocalPlayerGuid) : nullptr;
+        Unit2 = ResolveUnit(L, 1);
+    }
+
+    lua_pushboolean(L, GetUnitRelationship(Ctx, Unit1, Unit2) == EWowUnitRelationship::Hostile ? 1 : 0);
     return 1;
 }
 
@@ -4084,30 +4309,32 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "UnitIsPossessed", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
     lua_register(L, "UnitCanAssist", [](lua_State* L2) -> int {
         // UnitCanAssist(unit1, unit2) → boolean (can unit1 assist unit2?)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         FWowEntity* Entity1 = ResolveUnit(L2, 1);
         FWowEntity* Entity2 = ResolveUnit(L2, 2);
-        if (Entity1 && Entity2 && Entity1->IsUnit() && Entity2->IsUnit()) {
-            // TODO: Use faction data for proper friend/enemy checks
-            // For now, assume same faction = can assist
-            lua_pushboolean(L2, true);
-        } else {
-            lua_pushboolean(L2, false);
-        }
+        const bool bCanAssist = Entity1 && Entity2 &&
+            GetUnitRelationship(Ctx, Entity1, Entity2) == EWowUnitRelationship::Friendly;
+        lua_pushboolean(L2, bCanAssist ? 1 : 0);
+        return 1;
+    });
+    lua_register(L, "UnitCanCooperate", [](lua_State* L2) -> int {
+        // UnitCanCooperate(unit1, unit2) → boolean (can unit1 cooperate with unit2?)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        FWowEntity* Entity1 = ResolveUnit(L2, 1);
+        FWowEntity* Entity2 = ResolveUnit(L2, 2);
+        const bool bCanCooperate = Entity1 && Entity2 &&
+            GetUnitRelationship(Ctx, Entity1, Entity2) == EWowUnitRelationship::Friendly;
+        lua_pushboolean(L2, bCanCooperate ? 1 : 0);
         return 1;
     });
     lua_register(L, "UnitCanAttack", [](lua_State* L2) -> int {
         // UnitCanAttack(unit1, unit2) → boolean (can unit1 attack unit2?)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         FWowEntity* Entity1 = ResolveUnit(L2, 1);
         FWowEntity* Entity2 = ResolveUnit(L2, 2);
-        if (Entity1 && Entity2 && Entity1->IsUnit() && Entity2->IsUnit()) {
-            // TODO: Use faction data for proper enemy checks
-            // For now, check if one is player and other is NPC
-            bool CanAttack = (Entity1->IsPlayer() && !Entity2->IsPlayer()) ||
-                           (!Entity1->IsPlayer() && Entity2->IsPlayer());
-            lua_pushboolean(L2, CanAttack);
-        } else {
-            lua_pushboolean(L2, false);
-        }
+        const bool bCanAttack = Entity1 && Entity2 &&
+            GetUnitRelationship(Ctx, Entity1, Entity2) == EWowUnitRelationship::Hostile;
+        lua_pushboolean(L2, bCanAttack ? 1 : 0);
         return 1;
     });
     lua_register(L, "UnitInRaid", [](lua_State* L2) -> int {
@@ -5128,23 +5355,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
             return 1;
         }
 
-        // Get faction templates
-        uint32 Faction1 = Unit1->IsUnit() ? static_cast<FWowUnitEntity*>(Unit1)->GetFactionTemplate() : 0;
-        uint32 Faction2 = Unit2->IsUnit() ? static_cast<FWowUnitEntity*>(Unit2)->GetFactionTemplate() : 0;
-
-        // Simple faction check - this could be expanded with DBC faction data
-        if (Faction1 == Faction2 && Faction1 != 0)
-        {
-            lua_pushnumber(L2, 8); // friendly
-        }
-        else if ((Faction1 == 1 && Faction2 == 2) || (Faction1 == 2 && Faction2 == 1)) // Alliance vs Horde
-        {
-            lua_pushnumber(L2, 2); // hostile
-        }
-        else
-        {
-            lua_pushnumber(L2, 4); // neutral
-        }
+        lua_pushnumber(L2, GetUnitReactionRank(Ctx, Unit1, Unit2));
         return 1;
     });
 
