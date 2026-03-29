@@ -374,6 +374,170 @@ bool FShowBankPacketBroadcastsEvent::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FShowMailboxPacketBroadcastsEvent, "WowUnreal.Network.ShowMailboxPacketBroadcastsEvent",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FShowMailboxPacketBroadcastsEvent::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    bool bCalled = false;
+    uint64 OpenedMailboxGuid = 0;
+    PacketHandler.OnMailboxShown.AddLambda([&bCalled, &OpenedMailboxGuid](uint64 MailboxGuid)
+    {
+        bCalled = true;
+        OpenedMailboxGuid = MailboxGuid;
+    });
+
+    const uint64 MailboxGuid = 0x8877665544332211ULL;
+    TArray<uint8> PacketData;
+    PacketData.SetNumUninitialized(8);
+    FMemory::Memcpy(PacketData.GetData(), &MailboxGuid, sizeof(MailboxGuid));
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_SHOW_MAILBOX, PacketData);
+
+    TestTrue(TEXT("SMSG_SHOW_MAILBOX fires the mailbox-open delegate"), bCalled);
+    TestEqual(TEXT("Delegate receives the mailbox guid from the packet"), OpenedMailboxGuid, MailboxGuid);
+    TestEqual(TEXT("Packet handler stores the current mailbox guid"), PacketHandler.CurrentMailboxGuid, MailboxGuid);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGameObjectMailboxTypeAccessor, "WowUnreal.Entity.GameObjectMailboxTypeAccessor",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FGameObjectMailboxTypeAccessor::RunTest(const FString& Parameters)
+{
+    FWowGameObjectEntity Mailbox;
+    Mailbox.TypeMask = WowTypeMask::GAMEOBJECT;
+    Mailbox.SetField(GameObjectField::BYTES_1, static_cast<uint32>(WowGameObjectType::MAILBOX) << 8);
+
+    TestEqual(TEXT("Mailbox gameobject type is read from GAMEOBJECT_BYTES_1 byte 1"), Mailbox.GetGameObjectType(), static_cast<uint8>(WowGameObjectType::MAILBOX));
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMailListPacketParsesInbox, "WowUnreal.Network.MailListPacketParsesInbox",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FMailListPacketParsesInbox::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    bool bCalled = false;
+    TArray<FWowMailMessage> ParsedMail;
+    PacketHandler.OnMailListReceived.AddLambda([&bCalled, &ParsedMail](const TArray<FWowMailMessage>& Mail)
+    {
+        bCalled = true;
+        ParsedMail = Mail;
+    });
+
+    TArray<uint8> PacketData;
+    TArray<uint8> MailBlock;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU16 = [](TArray<uint8>& Buffer, uint16 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint16));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint16));
+    };
+    auto AppendU32 = [](TArray<uint8>& Buffer, uint32 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint32));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint32));
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+    auto AppendFloat = [](TArray<uint8>& Buffer, float Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(float));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(float));
+    };
+    auto AppendCString = [](TArray<uint8>& Buffer, const ANSICHAR* Value)
+    {
+        const int32 Length = FCStringAnsi::Strlen(Value) + 1;
+        const int32 Offset = Buffer.AddUninitialized(Length);
+        FMemory::Memcpy(Buffer.GetData() + Offset, Value, Length);
+    };
+
+    AppendU32(PacketData, 1u);
+    AppendU8(PacketData, 1u);
+
+    const uint32 MessageId = 42;
+    const uint64 SenderGuid = 0x1122334455667788ULL;
+    const float DaysLeft = 29.5f;
+    const uint32 ItemEntry = 6948;
+
+    AppendU32(MailBlock, MessageId);
+    AppendU8(MailBlock, WowMailMessageType::NORMAL);
+    AppendU64(MailBlock, SenderGuid);
+    AppendU32(MailBlock, 1234u); // C.O.D.
+    AppendU32(MailBlock, 0u);    // unknown 3.3.5 field
+    AppendU32(MailBlock, 61u);   // stationery
+    AppendU32(MailBlock, 56789u);
+    AppendU32(MailBlock, WowMailCheckMask::HAS_BODY);
+    AppendFloat(MailBlock, DaysLeft);
+    AppendU32(MailBlock, 0u); // template id
+    AppendCString(MailBlock, "Welcome");
+    AppendCString(MailBlock, "Mailbox parser smoke test.");
+    AppendU8(MailBlock, 1u); // one attachment
+    AppendU8(MailBlock, 0u); // attachment index
+    AppendU32(MailBlock, 77u);
+    AppendU32(MailBlock, ItemEntry);
+    for (int32 EnchantIndex = 0; EnchantIndex < 7; ++EnchantIndex)
+    {
+        AppendU32(MailBlock, 0u);
+        AppendU32(MailBlock, 0u);
+        AppendU32(MailBlock, 0u);
+    }
+    AppendU32(MailBlock, static_cast<uint32>(-42)); // random property id
+    AppendU32(MailBlock, 99u); // suffix factor
+    AppendU32(MailBlock, 2u);  // count
+    AppendU32(MailBlock, 0u);  // charges
+    AppendU32(MailBlock, 100u);
+    AppendU32(MailBlock, 80u);
+    AppendU8(MailBlock, 0u);
+
+    AppendU16(PacketData, static_cast<uint16>(MailBlock.Num() + sizeof(uint16)));
+    PacketData.Append(MailBlock);
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_MAIL_LIST_RESULT, PacketData);
+
+    TestTrue(TEXT("SMSG_MAIL_LIST_RESULT fires the mail list delegate"), bCalled);
+    TestEqual(TEXT("Parsed inbox has one message"), ParsedMail.Num(), 1);
+    TestEqual(TEXT("Packet handler stores the parsed inbox"), PacketHandler.MailInbox.Num(), 1);
+    if (ParsedMail.Num() != 1 || PacketHandler.MailInbox.Num() != 1)
+    {
+        return false;
+    }
+
+    const FWowMailMessage& Mail = ParsedMail[0];
+    TestEqual(TEXT("Mail message id parsed"), Mail.MessageId, MessageId);
+    TestEqual(TEXT("Mail type parsed"), Mail.MessageType, static_cast<uint8>(WowMailMessageType::NORMAL));
+    TestEqual(TEXT("Mail sender guid parsed"), Mail.SenderGuid, SenderGuid);
+    TestEqual(TEXT("Mail COD parsed"), Mail.COD, 1234u);
+    TestEqual(TEXT("Mail money parsed"), Mail.Money, 56789u);
+    TestEqual(TEXT("Mail subject parsed"), Mail.Subject, FString(TEXT("Welcome")));
+    TestEqual(TEXT("Mail body parsed"), Mail.Body, FString(TEXT("Mailbox parser smoke test.")));
+    TestEqual(TEXT("Mail attachment count parsed"), Mail.Attachments.Num(), 1);
+    TestTrue(TEXT("Mail days left parsed"), FMath::IsNearlyEqual(Mail.DaysLeft, DaysLeft, KINDA_SMALL_NUMBER));
+
+    if (Mail.Attachments.Num() != 1)
+    {
+        return false;
+    }
+
+    const FWowMailAttachment& Attachment = Mail.Attachments[0];
+    TestEqual(TEXT("Attachment entry parsed"), Attachment.ItemEntry, ItemEntry);
+    TestEqual(TEXT("Attachment count parsed"), Attachment.Count, 2u);
+    TestEqual(TEXT("Attachment random property id parsed as signed"), Attachment.RandomPropertyId, -42);
+
+    return true;
+}
+
 // ====================================================================
 // DBC Parser Tests (require MPQ data)
 // ====================================================================

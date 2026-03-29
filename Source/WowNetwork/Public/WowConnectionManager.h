@@ -79,8 +79,14 @@ public:
     /** Send gossip/questgiver hello to initiate NPC interaction */
     UFUNCTION(BlueprintCallable) void SendGossipHello(int64 NpcGuid);
 
+    /** Use an interactable gameobject such as a mailbox */
+    UFUNCTION(BlueprintCallable) void SendGameObjectUse(int64 GameObjectGuid);
+
     /** Send banker activate to open the bank window */
     UFUNCTION(BlueprintCallable) void SendBankerActivate(int64 BankerGuid);
+
+    /** Request mailbox contents from a mailbox gameobject or mailbox NPC */
+    UFUNCTION(BlueprintCallable) void SendGetMailList(int64 MailboxGuid);
 
     /** Send quest accept command */
     UFUNCTION(BlueprintCallable) void SendQuestAccept(int64 QuestGiverGuid, int32 QuestId);

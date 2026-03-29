@@ -1,12 +1,14 @@
 #pragma once
 #include "CoreMinimal.h"
+#include "WowNetwork/Public/WowEntity.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 
-class FWowPacketHandler;
+class UWowConnectionManager;
+class SScrollBox;
 
 /**
- * Mailbox window widget (stub implementation)
+ * Mailbox inbox widget
  */
 class WOWUNREAL_API SWowMailbox : public SCompoundWidget
 {
@@ -15,7 +17,7 @@ public:
     {}
     SLATE_END_ARGS()
 
-    void Construct(const FArguments& InArgs, FWowPacketHandler* InPacketHandler);
+    void Construct(const FArguments& InArgs, UWowConnectionManager* InConnectionManager);
 
     /** Toggle visibility of the mailbox window */
     void ToggleVisibility();
@@ -23,30 +25,32 @@ public:
     /** Check if mailbox is visible */
     bool IsVisible() const;
 
-    /** Show the mailbox window */
-    void Show();
+    /** Show the mailbox window and request inbox contents */
+    void Show(uint64 MailboxGuid);
 
 private:
     /** Handle close button clicked */
     FReply OnCloseButtonClicked();
 
-    /** Handle inbox tab clicked */
-    FReply OnInboxTabClicked();
-
-    /** Handle send tab clicked */
-    FReply OnSendTabClicked();
+    /** Refresh the inbox contents from the server */
+    FReply OnRefreshButtonClicked();
 
     /** Request mail list from server */
     void RequestMailList();
 
-    /** Get tab button colors */
-    FSlateColor GetInboxTabColor() const;
-    FSlateColor GetSendTabColor() const;
+    /** Receive a parsed mail list from the packet handler */
+    void OnMailListReceived(const TArray<FWowMailMessage>& InMail);
 
-    /** Get content text based on active tab */
-    FText GetContentText() const;
+    /** Rebuild the inbox rows */
+    void RefreshInboxList();
+    TSharedRef<SWidget> BuildMailRow(const FWowMailMessage& Mail) const;
+    FString GetSenderLabel(const FWowMailMessage& Mail) const;
+    FText GetMoneyText(uint32 Copper) const;
 
-    mutable FWowPacketHandler* PacketHandler = nullptr;
+    TWeakObjectPtr<UWowConnectionManager> ConnectionManager;
+    TArray<FWowMailMessage> CurrentMail;
     EVisibility CurrentVisibility = EVisibility::Hidden;
-    int32 ActiveTab = 0; // 0 = inbox, 1 = send
+    uint64 CurrentMailboxGuid = 0;
+    bool bWaitingForMailList = false;
+    TSharedPtr<SScrollBox> MailList;
 };

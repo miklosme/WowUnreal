@@ -672,6 +672,19 @@ void UWowConnectionManager::SendGossipHello(int64 NpcGuid)
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_GOSSIP_HELLO for NPC %llu"), Guid);
 }
 
+void UWowConnectionManager::SendGameObjectUse(int64 GameObjectGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    const uint64 Guid = static_cast<uint64>(GameObjectGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_GAMEOBJ_USE, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_GAMEOBJ_USE for gameobject %llu"), Guid);
+}
+
 void UWowConnectionManager::SendBankerActivate(int64 BankerGuid)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
@@ -683,6 +696,19 @@ void UWowConnectionManager::SendBankerActivate(int64 BankerGuid)
 
     WorldSocket->SendPacket(WowOpcode::CMSG_BANKER_ACTIVATE, Data);
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_BANKER_ACTIVATE for NPC %llu"), Guid);
+}
+
+void UWowConnectionManager::SendGetMailList(int64 MailboxGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    const uint64 Guid = static_cast<uint64>(MailboxGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_GET_MAIL_LIST, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_GET_MAIL_LIST for mailbox %llu"), Guid);
 }
 
 void UWowConnectionManager::SendQuestAccept(int64 QuestGiverGuid, int32 QuestId)

@@ -367,8 +367,8 @@ private:
     /** Create guild roster widget */
     void CreateGuildRoster();
 
-    /** Show mailbox (called from NPC interaction) */
-    void ShowMailbox();
+    /** Show mailbox for a mailbox NPC or mailbox gameobject */
+    void ShowMailbox(int64 MailboxGuid);
 
     /** Create mailbox widget */
     void CreateMailbox();

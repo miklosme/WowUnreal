@@ -183,7 +183,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Vendor/merchant window (SMSG_LIST_INVENTORY)
 - [x] Quest dialog (SMSG_QUESTGIVER_QUEST_DETAILS, accept/decline/complete)
 - [x] Bank (SMSG_SHOW_BANK)
-- [ ] Mail system (SMSG_MAIL_LIST_RESULT)
+- [?] Mail system (SMSG_MAIL_LIST_RESULT)
 - [ ] Trade window (SMSG_TRADE_STATUS)
 - [x] Group/party UI (invite, accept, leave, ready check)
 - [ ] Raid UI (raid frames, marks, ready check)

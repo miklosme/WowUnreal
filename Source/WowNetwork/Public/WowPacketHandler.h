@@ -14,6 +14,8 @@ DECLARE_MULTICAST_DELEGATE_FourParams(FOnAttackerStateUpdate, uint64 /*AttackerG
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnLootOpened, uint64 /*LootGuid*/, uint8 /*LootType*/, uint32 /*Gold*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, const TArray<FWowVendorItem>& /*Items*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailListReceived, const TArray<FWowMailMessage>& /*Mail*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailboxShown, uint64 /*MailboxGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnBankOpened, uint64 /*BankerGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestDialog, const FWowQuestDetails& /*QuestDetails*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestRewardDialog, const FWowQuestDetails& /*QuestDetails*/);
@@ -180,6 +182,11 @@ public:
     /** Taxi system data */
     FWowTaxiData TaxiData;
 
+    /** Current mailbox contents */
+    uint64 CurrentMailboxGuid = 0;
+    uint32 MailInboxTotalCount = 0;
+    TArray<FWowMailMessage> MailInbox;
+
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
@@ -191,6 +198,8 @@ public:
     FOnLootOpened OnLootOpened;
     FOnLootClosed OnLootClosed;
     FOnVendorOpened OnVendorOpened;
+    FOnMailListReceived OnMailListReceived;
+    FOnMailboxShown OnMailboxShown;
     FOnBankOpened OnBankOpened;
     FOnQuestDialog OnQuestDialog;
     FOnQuestRewardDialog OnQuestRewardDialog;
@@ -338,6 +347,7 @@ private:
     void HandleGossipMessage(FPacketReader& R);
 
     // ── Mail system handlers ────────────────────────────────────────────────
+    void HandleShowMailbox(FPacketReader& R);
     void HandleMailListResult(FPacketReader& R);
 
     // ── Bank system handlers ────────────────────────────────────────────────

@@ -92,6 +92,38 @@ struct FWowVendorItem
     uint32 ExtendedCost = 0;
 };
 
+// Mail attachment entry
+struct FWowMailAttachment
+{
+    uint8 AttachmentIndex = 0;
+    uint32 ItemGuidLow = 0;
+    uint32 ItemEntry = 0;
+    int32 RandomPropertyId = 0;
+    uint32 SuffixFactor = 0;
+    uint32 Count = 0;
+    uint32 Charges = 0;
+    uint32 MaxDurability = 0;
+    uint32 Durability = 0;
+};
+
+// Mail header/body plus attachment data
+struct FWowMailMessage
+{
+    uint32 MessageId = 0;
+    uint8 MessageType = 0;
+    uint64 SenderGuid = 0;
+    uint32 SenderEntry = 0;
+    uint32 COD = 0;
+    uint32 Stationery = 0;
+    uint32 Money = 0;
+    uint32 Checked = 0;
+    float DaysLeft = 0.0f;
+    uint32 MailTemplateId = 0;
+    FString Subject;
+    FString Body;
+    TArray<FWowMailAttachment> Attachments;
+};
+
 // Quest reward item
 struct FWowQuestRewardItem
 {
@@ -141,6 +173,29 @@ namespace WowNpcFlags
     inline constexpr uint32 INTERACTABLE = GOSSIP | QUESTGIVER | VENDOR | REPAIR
         | FLIGHTMASTER | TRAINER | TRAINER_CLASS | TRAINER_PROF
         | INNKEEPER | BANKER | PETITIONER | AUCTIONEER | STABLEMASTER;
+}
+
+namespace WowGameObjectType
+{
+    inline constexpr uint8 MAILBOX = 19;
+}
+
+namespace WowMailMessageType
+{
+    inline constexpr uint8 NORMAL     = 0;
+    inline constexpr uint8 AUCTION    = 2;
+    inline constexpr uint8 CREATURE   = 3;
+    inline constexpr uint8 GAMEOBJECT = 4;
+    inline constexpr uint8 CALENDAR   = 5;
+}
+
+namespace WowMailCheckMask
+{
+    inline constexpr uint32 READ        = 0x01;
+    inline constexpr uint32 RETURNED    = 0x02;
+    inline constexpr uint32 COPIED      = 0x04;
+    inline constexpr uint32 COD_PAYMENT = 0x08;
+    inline constexpr uint32 HAS_BODY    = 0x10;
 }
 
 // WoW 3.3.5a unit stand states (UNIT_FIELD_BYTES_1 byte 0)
@@ -460,6 +515,7 @@ struct WOWNETWORK_API FWowGameObjectEntity : public FWowEntity
     uint32 GetGameObjectFlags() const { return GetField(GameObjectField::FLAGS); }
     uint32 GetFaction() const { return GetField(GameObjectField::FACTION); }
     int32 GetGameObjectLevel() const { return static_cast<int32>(GetField(GameObjectField::LEVEL)); }
+    uint8 GetGameObjectType() const { return GetFieldByte(GameObjectField::BYTES_1, 1); }
     float GetParentRotationComponent(int32 ComponentIndex) const
     {
         return (ComponentIndex >= 0 && ComponentIndex < 4) ? GetFieldFloat(GameObjectField::PARENT_ROTATION + ComponentIndex) : 0.0f;

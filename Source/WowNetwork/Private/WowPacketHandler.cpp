@@ -114,6 +114,7 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_GOSSIP_MESSAGE,          &FWowPacketHandler::HandleGossipMessage);
 
     // ── Mail system handlers ────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_SHOW_MAILBOX,            &FWowPacketHandler::HandleShowMailbox);
     Handlers.Add(WowOpcode::SMSG_MAIL_LIST_RESULT,        &FWowPacketHandler::HandleMailListResult);
 
     // ── Bank system handlers ────────────────────────────────────────────────
@@ -2722,24 +2723,127 @@ void FWowPacketHandler::HandleGossipMessage(FPacketReader& R)
 
 // ── Mail system handlers ────────────────────────────────────────────
 
+void FWowPacketHandler::HandleShowMailbox(FPacketReader& R)
+{
+    if (!R.CanRead(8))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("SHOW_MAILBOX: packet too short"));
+        return;
+    }
+
+    CurrentMailboxGuid = R.ReadU64();
+
+    UE_LOG(LogWowPacket, Log, TEXT("SHOW_MAILBOX: mailbox GUID %llu"), CurrentMailboxGuid);
+    OnMailboxShown.Broadcast(CurrentMailboxGuid);
+}
+
 void FWowPacketHandler::HandleMailListResult(FPacketReader& R)
 {
     // SMSG_MAIL_LIST_RESULT
-    // uint8 mailCount
-    // For each mail: complex structure with sender, subject, body, attachments, etc.
+    // uint32 totalMailCount, uint8 displayedMailCount, repeated mail blocks.
 
-    if (!R.CanRead(1))
+    if (!R.CanRead(5))
     {
         UE_LOG(LogWowPacket, Warning, TEXT("MAIL_LIST_RESULT: packet too short"));
         return;
     }
 
-    uint8 MailCount = R.ReadU8();
+    constexpr int32 MailAttachmentEnchantSlots = 7;
 
-    UE_LOG(LogWowPacket, Log, TEXT("MAIL_LIST_RESULT: %d mails received"), MailCount);
+    MailInboxTotalCount = R.ReadU32();
+    const uint8 MailCount = R.ReadU8();
 
-    // For stub implementation, just log the count and ignore the rest
-    // In a full implementation, this would parse each mail entry
+    TArray<FWowMailMessage> ParsedMail;
+    ParsedMail.Reserve(MailCount);
+
+    for (uint8 MailIndex = 0; MailIndex < MailCount; ++MailIndex)
+    {
+        if (!R.CanRead(2))
+        {
+            UE_LOG(LogWowPacket, Warning, TEXT("MAIL_LIST_RESULT: missing block size for mail %d/%d"), MailIndex + 1, MailCount);
+            break;
+        }
+
+        const int32 BlockStart = R.Pos;
+        const uint16 BlockSize = R.ReadU16();
+        const int32 BlockEnd = BlockStart + BlockSize;
+        if (BlockSize < 2 || BlockEnd > R.Size)
+        {
+            UE_LOG(LogWowPacket, Warning, TEXT("MAIL_LIST_RESULT: invalid block size %u for mail %d/%d"), BlockSize, MailIndex + 1, MailCount);
+            break;
+        }
+
+        FPacketReader MailReader(R.Data + R.Pos, BlockEnd - R.Pos);
+
+        FWowMailMessage Mail;
+        Mail.MessageId = MailReader.ReadU32();
+        Mail.MessageType = MailReader.ReadU8();
+
+        if (Mail.MessageType == WowMailMessageType::NORMAL)
+        {
+            Mail.SenderGuid = MailReader.ReadU64();
+        }
+        else
+        {
+            Mail.SenderEntry = MailReader.ReadU32();
+        }
+
+        Mail.COD = MailReader.ReadU32();
+        MailReader.ReadU32(); // 3.3.5a unknown field
+        Mail.Stationery = MailReader.ReadU32();
+        Mail.Money = MailReader.ReadU32();
+        Mail.Checked = MailReader.ReadU32();
+        Mail.DaysLeft = MailReader.ReadFloat();
+        Mail.MailTemplateId = MailReader.ReadU32();
+        Mail.Subject = MailReader.ReadCString();
+        Mail.Body = MailReader.ReadCString();
+
+        const uint8 AttachmentCount = MailReader.ReadU8();
+        Mail.Attachments.Reserve(AttachmentCount);
+
+        for (uint8 AttachmentIndex = 0; AttachmentIndex < AttachmentCount; ++AttachmentIndex)
+        {
+            if (!MailReader.CanRead(1 + 4 + 4 + (MailAttachmentEnchantSlots * 12) + 4 + 4 + 4 + 4 + 4 + 4 + 1))
+            {
+                UE_LOG(LogWowPacket, Warning, TEXT("MAIL_LIST_RESULT: truncated attachment %d for mail %u"), AttachmentIndex, Mail.MessageId);
+                break;
+            }
+
+            FWowMailAttachment Attachment;
+            Attachment.AttachmentIndex = MailReader.ReadU8();
+            Attachment.ItemGuidLow = MailReader.ReadU32();
+            Attachment.ItemEntry = MailReader.ReadU32();
+
+            for (int32 EnchantIndex = 0; EnchantIndex < MailAttachmentEnchantSlots; ++EnchantIndex)
+            {
+                MailReader.Skip(12);
+            }
+
+            Attachment.RandomPropertyId = static_cast<int32>(MailReader.ReadU32());
+            Attachment.SuffixFactor = MailReader.ReadU32();
+            Attachment.Count = MailReader.ReadU32();
+            Attachment.Charges = MailReader.ReadU32();
+            Attachment.MaxDurability = MailReader.ReadU32();
+            Attachment.Durability = MailReader.ReadU32();
+            MailReader.ReadU8(); // 3.3.5a trailing unknown byte
+
+            Mail.Attachments.Add(Attachment);
+        }
+
+        if (MailReader.Pos > MailReader.Size)
+        {
+            UE_LOG(LogWowPacket, Warning, TEXT("MAIL_LIST_RESULT: mail %u parser overran its block"), Mail.MessageId);
+        }
+
+        R.Pos = BlockEnd;
+
+        ParsedMail.Add(MoveTemp(Mail));
+    }
+
+    MailInbox = MoveTemp(ParsedMail);
+
+    UE_LOG(LogWowPacket, Log, TEXT("MAIL_LIST_RESULT: received %d displayed mails (%u total)"), MailInbox.Num(), MailInboxTotalCount);
+    OnMailListReceived.Broadcast(MailInbox);
 }
 
 // ── Bank system handlers ────────────────────────────────────────────

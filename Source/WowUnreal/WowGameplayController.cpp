@@ -360,6 +360,12 @@ void AWowGameplayController::BindEntityEvents()
 			}
 		});
 
+	ConnectionManager->PacketHandler.OnMailboxShown.AddLambda(
+		[this](uint64 MailboxGuid)
+		{
+			ShowMailbox(static_cast<int64>(MailboxGuid));
+		});
+
 	ConnectionManager->PacketHandler.OnBankOpened.AddLambda(
 		[this](uint64 BankerGuid)
 		{
@@ -1661,6 +1667,19 @@ void AWowGameplayController::OnRightClick()
 		TargetGuid, TargetEntity->IsUnit() ? 1 : 0, TargetEntity->IsPlayer() ? 1 : 0,
 		TargetEntity->TypeMask, static_cast<int32>(TargetEntity->GetEntityKind()));
 
+	if (TargetEntity->IsGameObject())
+	{
+		const uint8 GameObjectType = TargetEntity->GetFieldByte(GameObjectField::BYTES_1, 1);
+		UE_LOG(LogWowGameplay, Log, TEXT("Right-click gameobject %llu: GoType=%u"), TargetGuid, GameObjectType);
+
+		if (GameObjectType == WowGameObjectType::MAILBOX)
+		{
+			UE_LOG(LogWowGameplay, Log, TEXT("  -> Opening mailbox"));
+			ShowMailbox(static_cast<int64>(TargetGuid));
+		}
+		return;
+	}
+
 	if (!TargetEntity->IsUnit()) return;
 
 	// Players: do nothing (no PvP interaction yet)
@@ -1679,7 +1698,12 @@ void AWowGameplayController::OnRightClick()
 	uint32 NpcFlags = TargetEntity->GetField(UnitField::NPC_FLAGS);
 	UE_LOG(LogWowGameplay, Log, TEXT("Right-click NPC %llu: NpcFlags=0x%08X"), TargetGuid, NpcFlags);
 
-	if (NpcFlags & WowNpcFlags::BANKER)
+	if (NpcFlags & WowNpcFlags::MAILBOX)
+	{
+		UE_LOG(LogWowGameplay, Log, TEXT("  -> Opening mailbox"));
+		ShowMailbox(static_cast<int64>(TargetGuid));
+	}
+	else if (NpcFlags & WowNpcFlags::BANKER)
 	{
 		UE_LOG(LogWowGameplay, Log, TEXT("  -> Sending banker activate"));
 		ConnectionManager->SendBankerActivate(static_cast<int64>(TargetGuid));
@@ -2662,10 +2686,17 @@ void AWowGameplayController::UpdateTargetHighlight()
 	}
 	else if (Entity)
 	{
-		uint32 NpcFlags = Entity->GetField(UnitField::NPC_FLAGS);
-		if (NpcFlags & WowNpcFlags::INTERACTABLE)
+		if (Entity->IsGameObject() && Entity->GetFieldByte(GameObjectField::BYTES_1, 1) == WowGameObjectType::MAILBOX)
 		{
 			HighlightColor = FLinearColor::Green;
+		}
+		else if (Entity->IsUnit())
+		{
+			uint32 NpcFlags = Entity->GetField(UnitField::NPC_FLAGS);
+			if ((NpcFlags & WowNpcFlags::INTERACTABLE) || (NpcFlags & WowNpcFlags::MAILBOX))
+			{
+				HighlightColor = FLinearColor::Green;
+			}
 		}
 	}
 
@@ -4385,7 +4416,7 @@ void AWowGameplayController::OnGuildRosterUpdated()
 
 // ── Mailbox Methods ────────────────────────────────────────────────────────────
 
-void AWowGameplayController::ShowMailbox()
+void AWowGameplayController::ShowMailbox(int64 MailboxGuid)
 {
 	if (!MailboxWidget.IsValid())
 	{
@@ -4394,7 +4425,7 @@ void AWowGameplayController::ShowMailbox()
 
 	if (MailboxWidget.IsValid())
 	{
-		MailboxWidget->Show();
+		MailboxWidget->Show(static_cast<uint64>(MailboxGuid));
 	}
 }
 
@@ -4405,21 +4436,14 @@ void AWowGameplayController::CreateMailbox()
 		return; // Already created
 	}
 
-	// Get the packet handler for mail data
-	FWowPacketHandler* PacketHandler = nullptr;
-	if (ConnectionManager)
+	if (!ConnectionManager)
 	{
-		PacketHandler = &ConnectionManager->PacketHandler;
-	}
-
-	if (!PacketHandler)
-	{
-		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot create mailbox: no packet handler available"));
+		UE_LOG(LogWowGameplay, Warning, TEXT("Cannot create mailbox: no connection manager available"));
 		return;
 	}
 
 	// Create the mailbox widget
-	MailboxWidget = SNew(SWowMailbox, PacketHandler);
+	MailboxWidget = SNew(SWowMailbox, ConnectionManager);
 
 	// Add to viewport
 	if (GEngine && GEngine->GameViewport)
