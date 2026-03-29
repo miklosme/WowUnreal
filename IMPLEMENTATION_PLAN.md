@@ -229,7 +229,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Secure attribute delegate dispatch for Blizzard dropdown bootstrap (`SetAttribute` now drives `OnAttributeChanged` so `UIDROPDOWNMENU_INIT_MENU`/unit popup dropdowns initialize)
 - [x] Unit relationship API parity for Blizzard unit popup bootstrap (`UnitCanCooperate` and shared friend/hostile resolution for party/target dropdown setup)
 - [x] UnitPopup utility API coverage for RAF/loot/difficulty gates (`IsReferAFriendLinked`, `GetOptOutOfLoot`, `HasLFGRestrictions`, `GetInstanceInfo`, `CanChangePlayerDifficulty`)
-- [?] RAF summon helper API coverage for UnitPopup/FriendsFrame (`GetSummonFriendCooldown`, `CanSummonFriend`, `CanGrantLevel`, `SummonFriend`, `GrantLevel`)
+- [x] RAF summon helper API coverage for UnitPopup/FriendsFrame (`GetSummonFriendCooldown`, `CanSummonFriend`, `CanGrantLevel`, `SummonFriend`, `GrantLevel`)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
