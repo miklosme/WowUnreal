@@ -95,6 +95,10 @@ public:
     /** Party frame widget */
     TSharedPtr<SWowPartyFrame> PartyFrameWidget;
 
+    /** Tracks whether the current raid roster already requested icon sync */
+    bool bRaidIconsRequested = false;
+    uint64 LastRaidGroupGuid = 0;
+
     /** Party invite dialog widget */
     TSharedPtr<SWowPartyInvite> PartyInviteWidget;
 
@@ -312,6 +316,8 @@ private:
 
     // Party/Group event handlers
     void OnGroupUpdated();
+    void OnRaidTargetsUpdated(const FWowRaidTargetState& RaidTargets);
+    void OnReadyCheckUpdated(const FWowReadyCheckState& ReadyCheck);
     void OnGroupInviteReceived(const FString& InviterName);
     void OnPartyCommandResult(uint8 Command, const FString& PlayerName, uint8 Result);
 

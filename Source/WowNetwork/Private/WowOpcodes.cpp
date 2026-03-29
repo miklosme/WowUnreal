@@ -54,6 +54,12 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case SMSG_CHANNEL_NOTIFY:           return TEXT("SMSG_CHANNEL_NOTIFY");
     case SMSG_GROUP_LIST:               return TEXT("SMSG_GROUP_LIST");
     case SMSG_PARTY_COMMAND_RESULT:     return TEXT("SMSG_PARTY_COMMAND_RESULT");
+    case SMSG_RAID_GROUP_ONLY:          return TEXT("SMSG_RAID_GROUP_ONLY");
+    case MSG_RAID_TARGET_UPDATE:        return TEXT("MSG_RAID_TARGET_UPDATE");
+    case MSG_RAID_READY_CHECK:          return TEXT("MSG_RAID_READY_CHECK");
+    case MSG_RAID_READY_CHECK_CONFIRM:  return TEXT("MSG_RAID_READY_CHECK_CONFIRM");
+    case MSG_RAID_READY_CHECK_FINISHED: return TEXT("MSG_RAID_READY_CHECK_FINISHED");
+    case SMSG_RAID_READY_CHECK_ERROR:   return TEXT("SMSG_RAID_READY_CHECK_ERROR");
     case SMSG_WHO:                      return TEXT("SMSG_WHO");
     case CMSG_FRIEND_LIST:              return TEXT("CMSG_FRIEND_LIST");
     case CMSG_ADD_FRIEND:               return TEXT("CMSG_ADD_FRIEND");

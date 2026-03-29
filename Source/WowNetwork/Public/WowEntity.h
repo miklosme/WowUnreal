@@ -302,6 +302,38 @@ enum class EWowEntityKind : uint8
     Corpse
 };
 
+namespace WowGroupType
+{
+    inline constexpr uint8 NORMAL         = 0x00;
+    inline constexpr uint8 BG             = 0x01;
+    inline constexpr uint8 RAID           = 0x02;
+    inline constexpr uint8 LFG_RESTRICTED = 0x04;
+    inline constexpr uint8 LFG            = 0x08;
+}
+
+namespace WowGroupMemberFlags
+{
+    inline constexpr uint8 ASSISTANT  = 0x01;
+    inline constexpr uint8 MAINTANK   = 0x02;
+    inline constexpr uint8 MAINASSIST = 0x04;
+}
+
+namespace WowGroupMemberStatus
+{
+    inline constexpr uint8 ONLINE  = 0x01;
+    inline constexpr uint8 PVP     = 0x02;
+    inline constexpr uint8 DEAD    = 0x04;
+    inline constexpr uint8 GHOST   = 0x08;
+    inline constexpr uint8 AFK     = 0x40;
+    inline constexpr uint8 DND     = 0x80;
+}
+
+namespace WowReadyCheckResponse
+{
+    inline constexpr uint8 NOT_READY = 0;
+    inline constexpr uint8 READY     = 1;
+}
+
 // Base entity — represents any WoW object tracked by the client
 struct WOWNETWORK_API FWowEntity
 {
@@ -676,25 +708,173 @@ struct FWowGroupMember
     uint8 Class = 0;        // Member class
 };
 
+// Raid target icon state for the current group
+struct FWowRaidTargetState
+{
+    TArray<uint64> IconTargets;
+    TMap<uint64, uint8> GuidToIcon;
+
+    FWowRaidTargetState()
+    {
+        Clear();
+    }
+
+    void Clear()
+    {
+        IconTargets.Init(0, 8);
+        GuidToIcon.Empty();
+    }
+
+    bool HasAnyIcons() const
+    {
+        for (const uint64 Guid : IconTargets)
+        {
+            if (Guid != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void SetTarget(uint8 IconIndex, uint64 TargetGuid)
+    {
+        if (!IconTargets.IsValidIndex(IconIndex))
+        {
+            return;
+        }
+
+        const uint64 PreviousTarget = IconTargets[IconIndex];
+        if (PreviousTarget != 0)
+        {
+            GuidToIcon.Remove(PreviousTarget);
+        }
+
+        if (TargetGuid != 0)
+        {
+            for (int32 ExistingIndex = 0; ExistingIndex < IconTargets.Num(); ++ExistingIndex)
+            {
+                if (ExistingIndex != IconIndex && IconTargets[ExistingIndex] == TargetGuid)
+                {
+                    IconTargets[ExistingIndex] = 0;
+                }
+            }
+        }
+
+        IconTargets[IconIndex] = TargetGuid;
+        if (TargetGuid != 0)
+        {
+            GuidToIcon.Add(TargetGuid, IconIndex);
+        }
+    }
+
+    int32 GetIconIndex(uint64 Guid) const
+    {
+        const uint8* FoundIcon = GuidToIcon.Find(Guid);
+        return FoundIcon ? static_cast<int32>(*FoundIcon) : INDEX_NONE;
+    }
+};
+
+// Active ready-check state for the current group
+struct FWowReadyCheckState
+{
+    bool bActive = false;
+    uint64 InitiatorGuid = 0;
+    double EndTimeSeconds = 0.0;
+    TMap<uint64, uint8> Responses;
+
+    void Begin(uint64 InInitiatorGuid, double DurationSeconds = 35.0)
+    {
+        bActive = true;
+        InitiatorGuid = InInitiatorGuid;
+        EndTimeSeconds = FPlatformTime::Seconds() + DurationSeconds;
+        Responses.Empty();
+    }
+
+    void Clear()
+    {
+        bActive = false;
+        InitiatorGuid = 0;
+        EndTimeSeconds = 0.0;
+        Responses.Empty();
+    }
+
+    void SetResponse(uint64 Guid, uint8 ResponseState)
+    {
+        Responses.Add(Guid, ResponseState);
+    }
+
+    float GetTimeLeftSeconds() const
+    {
+        if (!bActive)
+        {
+            return 0.0f;
+        }
+
+        return static_cast<float>(FMath::Max(0.0, EndTimeSeconds - FPlatformTime::Seconds()));
+    }
+
+    const uint8* FindResponse(uint64 Guid) const
+    {
+        return Responses.Find(Guid);
+    }
+};
+
 // Group/Party information
 struct FWowGroupInfo
 {
-    uint8 MemberCount = 0;
+    uint8 MemberCount = 0;  // Total count including the local player
     uint8 GroupType = 0;    // 0=party, 1=raid
+    uint8 RawGroupType = 0;
+    uint64 GroupGuid = 0;
     uint64 LeaderGuid = 0;
+    uint8 SelfSubgroup = 0;
+    uint8 SelfFlags = 0;
+    uint8 SelfRoles = 0;
     TArray<FWowGroupMember> Members;
 
     void Clear()
     {
         MemberCount = 0;
         GroupType = 0;
+        RawGroupType = 0;
+        GroupGuid = 0;
         LeaderGuid = 0;
+        SelfSubgroup = 0;
+        SelfFlags = 0;
+        SelfRoles = 0;
         Members.Empty();
     }
 
     bool IsEmpty() const
     {
-        return MemberCount == 0 || Members.IsEmpty();
+        return MemberCount == 0;
+    }
+
+    bool IsRaidGroup() const
+    {
+        return GroupType == 1;
+    }
+
+    bool IsPartyGroup() const
+    {
+        return !IsEmpty() && GroupType == 0;
+    }
+
+    bool IsLfgGroup() const
+    {
+        return (RawGroupType & WowGroupType::LFG) != 0;
+    }
+
+    bool LocalPlayerIsLeader(uint64 LocalPlayerGuid) const
+    {
+        return LocalPlayerGuid != 0 && LocalPlayerGuid == LeaderGuid;
+    }
+
+    bool LocalPlayerIsAssistant() const
+    {
+        return (SelfFlags & WowGroupMemberFlags::ASSISTANT) != 0;
     }
 
     const FWowGroupMember* FindMember(uint64 Guid) const

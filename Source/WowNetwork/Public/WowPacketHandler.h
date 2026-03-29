@@ -28,6 +28,8 @@ DECLARE_MULTICAST_DELEGATE(FOnTalentsUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnFriendListUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGuildRosterUpdated);
 DECLARE_MULTICAST_DELEGATE(FOnGroupUpdated);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnRaidTargetsUpdated, const FWowRaidTargetState& /*RaidTargets*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnReadyCheckUpdated, const FWowReadyCheckState& /*ReadyCheck*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnGroupInviteReceived, const FString& /*InviterName*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnPartyCommandResult, uint8 /*Command*/, const FString& /*PlayerName*/, uint8 /*Result*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnTaxiNodesShown, uint64 /*NpcGuid*/, uint32 /*CurrentNodeId*/);
@@ -180,6 +182,12 @@ public:
     /** Group/Party information */
     FWowGroupInfo GroupInfo;
 
+    /** Active raid target icon state */
+    FWowRaidTargetState RaidTargets;
+
+    /** Active ready check state */
+    FWowReadyCheckState ReadyCheck;
+
     /** Taxi system data */
     FWowTaxiData TaxiData;
 
@@ -214,6 +222,8 @@ public:
     FOnFriendListUpdated OnFriendListUpdated;
     FOnGuildRosterUpdated OnGuildRosterUpdated;
     FOnGroupUpdated OnGroupUpdated;
+    FOnRaidTargetsUpdated OnRaidTargetsUpdated;
+    FOnReadyCheckUpdated OnReadyCheckUpdated;
     FOnGroupInviteReceived OnGroupInviteReceived;
     FOnPartyCommandResult OnPartyCommandResult;
     FOnTaxiNodesShown OnTaxiNodesShown;
@@ -305,6 +315,10 @@ private:
     void HandleGuildEvent(FPacketReader& R);
     void HandleChannelNotify(FPacketReader& R);
     void HandleGroupList(FPacketReader& R);
+    void HandleRaidTargetUpdate(FPacketReader& R);
+    void HandleRaidReadyCheck(FPacketReader& R);
+    void HandleRaidReadyCheckConfirm(FPacketReader& R);
+    void HandleRaidReadyCheckFinished(FPacketReader& R);
     void HandlePartyCommandResult(FPacketReader& R);
     void HandleGroupInvite(FPacketReader& R);
     void HandleWho(FPacketReader& R);

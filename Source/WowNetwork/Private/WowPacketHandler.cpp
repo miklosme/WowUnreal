@@ -55,6 +55,10 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_GUILD_EVENT,              &FWowPacketHandler::HandleGuildEvent);
     Handlers.Add(WowOpcode::SMSG_CHANNEL_NOTIFY,           &FWowPacketHandler::HandleChannelNotify);
     Handlers.Add(WowOpcode::SMSG_GROUP_LIST,               &FWowPacketHandler::HandleGroupList);
+    Handlers.Add(WowOpcode::MSG_RAID_TARGET_UPDATE,        &FWowPacketHandler::HandleRaidTargetUpdate);
+    Handlers.Add(WowOpcode::MSG_RAID_READY_CHECK,          &FWowPacketHandler::HandleRaidReadyCheck);
+    Handlers.Add(WowOpcode::MSG_RAID_READY_CHECK_CONFIRM,  &FWowPacketHandler::HandleRaidReadyCheckConfirm);
+    Handlers.Add(WowOpcode::MSG_RAID_READY_CHECK_FINISHED, &FWowPacketHandler::HandleRaidReadyCheckFinished);
     Handlers.Add(WowOpcode::SMSG_PARTY_COMMAND_RESULT,     &FWowPacketHandler::HandlePartyCommandResult);
     Handlers.Add(WowOpcode::SMSG_GROUP_INVITE,             &FWowPacketHandler::HandleGroupInvite);
     Handlers.Add(WowOpcode::SMSG_WHO,                      &FWowPacketHandler::HandleWho);
@@ -1596,51 +1600,57 @@ void FWowPacketHandler::HandleChannelNotify(FPacketReader& R)
 }
 
 // ── SMSG_GROUP_LIST ─────────────────────────────────────────────────────────
-// uint8 groupType, uint8 subgroup, uint8 flags, uint8 roles, uint64 guid (if LFG),
-// uint32 counter, uint32 memberCount, for each: FString name, uint64 guid, uint8 online, uint8 subgroup, uint8 flags, uint8 roles
+// uint8 groupFlags, uint8 selfSubgroup, uint8 selfFlags, uint8 selfRoles,
+// if LFG: uint8 completedFlag, uint32 dungeonId,
+// uint64 groupGuid, uint32 counter, uint32 otherMemberCount,
+// repeated otherMemberCount: CString name, uint64 guid, uint8 online, uint8 subgroup, uint8 flags, uint8 roles,
+// uint64 leaderGuid, optional loot data
 
 void FWowPacketHandler::HandleGroupList(FPacketReader& R)
 {
     if (!R.CanRead(4)) return;
 
-    uint8 GroupType = R.ReadU8();
-    uint8 Subgroup = R.ReadU8();
-    uint8 Flags = R.ReadU8();
-    uint8 Roles = R.ReadU8();
+    const uint8 RawGroupType = R.ReadU8();
+    const uint8 SelfSubgroup = R.ReadU8();
+    const uint8 SelfFlags = R.ReadU8();
+    const uint8 SelfRoles = R.ReadU8();
 
-    // Check if LFG (flags & some bit)
-    if (Flags & 0x10) // example flag for LFG
+    if ((RawGroupType & WowGroupType::LFG) != 0)
     {
-        if (R.CanRead(8))
-        {
-            uint64 LFGGuid = R.ReadU64();
-        }
+        if (!R.CanRead(5)) return;
+        R.Skip(1); // completed dungeon flag
+        R.Skip(4); // dungeon id
     }
 
-    if (!R.CanRead(8)) return;
-    uint32 Counter = R.ReadU32();
-    uint32 MemberCount = R.ReadU32();
+    if (!R.CanRead(16)) return;
+    const uint64 GroupGuid = R.ReadU64();
+    const uint32 Counter = R.ReadU32();
+    const uint32 OtherMemberCount = R.ReadU32();
 
-    UE_LOG(LogWowPacket, Log, TEXT("GROUP_LIST: type=%d members=%d"), GroupType, MemberCount);
+    const uint64 PreviousGroupGuid = GroupInfo.GroupGuid;
+    const bool bHadRaidTargets = RaidTargets.HasAnyIcons();
+    const bool bHadReadyCheck = ReadyCheck.bActive;
 
-    // Update group info structure
     GroupInfo.Clear();
-    GroupInfo.GroupType = GroupType;
-    GroupInfo.MemberCount = static_cast<uint8>(MemberCount);
+    GroupInfo.RawGroupType = RawGroupType;
+    GroupInfo.GroupType = (RawGroupType & WowGroupType::RAID) != 0 ? 1 : 0;
+    GroupInfo.GroupGuid = GroupGuid;
+    GroupInfo.SelfSubgroup = SelfSubgroup;
+    GroupInfo.SelfFlags = SelfFlags;
+    GroupInfo.SelfRoles = SelfRoles;
+    GroupInfo.Members.Reserve(OtherMemberCount);
 
-    // Read member data
-    for (uint32 i = 0; i < MemberCount; ++i)
+    for (uint32 i = 0; i < OtherMemberCount; ++i)
     {
-        FString MemberName = R.ReadCString();
+        const FString MemberName = R.ReadCString();
 
         if (!R.CanRead(12)) break; // guid + online + subgroup + flags + roles
-        uint64 MemberGuid = R.ReadU64();
-        uint8 Online = R.ReadU8();
-        uint8 MemberSubgroup = R.ReadU8();
-        uint8 MemberFlags = R.ReadU8();
-        uint8 MemberRoles = R.ReadU8();
+        const uint64 MemberGuid = R.ReadU64();
+        const uint8 Online = R.ReadU8();
+        const uint8 MemberSubgroup = R.ReadU8();
+        const uint8 MemberFlags = R.ReadU8();
+        const uint8 MemberRoles = R.ReadU8();
 
-        // Create group member structure
         FWowGroupMember Member;
         Member.Guid = MemberGuid;
         Member.Name = MemberName;
@@ -1665,7 +1675,139 @@ void FWowPacketHandler::HandleGroupList(FPacketReader& R)
                *MemberName, MemberGuid, Online, Member.Level, Member.Class);
     }
 
+    if (!R.CanRead(8)) return;
+    GroupInfo.LeaderGuid = R.ReadU64();
+
+    if (OtherMemberCount > 0 && R.CanRead(12))
+    {
+        R.Skip(1); // loot method
+        R.Skip(8); // master looter guid
+        R.Skip(1); // loot threshold
+        R.Skip(1); // dungeon difficulty
+        R.Skip(1); // raid difficulty
+        if (R.CanRead(1))
+        {
+            R.Skip(1); // heroic raid difficulty toggle
+        }
+    }
+
+    const bool bHasGroup = (GroupInfo.LeaderGuid != 0) || (OtherMemberCount > 0);
+    GroupInfo.MemberCount = bHasGroup ? static_cast<uint8>(FMath::Min<uint32>(OtherMemberCount + 1, MAX_uint8)) : 0;
+
+    if (!bHasGroup)
+    {
+        GroupInfo.Clear();
+    }
+
+    const bool bGroupChanged = PreviousGroupGuid != 0 && PreviousGroupGuid != GroupInfo.GroupGuid;
+
+    if (!GroupInfo.IsRaidGroup() || bGroupChanged)
+    {
+        RaidTargets.Clear();
+        ReadyCheck.Clear();
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("GROUP_LIST: rawType=0x%02X normalizedType=%d members=%d leader=%llu groupGuid=%llu counter=%u"),
+        RawGroupType,
+        GroupInfo.GroupType,
+        GroupInfo.MemberCount,
+        GroupInfo.LeaderGuid,
+        GroupGuid,
+        Counter);
+
     OnGroupUpdated.Broadcast();
+
+    if ((bHadRaidTargets && !RaidTargets.HasAnyIcons()) || (bHadReadyCheck && !ReadyCheck.bActive))
+    {
+        if (bHadRaidTargets)
+        {
+            OnRaidTargetsUpdated.Broadcast(RaidTargets);
+        }
+        if (bHadReadyCheck)
+        {
+            OnReadyCheckUpdated.Broadcast(ReadyCheck);
+        }
+    }
+}
+
+// ── MSG_RAID_TARGET_UPDATE ─────────────────────────────────────────────────
+// uint8 mode
+// mode 1: repeated uint8 icon, uint64 targetGuid
+// mode 0: uint64 setterGuid, uint8 icon, uint64 targetGuid
+
+void FWowPacketHandler::HandleRaidTargetUpdate(FPacketReader& R)
+{
+    if (!R.CanRead(1)) return;
+
+    const uint8 Mode = R.ReadU8();
+    if (Mode == 1)
+    {
+        RaidTargets.Clear();
+        while (R.CanRead(9))
+        {
+            const uint8 IconIndex = R.ReadU8();
+            const uint64 TargetGuid = R.ReadU64();
+            RaidTargets.SetTarget(IconIndex, TargetGuid);
+        }
+
+        UE_LOG(LogWowPacket, Log, TEXT("RAID_TARGET_UPDATE: received icon list"));
+    }
+    else
+    {
+        if (!R.CanRead(17)) return;
+
+        const uint64 SetterGuid = R.ReadU64();
+        const uint8 IconIndex = R.ReadU8();
+        const uint64 TargetGuid = R.ReadU64();
+
+        RaidTargets.SetTarget(IconIndex, TargetGuid);
+        UE_LOG(LogWowPacket, Log, TEXT("RAID_TARGET_UPDATE: setter=%llu icon=%d target=%llu"), SetterGuid, IconIndex, TargetGuid);
+    }
+
+    OnRaidTargetsUpdated.Broadcast(RaidTargets);
+}
+
+// ── MSG_RAID_READY_CHECK ───────────────────────────────────────────────────
+// uint64 initiatorGuid
+
+void FWowPacketHandler::HandleRaidReadyCheck(FPacketReader& R)
+{
+    if (!R.CanRead(8)) return;
+
+    const uint64 InitiatorGuid = R.ReadU64();
+    ReadyCheck.Begin(InitiatorGuid);
+    UE_LOG(LogWowPacket, Log, TEXT("RAID_READY_CHECK: initiator=%llu"), InitiatorGuid);
+    OnReadyCheckUpdated.Broadcast(ReadyCheck);
+}
+
+// ── MSG_RAID_READY_CHECK_CONFIRM ───────────────────────────────────────────
+// uint64 responderGuid, uint8 state
+
+void FWowPacketHandler::HandleRaidReadyCheckConfirm(FPacketReader& R)
+{
+    if (!R.CanRead(9)) return;
+
+    const uint64 ResponderGuid = R.ReadU64();
+    const uint8 ResponseState = R.ReadU8();
+
+    if (!ReadyCheck.bActive)
+    {
+        ReadyCheck.Begin(0);
+    }
+
+    ReadyCheck.SetResponse(ResponderGuid, ResponseState);
+    UE_LOG(LogWowPacket, Log, TEXT("RAID_READY_CHECK_CONFIRM: responder=%llu state=%d"), ResponderGuid, ResponseState);
+    OnReadyCheckUpdated.Broadcast(ReadyCheck);
+}
+
+// ── MSG_RAID_READY_CHECK_FINISHED ──────────────────────────────────────────
+
+void FWowPacketHandler::HandleRaidReadyCheckFinished(FPacketReader& R)
+{
+    static_cast<void>(R);
+    ReadyCheck.Clear();
+    UE_LOG(LogWowPacket, Log, TEXT("RAID_READY_CHECK_FINISHED"));
+    OnReadyCheckUpdated.Broadcast(ReadyCheck);
 }
 
 // ── SMSG_PARTY_COMMAND_RESULT ──────────────────────────────────────────────

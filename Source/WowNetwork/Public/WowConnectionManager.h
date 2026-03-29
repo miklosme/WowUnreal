@@ -94,6 +94,21 @@ public:
     /** Set the amount of gold offered in the current trade */
     UFUNCTION(BlueprintCallable) void SendSetTradeGold(int32 CopperAmount);
 
+    /** Request the current raid target icon assignments */
+    void SendRequestRaidTargetIcons();
+
+    /** Assign a raid target icon to the specified guid (or clear by passing 0) */
+    void SendSetRaidTargetIcon(int32 IconIndex, int64 InTargetGuid);
+
+    /** Start a ready check if the local player can issue one */
+    void SendStartReadyCheck();
+
+    /** Send a ready-check response */
+    void SendReadyCheckConfirm(bool bReady);
+
+    /** Finish the active ready check */
+    void SendFinishReadyCheck();
+
     /** Send gossip/questgiver hello to initiate NPC interaction */
     UFUNCTION(BlueprintCallable) void SendGossipHello(int64 NpcGuid);
 

@@ -736,6 +736,70 @@ void UWowConnectionManager::SendSetTradeGold(int32 CopperAmount)
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_SET_TRADE_GOLD amount=%u"), Gold);
 }
 
+void UWowConnectionManager::SendRequestRaidTargetIcons()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Add(0xFF);
+    WorldSocket->SendPacket(WowOpcode::MSG_RAID_TARGET_UPDATE, Data);
+    UE_LOG(LogWowNet, Verbose, TEXT("Requested current raid target icon list"));
+}
+
+void UWowConnectionManager::SendSetRaidTargetIcon(int32 IconIndex, int64 InTargetGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+    if (IconIndex < 0 || IconIndex > 7) return;
+
+    TArray<uint8> Data;
+    Data.Reserve(9);
+
+    const uint8 Icon = static_cast<uint8>(IconIndex);
+    const uint64 Guid = static_cast<uint64>(InTargetGuid);
+    Data.Add(Icon);
+    Data.Append(reinterpret_cast<const uint8*>(&Guid), sizeof(Guid));
+
+    WorldSocket->SendPacket(WowOpcode::MSG_RAID_TARGET_UPDATE, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent MSG_RAID_TARGET_UPDATE icon=%d guid=%llu"), IconIndex, Guid);
+}
+
+void UWowConnectionManager::SendStartReadyCheck()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::MSG_RAID_READY_CHECK, {});
+    UE_LOG(LogWowNet, Log, TEXT("Sent MSG_RAID_READY_CHECK request"));
+}
+
+void UWowConnectionManager::SendReadyCheckConfirm(bool bReady)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.Add(bReady ? WowReadyCheckResponse::READY : WowReadyCheckResponse::NOT_READY);
+
+    WorldSocket->SendPacket(WowOpcode::MSG_RAID_READY_CHECK, Data);
+
+    const uint64 LocalPlayerGuid = PacketHandler.EntityManager.LocalPlayerGuid;
+    if (PacketHandler.ReadyCheck.bActive && LocalPlayerGuid != 0)
+    {
+        PacketHandler.ReadyCheck.SetResponse(LocalPlayerGuid, Data[0]);
+        PacketHandler.OnReadyCheckUpdated.Broadcast(PacketHandler.ReadyCheck);
+    }
+
+    UE_LOG(LogWowNet, Log, TEXT("Sent MSG_RAID_READY_CHECK response ready=%d"), bReady ? 1 : 0);
+}
+
+void UWowConnectionManager::SendFinishReadyCheck()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::MSG_RAID_READY_CHECK_FINISHED, {});
+    PacketHandler.ReadyCheck.Clear();
+    PacketHandler.OnReadyCheckUpdated.Broadcast(PacketHandler.ReadyCheck);
+    UE_LOG(LogWowNet, Log, TEXT("Sent MSG_RAID_READY_CHECK_FINISHED"));
+}
+
 void UWowConnectionManager::SendGossipHello(int64 NpcGuid)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;

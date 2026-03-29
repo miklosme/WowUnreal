@@ -848,6 +848,192 @@ bool FTradeStatusExtendedParsesBothSides::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRaidGroupListParsesRosterMetadata, "WowUnreal.Network.Raid.GroupListParsesRosterMetadata",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRaidGroupListParsesRosterMetadata::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU32 = [](TArray<uint8>& Buffer, uint32 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint32));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint32));
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+    auto AppendCString = [](TArray<uint8>& Buffer, const ANSICHAR* Value)
+    {
+        const int32 Length = FCStringAnsi::Strlen(Value) + 1;
+        const int32 Offset = Buffer.AddUninitialized(Length);
+        FMemory::Memcpy(Buffer.GetData() + Offset, Value, Length);
+    };
+
+    const uint64 GroupGuid = 0x1020304050607080ULL;
+    const uint64 LeaderGuid = 0x9988776655443322ULL;
+    const uint64 MemberGuidA = 0x1111222233334444ULL;
+    const uint64 MemberGuidB = LeaderGuid;
+
+    TArray<uint8> Packet;
+    AppendU8(Packet, WowGroupType::RAID);
+    AppendU8(Packet, 2u);
+    AppendU8(Packet, WowGroupMemberFlags::ASSISTANT);
+    AppendU8(Packet, 3u);
+    AppendU64(Packet, GroupGuid);
+    AppendU32(Packet, 41u);
+    AppendU32(Packet, 2u);
+
+    AppendCString(Packet, "Tanky");
+    AppendU64(Packet, MemberGuidA);
+    AppendU8(Packet, WowGroupMemberStatus::ONLINE);
+    AppendU8(Packet, 0u);
+    AppendU8(Packet, WowGroupMemberFlags::MAINTANK);
+    AppendU8(Packet, 1u);
+
+    AppendCString(Packet, "Leader");
+    AppendU64(Packet, MemberGuidB);
+    AppendU8(Packet, WowGroupMemberStatus::ONLINE);
+    AppendU8(Packet, 1u);
+    AppendU8(Packet, 0u);
+    AppendU8(Packet, 2u);
+
+    AppendU64(Packet, LeaderGuid);
+    AppendU8(Packet, 2u);
+    AppendU64(Packet, 0u);
+    AppendU8(Packet, 3u);
+    AppendU8(Packet, 1u);
+    AppendU8(Packet, 2u);
+    AppendU8(Packet, 0u);
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_GROUP_LIST, Packet);
+
+    TestTrue(TEXT("Group list marks the roster as a raid"), PacketHandler.GroupInfo.IsRaidGroup());
+    TestEqual(TEXT("Group list stores the raw group flags"), PacketHandler.GroupInfo.RawGroupType, static_cast<uint8>(WowGroupType::RAID));
+    TestEqual(TEXT("Group list stores the group guid"), PacketHandler.GroupInfo.GroupGuid, GroupGuid);
+    TestEqual(TEXT("Group list stores the total member count including the local player"), PacketHandler.GroupInfo.MemberCount, static_cast<uint8>(3));
+    TestEqual(TEXT("Group list stores the leader guid"), PacketHandler.GroupInfo.LeaderGuid, LeaderGuid);
+    TestEqual(TEXT("Group list stores the local subgroup"), PacketHandler.GroupInfo.SelfSubgroup, static_cast<uint8>(2));
+    TestEqual(TEXT("Group list stores the local flags"), PacketHandler.GroupInfo.SelfFlags, static_cast<uint8>(WowGroupMemberFlags::ASSISTANT));
+    TestEqual(TEXT("Group list stores the remote roster size"), PacketHandler.GroupInfo.Members.Num(), 2);
+    if (PacketHandler.GroupInfo.Members.Num() != 2)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("First remote member name parsed"), PacketHandler.GroupInfo.Members[0].Name, FString(TEXT("Tanky")));
+    TestEqual(TEXT("First remote member subgroup parsed"), PacketHandler.GroupInfo.Members[0].Group, static_cast<uint8>(0));
+    TestEqual(TEXT("Second remote member guid parsed"), PacketHandler.GroupInfo.Members[1].Guid, MemberGuidB);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRaidTargetPacketsTrackAssignments, "WowUnreal.Network.Raid.TargetPacketsTrackAssignments",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRaidTargetPacketsTrackAssignments::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+
+    const uint64 TargetA = 0xABCDEF0011223344ULL;
+    const uint64 TargetB = 0x5566778899AABBCCULL;
+    const uint64 TargetC = 0xCAFEBABE01020304ULL;
+
+    TArray<uint8> ListPacket;
+    AppendU8(ListPacket, 1u);
+    AppendU8(ListPacket, 0u);
+    AppendU64(ListPacket, TargetA);
+    AppendU8(ListPacket, 7u);
+    AppendU64(ListPacket, TargetB);
+    PacketHandler.HandlePacket(WowOpcode::MSG_RAID_TARGET_UPDATE, ListPacket);
+
+    TestEqual(TEXT("Icon list assigns icon 1 to the first target"), PacketHandler.RaidTargets.GetIconIndex(TargetA), 0);
+    TestEqual(TEXT("Icon list assigns icon 8 to the second target"), PacketHandler.RaidTargets.GetIconIndex(TargetB), 7);
+
+    TArray<uint8> UpdatePacket;
+    AppendU8(UpdatePacket, 0u);
+    AppendU64(UpdatePacket, 0x0102030405060708ULL);
+    AppendU8(UpdatePacket, 7u);
+    AppendU64(UpdatePacket, TargetC);
+    PacketHandler.HandlePacket(WowOpcode::MSG_RAID_TARGET_UPDATE, UpdatePacket);
+
+    TestEqual(TEXT("Single target update replaces the icon target"), PacketHandler.RaidTargets.GetIconIndex(TargetC), 7);
+    TestEqual(TEXT("Replaced target no longer has an icon"), PacketHandler.RaidTargets.GetIconIndex(TargetB), INDEX_NONE);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRaidReadyCheckPacketsTrackLifecycle, "WowUnreal.Network.Raid.ReadyCheckPacketsTrackLifecycle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FRaidReadyCheckPacketsTrackLifecycle::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+
+    const uint64 InitiatorGuid = 0x8877665544332211ULL;
+    const uint64 ReadyGuid = 0x1111111122222222ULL;
+    const uint64 NotReadyGuid = 0x3333333344444444ULL;
+
+    TArray<uint8> StartPacket;
+    AppendU64(StartPacket, InitiatorGuid);
+    PacketHandler.HandlePacket(WowOpcode::MSG_RAID_READY_CHECK, StartPacket);
+
+    TestTrue(TEXT("Ready check becomes active on request"), PacketHandler.ReadyCheck.bActive);
+    TestEqual(TEXT("Ready check stores the initiator"), PacketHandler.ReadyCheck.InitiatorGuid, InitiatorGuid);
+    TestTrue(TEXT("Ready check starts with remaining time"), PacketHandler.ReadyCheck.GetTimeLeftSeconds() > 0.0f);
+
+    TArray<uint8> ReadyPacket;
+    AppendU64(ReadyPacket, ReadyGuid);
+    AppendU8(ReadyPacket, WowReadyCheckResponse::READY);
+    PacketHandler.HandlePacket(WowOpcode::MSG_RAID_READY_CHECK_CONFIRM, ReadyPacket);
+
+    TArray<uint8> NotReadyPacket;
+    AppendU64(NotReadyPacket, NotReadyGuid);
+    AppendU8(NotReadyPacket, WowReadyCheckResponse::NOT_READY);
+    PacketHandler.HandlePacket(WowOpcode::MSG_RAID_READY_CHECK_CONFIRM, NotReadyPacket);
+
+    const uint8* ReadyState = PacketHandler.ReadyCheck.FindResponse(ReadyGuid);
+    const uint8* NotReadyState = PacketHandler.ReadyCheck.FindResponse(NotReadyGuid);
+    TestNotNull(TEXT("Ready responder is tracked"), ReadyState);
+    TestNotNull(TEXT("Not-ready responder is tracked"), NotReadyState);
+    if (!ReadyState || !NotReadyState)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Ready response value is stored"), *ReadyState, static_cast<uint8>(WowReadyCheckResponse::READY));
+    TestEqual(TEXT("Not-ready response value is stored"), *NotReadyState, static_cast<uint8>(WowReadyCheckResponse::NOT_READY));
+
+    PacketHandler.HandlePacket(WowOpcode::MSG_RAID_READY_CHECK_FINISHED, {});
+    TestFalse(TEXT("Ready check is cleared when finished"), PacketHandler.ReadyCheck.bActive);
+    TestEqual(TEXT("Ready check responses are cleared when finished"), PacketHandler.ReadyCheck.Responses.Num(), 0);
+
+    return true;
+}
+
 // ====================================================================
 // DBC Parser Tests (require MPQ data)
 // ====================================================================

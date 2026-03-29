@@ -198,6 +198,12 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_GROUP_DECLINE           = 0x0073;
     inline constexpr uint16 CMSG_GROUP_UNINVITE          = 0x0075;
     inline constexpr uint16 CMSG_GROUP_DISBAND           = 0x007B;
+    inline constexpr uint16 SMSG_RAID_GROUP_ONLY         = 0x0286;
+    inline constexpr uint16 MSG_RAID_TARGET_UPDATE       = 0x0321;
+    inline constexpr uint16 MSG_RAID_READY_CHECK         = 0x0322;
+    inline constexpr uint16 MSG_RAID_READY_CHECK_CONFIRM = 0x03AE;
+    inline constexpr uint16 MSG_RAID_READY_CHECK_FINISHED = 0x03C6;
+    inline constexpr uint16 SMSG_RAID_READY_CHECK_ERROR  = 0x0408;
     inline constexpr uint16 CMSG_NAME_QUERY              = 0x0050;
     inline constexpr uint16 CMSG_CREATURE_QUERY          = 0x0060;
 

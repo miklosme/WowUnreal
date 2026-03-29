@@ -297,6 +297,10 @@ void AWowGameplayController::BindEntityEvents()
 	// Bind party/group events
 	ConnectionManager->PacketHandler.OnGroupUpdated.AddUObject(
 		this, &AWowGameplayController::OnGroupUpdated);
+	ConnectionManager->PacketHandler.OnRaidTargetsUpdated.AddUObject(
+		this, &AWowGameplayController::OnRaidTargetsUpdated);
+	ConnectionManager->PacketHandler.OnReadyCheckUpdated.AddUObject(
+		this, &AWowGameplayController::OnReadyCheckUpdated);
 	ConnectionManager->PacketHandler.OnGroupInviteReceived.AddUObject(
 		this, &AWowGameplayController::OnGroupInviteReceived);
 	ConnectionManager->PacketHandler.OnPartyCommandResult.AddUObject(
@@ -2838,7 +2842,53 @@ void AWowGameplayController::OnGroupUpdated()
 		PartyFrameWidget->UpdatePartyInfo(ConnectionManager->PacketHandler.GroupInfo);
 	}
 
+	if (ConnectionManager->PacketHandler.GroupInfo.IsRaidGroup())
+	{
+		FireUIEvent(TEXT("RAID_ROSTER_UPDATE"));
+
+		if (ConnectionManager->PacketHandler.GroupInfo.GroupGuid != LastRaidGroupGuid)
+		{
+			LastRaidGroupGuid = ConnectionManager->PacketHandler.GroupInfo.GroupGuid;
+			bRaidIconsRequested = false;
+		}
+
+		if (!bRaidIconsRequested)
+		{
+			ConnectionManager->SendRequestRaidTargetIcons();
+			bRaidIconsRequested = true;
+		}
+	}
+	else
+	{
+		bRaidIconsRequested = false;
+		LastRaidGroupGuid = 0;
+	}
+
 	UE_LOG(LogWowGameplay, Log, TEXT("Group updated"));
+}
+
+void AWowGameplayController::OnRaidTargetsUpdated(const FWowRaidTargetState& RaidTargets)
+{
+	static_cast<void>(RaidTargets);
+	if (!ConnectionManager || !PartyFrameWidget.IsValid())
+	{
+		return;
+	}
+
+	PartyFrameWidget->UpdatePartyInfo(ConnectionManager->PacketHandler.GroupInfo);
+	UE_LOG(LogWowGameplay, Verbose, TEXT("Raid target icons updated"));
+}
+
+void AWowGameplayController::OnReadyCheckUpdated(const FWowReadyCheckState& ReadyCheck)
+{
+	static_cast<void>(ReadyCheck);
+	if (!ConnectionManager || !PartyFrameWidget.IsValid())
+	{
+		return;
+	}
+
+	PartyFrameWidget->UpdatePartyInfo(ConnectionManager->PacketHandler.GroupInfo);
+	UE_LOG(LogWowGameplay, Verbose, TEXT("Ready check state updated"));
 }
 
 void AWowGameplayController::OnGroupInviteReceived(const FString& InviterName)

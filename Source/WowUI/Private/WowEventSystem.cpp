@@ -1200,7 +1200,7 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 	case 0x006E: return TEXT("PLAYER_LEAVING_WORLD");            // SMSG_LOGOUT_COMPLETE
 
 	// Targeting
-	case 0x0078: return TEXT("PLAYER_TARGET_CHANGED");           // MSG_RAID_TARGET_UPDATE (contextual)
+	case 0x0078: return TEXT("");
 
 	// Unit updates
 	case 0x0480: return TEXT("UNIT_MANA");                       // SMSG_POWER_UPDATE (correct opcode)
@@ -1235,7 +1235,11 @@ FString FWowEventSystem::OpcodeToEvent(uint16 Opcode)
 
 	// Group / raid
 	case 0x007D: return TEXT("GROUP_ROSTER_UPDATE");             // SMSG_GROUP_LIST
-	case 0x007E: return TEXT("RAID_ROSTER_UPDATE");              // SMSG_RAID_GROUP_ONLY
+	case 0x0321: return TEXT("RAID_TARGET_UPDATE");              // MSG_RAID_TARGET_UPDATE
+	case 0x0322: return TEXT("READY_CHECK");                     // MSG_RAID_READY_CHECK
+	case 0x03AE: return TEXT("READY_CHECK_CONFIRM");             // MSG_RAID_READY_CHECK_CONFIRM
+	case 0x03C6: return TEXT("READY_CHECK_FINISHED");            // MSG_RAID_READY_CHECK_FINISHED
+	case 0x0286: return TEXT("RAID_GROUP_ONLY");                 // SMSG_RAID_GROUP_ONLY
 
 	// Combat
 	case 0x04D2: return TEXT("COMBAT_LOG_EVENT_UNFILTERED");     // SMSG_COMBAT_LOG_MULTIPLE

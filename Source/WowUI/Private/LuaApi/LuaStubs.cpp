@@ -92,7 +92,7 @@ namespace WowSpellSchool
 #define STUB_RETURN_NONE(name) \
     static int L_##name(lua_State* L) { return 0; }
 
-// Helper: resolve "player"/"target"/"party1"-"party4" unit strings to entity GUID
+// Helper: resolve common WoW unit strings to entity GUID
 static uint64 ResolveUnitGuid(lua_State* L, int ArgIdx = 1)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -113,10 +113,38 @@ static uint64 ResolveUnitGuid(lua_State* L, int ArgIdx = 1)
         if (Ctx->ConnectionManager)
         {
             const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-            int32 PartyIndex = unit[5] - '1'; // Convert '1'-'4' to 0-3
+            const int32 PartyIndex = unit[5] - '1';
             if (PartyIndex >= 0 && PartyIndex < GroupInfo.Members.Num())
             {
                 return GroupInfo.Members[PartyIndex].Guid;
+            }
+        }
+    }
+    else if (strncmp(unit, "raid", 4) == 0 && unit[4] != '\0')
+    {
+        if (Ctx->ConnectionManager)
+        {
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            if (!GroupInfo.IsRaidGroup())
+            {
+                return 0;
+            }
+
+            const int32 RaidIndex = FCStringAnsi::Atoi(unit + 4);
+            if (RaidIndex <= 0)
+            {
+                return 0;
+            }
+
+            if (RaidIndex == 1)
+            {
+                return Ctx->EntityManager->LocalPlayerGuid;
+            }
+
+            const int32 MemberIndex = RaidIndex - 2;
+            if (GroupInfo.Members.IsValidIndex(MemberIndex))
+            {
+                return GroupInfo.Members[MemberIndex].Guid;
             }
         }
     }
@@ -357,9 +385,9 @@ static int L_GetNumPartyMembers(lua_State* L)
     if (Ctx && Ctx->ConnectionManager)
     {
         const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-        if (!GroupInfo.IsEmpty() && GroupInfo.GroupType == 0) // Party
+        if (!GroupInfo.IsEmpty() && !GroupInfo.IsRaidGroup())
         {
-            lua_pushnumber(L, GroupInfo.MemberCount > 1 ? GroupInfo.MemberCount - 1 : 0); // Exclude player
+            lua_pushnumber(L, FMath::Max(0, static_cast<int32>(GroupInfo.MemberCount) - 1));
             return 1;
         }
     }
@@ -374,7 +402,7 @@ static int L_GetNumRaidMembers(lua_State* L)
     if (Ctx && Ctx->ConnectionManager)
     {
         const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-        if (!GroupInfo.IsEmpty() && GroupInfo.GroupType == 1) // Raid
+        if (!GroupInfo.IsEmpty() && GroupInfo.IsRaidGroup())
         {
             lua_pushnumber(L, GroupInfo.MemberCount);
             return 1;
@@ -4494,82 +4522,80 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         if (!Ctx || !Ctx->ConnectionManager)
         {
-            lua_pushboolean(L2, 0);
+            lua_pushnil(L2);
             return 1;
         }
 
-        uint64 UnitGuid = ResolveUnitGuid(L2, 1);
+        const uint64 UnitGuid = ResolveUnitGuid(L2, 1);
         if (UnitGuid == 0)
         {
-            lua_pushboolean(L2, 0);
+            lua_pushnil(L2);
             return 1;
         }
 
         const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-        if (GroupInfo.IsEmpty() || GroupInfo.GroupType != 1) // 1 = raid
+        if (GroupInfo.IsEmpty() || !GroupInfo.IsRaidGroup())
         {
-            lua_pushboolean(L2, 0);
+            lua_pushnil(L2);
             return 1;
         }
 
-        // Check if unit is in raid (including player)
         if (UnitGuid == Ctx->EntityManager->LocalPlayerGuid)
         {
-            lua_pushboolean(L2, GroupInfo.MemberCount > 0);
+            lua_pushnumber(L2, 1);
             return 1;
         }
 
-        for (const auto& Member : GroupInfo.Members)
+        for (int32 MemberIndex = 0; MemberIndex < GroupInfo.Members.Num(); ++MemberIndex)
         {
-            if (Member.Guid == UnitGuid)
+            if (GroupInfo.Members[MemberIndex].Guid == UnitGuid)
             {
-                lua_pushboolean(L2, 1);
+                lua_pushnumber(L2, MemberIndex + 2);
                 return 1;
             }
         }
 
-        lua_pushboolean(L2, 0);
+        lua_pushnil(L2);
         return 1;
     });
     lua_register(L, "UnitInParty", [](lua_State* L2) -> int {
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         if (!Ctx || !Ctx->ConnectionManager)
         {
-            lua_pushboolean(L2, 0);
+            lua_pushnil(L2);
             return 1;
         }
 
-        uint64 UnitGuid = ResolveUnitGuid(L2, 1);
+        const uint64 UnitGuid = ResolveUnitGuid(L2, 1);
         if (UnitGuid == 0)
         {
-            lua_pushboolean(L2, 0);
+            lua_pushnil(L2);
             return 1;
         }
 
         const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-        if (GroupInfo.IsEmpty() || GroupInfo.GroupType != 0) // 0 = party
+        if (GroupInfo.IsEmpty() || GroupInfo.IsRaidGroup())
         {
-            lua_pushboolean(L2, 0);
+            lua_pushnil(L2);
             return 1;
         }
 
-        // Check if unit is in party (including player)
         if (UnitGuid == Ctx->EntityManager->LocalPlayerGuid)
         {
-            lua_pushboolean(L2, GroupInfo.MemberCount > 1);
+            lua_pushnumber(L2, 0);
             return 1;
         }
 
-        for (const auto& Member : GroupInfo.Members)
+        for (int32 MemberIndex = 0; MemberIndex < GroupInfo.Members.Num(); ++MemberIndex)
         {
-            if (Member.Guid == UnitGuid)
+            if (GroupInfo.Members[MemberIndex].Guid == UnitGuid)
             {
-                lua_pushboolean(L2, 1);
+                lua_pushnumber(L2, MemberIndex + 1);
                 return 1;
             }
         }
 
-        lua_pushboolean(L2, 0);
+        lua_pushnil(L2);
         return 1;
     });
     lua_register(L, "UnitInVehicle", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
@@ -5519,7 +5545,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager) {
             uint64 PlayerGuid = Ctx->EntityManager->LocalPlayerGuid;
             const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-            lua_pushboolean(L2, PlayerGuid == GroupInfo.LeaderGuid && GroupInfo.GroupType == 0);
+            lua_pushboolean(L2, GroupInfo.IsPartyGroup() && GroupInfo.LocalPlayerIsLeader(PlayerGuid));
         } else {
             lua_pushboolean(L2, false);
         }
@@ -5531,7 +5557,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager) {
             uint64 PlayerGuid = Ctx->EntityManager->LocalPlayerGuid;
             const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-            lua_pushboolean(L2, PlayerGuid == GroupInfo.LeaderGuid && GroupInfo.GroupType == 1);
+            lua_pushboolean(L2, GroupInfo.IsRaidGroup() && GroupInfo.LocalPlayerIsLeader(PlayerGuid));
         } else {
             lua_pushboolean(L2, false);
         }
@@ -5541,8 +5567,8 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         // IsRaidOfficer() → boolean (true if player is raid officer)
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager) {
-            // TODO: Check raid officer status when that data is available
-            lua_pushboolean(L2, false);
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            lua_pushboolean(L2, GroupInfo.IsRaidGroup() && GroupInfo.LocalPlayerIsAssistant());
         } else {
             lua_pushboolean(L2, false);
         }
@@ -5689,7 +5715,18 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetClassInfo", L_GetClassInfo);
 
     // Remaining missing functions from OnLoad errors
-    lua_register(L, "IsPartyLFG", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "IsPartyLFG", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager)
+        {
+            lua_pushboolean(L2, Ctx->ConnectionManager->PacketHandler.GroupInfo.IsLfgGroup());
+        }
+        else
+        {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "GetLFGRandomDungeonInfo", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "BNGetFriendInfo", [](lua_State* L2) -> int {
         // Returns multiple values: presenceID, presenceName, battleTag, isBattleTagPresence, toonName, toonID, client, isOnline, lastOnline, isAFK, isDND, messageText, noteText, isRIDFriend, broadcastTime, canSoR
@@ -5870,10 +5907,100 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
     // Ready check
     lua_register(L, "GetReadyCheckStatus", [](lua_State* L2) -> int {
-        lua_pushstring(L2, "ready");
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (!Ctx || !Ctx->ConnectionManager || !Ctx->EntityManager)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        const uint64 UnitGuid = ResolveUnitGuid(L2, 1);
+        if (UnitGuid == 0)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        const FWowPacketHandler& PacketHandler = Ctx->ConnectionManager->PacketHandler;
+        if (!PacketHandler.ReadyCheck.bActive)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        const bool bIsLocalPlayer = UnitGuid == Ctx->EntityManager->LocalPlayerGuid;
+        const FWowGroupMember* Member = bIsLocalPlayer ? nullptr : PacketHandler.GroupInfo.FindMember(UnitGuid);
+        const bool bOnline = bIsLocalPlayer
+            || (Member && (Member->Status & WowGroupMemberStatus::ONLINE) != 0);
+
+        const uint8* ResponseState = PacketHandler.ReadyCheck.FindResponse(UnitGuid);
+        if (!bOnline && ResponseState == nullptr)
+        {
+            lua_pushstring(L2, "notready");
+            return 1;
+        }
+
+        if (ResponseState == nullptr)
+        {
+            lua_pushstring(L2, "waiting");
+            return 1;
+        }
+
+        lua_pushstring(L2, (*ResponseState == WowReadyCheckResponse::READY) ? "ready" : "notready");
         return 1;
     });
-    lua_register(L, "GetReadyCheckTimeLeft", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetReadyCheckTimeLeft", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (!Ctx || !Ctx->ConnectionManager)
+        {
+            lua_pushnumber(L2, 0);
+            return 1;
+        }
+
+        lua_pushnumber(L2, Ctx->ConnectionManager->PacketHandler.ReadyCheck.GetTimeLeftSeconds());
+        return 1;
+    });
+    lua_register(L, "GetRaidTargetIndex", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (!Ctx || !Ctx->ConnectionManager)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        const uint64 UnitGuid = ResolveUnitGuid(L2, 1);
+        if (UnitGuid == 0)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        const int32 IconIndex = Ctx->ConnectionManager->PacketHandler.RaidTargets.GetIconIndex(UnitGuid);
+        if (IconIndex == INDEX_NONE)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        lua_pushnumber(L2, IconIndex + 1);
+        return 1;
+    });
+    lua_register(L, "DoReadyCheck", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager)
+        {
+            Ctx->ConnectionManager->SendStartReadyCheck();
+        }
+        return 0;
+    });
+    lua_register(L, "ConfirmReadyCheck", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager)
+        {
+            Ctx->ConnectionManager->SendReadyCheckConfirm(lua_toboolean(L2, 1) != 0);
+        }
+        return 0;
+    });
 
     // Vehicle UI
     lua_register(L, "UnitHasVehicleUI", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
