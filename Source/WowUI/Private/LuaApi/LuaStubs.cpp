@@ -25,6 +25,54 @@ extern "C" {
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLuaStub, Verbose, All);
 
+// WoW 3.3.5a Combat Rating Types (from PlayerFields.h / azerothcore)
+namespace WowCombatRating
+{
+    inline constexpr int32 WEAPON_SKILL = 0;
+    inline constexpr int32 DEFENCE = 1;
+    inline constexpr int32 DODGE = 2;
+    inline constexpr int32 PARRY = 3;
+    inline constexpr int32 BLOCK = 4;
+    inline constexpr int32 HIT_MELEE = 5;
+    inline constexpr int32 HIT_RANGED = 6;
+    inline constexpr int32 HIT_SPELL = 7;
+    inline constexpr int32 CRIT_MELEE = 8;
+    inline constexpr int32 CRIT_RANGED = 9;
+    inline constexpr int32 CRIT_SPELL = 10;
+    inline constexpr int32 HIT_TAKEN_MELEE = 11;
+    inline constexpr int32 HIT_TAKEN_RANGED = 12;
+    inline constexpr int32 HIT_TAKEN_SPELL = 13;
+    inline constexpr int32 CRIT_TAKEN_MELEE = 14;
+    inline constexpr int32 CRIT_TAKEN_RANGED = 15;
+    inline constexpr int32 CRIT_TAKEN_SPELL = 16;
+    inline constexpr int32 HASTE_MELEE = 17;
+    inline constexpr int32 HASTE_RANGED = 18;
+    inline constexpr int32 HASTE_SPELL = 19;
+    inline constexpr int32 HIT_TAKEN = 20;
+    inline constexpr int32 CRIT_TAKEN = 21;
+    inline constexpr int32 RESILIENCE = 22;
+    inline constexpr int32 HASTE = 23;
+    inline constexpr int32 EXPERTISE = 24;
+}
+
+// WoW 3.3.5a Unit Flags
+namespace WowUnitFlags
+{
+    inline constexpr uint32 IN_COMBAT = 0x00080000;
+}
+
+// WoW 3.3.5a School mask for spells (for GetSpellCritChance)
+namespace WowSpellSchool
+{
+    inline constexpr int32 PHYSICAL = 0;
+    inline constexpr int32 HOLY = 1;
+    inline constexpr int32 FIRE = 2;
+    inline constexpr int32 NATURE = 3;
+    inline constexpr int32 FROST = 4;
+    inline constexpr int32 SHADOW = 5;
+    inline constexpr int32 ARCANE = 6;
+}
+
 // Macro for simple stubs that return a fixed value
 #define STUB_RETURN_NIL(name) \
     static int L_##name(lua_State* L) { lua_pushnil(L); return 1; }
@@ -299,9 +347,36 @@ static int L_IsStealthed(lua_State* L)
     return 1;
 }
 
-// GetPlayerMapPosition("player") → 0, 0
+// GetPlayerMapPosition("player") → x, y (map coordinates 0.0-1.0)
 static int L_GetPlayerMapPosition(lua_State* L)
 {
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    const char* Unit = luaL_optstring(L, 1, "player");
+
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowEntity* Entity = ResolveUnit(L);
+        if (Entity)
+        {
+            // Get world position from movement info
+            const FVector& Position = Entity->Movement.Position;
+
+            // TODO: Convert world coordinates to proper map coordinates (0.0-1.0)
+            // For now, normalize assuming a standard map size
+            // WoW maps are typically ~34000x34000 world units
+            float MapX = (Position.X + 17066.0f) / 34132.0f;
+            float MapY = (Position.Y + 17066.0f) / 34132.0f;
+
+            // Clamp to valid range
+            MapX = FMath::Clamp(MapX, 0.0f, 1.0f);
+            MapY = FMath::Clamp(MapY, 0.0f, 1.0f);
+
+            lua_pushnumber(L, MapX);
+            lua_pushnumber(L, MapY);
+            return 2;
+        }
+    }
+
     lua_pushnumber(L, 0);
     lua_pushnumber(L, 0);
     return 2;
@@ -496,16 +571,8 @@ static int L_UnitIsPlayer(lua_State* L)
 
 static int L_UnitExists(lua_State* L)
 {
-    const char* unit = luaL_optstring(L, 1, "player");
-    if (strcmp(unit, "player") == 0)
-    {
-        lua_pushboolean(L, 1);
-    }
-    else
-    {
-        FWowEntity* Entity = ResolveUnit(L);
-        lua_pushboolean(L, Entity ? 1 : 0);
-    }
+    uint64 Guid = ResolveUnitGuid(L);
+    lua_pushboolean(L, Guid != 0 ? 1 : 0);
     return 1;
 }
 
@@ -559,8 +626,8 @@ static int L_UnitAffectingCombat(lua_State* L)
         FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
         uint32 UnitFlags = Unit->GetUnitFlags();
 
-        // Check UNIT_FLAG_IN_COMBAT (0x80000) and other combat-related flags
-        bool InCombat = (UnitFlags & 0x80000) != 0;
+        // Check UNIT_FLAG_IN_COMBAT flag
+        bool InCombat = (UnitFlags & WowUnitFlags::IN_COMBAT) != 0;
         lua_pushboolean(L, InCombat ? 1 : 0);
         return 1;
     }
@@ -1413,7 +1480,27 @@ static int L_GetSpellTabInfo(lua_State* L)
 static int L_IsUsableSpell(lua_State* L)
 {
     // IsUsableSpell(spell) → usable, noMana
-    lua_pushboolean(L, 1);
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        const char* SpellName = luaL_optstring(L, 1, "");
+        if (SpellName && strlen(SpellName) > 0)
+        {
+            // TODO: Look up spell ID by name from SpellDBC
+            // For now, check if it's a known spell by name comparison
+            const TSet<uint32>& KnownSpells = Ctx->ConnectionManager->PacketHandler.KnownSpells;
+
+            // Simple check - assume spell is usable if we have any spells
+            bool bUsable = !KnownSpells.IsEmpty();
+            bool bNoMana = false; // TODO: Check if player has enough mana/power
+
+            lua_pushboolean(L, bUsable ? 1 : 0);
+            lua_pushboolean(L, bNoMana ? 1 : 0);
+            return 2;
+        }
+    }
+
+    lua_pushboolean(L, 0);
     lua_pushboolean(L, 0);
     return 2;
 }
@@ -1636,6 +1723,54 @@ static int L_GetInventoryItemLink(lua_State* L)
 
 static int L_GetInventoryItemTexture(lua_State* L)
 {
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    int32 SlotId = static_cast<int32>(luaL_checknumber(L, 1));
+
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player && SlotId >= 0 && SlotId < 19) // 0-18 are equipment slots
+        {
+            uint64 ItemGuid = Player->GetEquipmentItemGuid(static_cast<uint8>(SlotId));
+            if (ItemGuid != 0)
+            {
+                FWowItemEntity* Item = Ctx->EntityManager->FindItem(ItemGuid);
+                if (Item)
+                {
+                    // TODO: Look up item texture from ItemDisplayInfo DBC
+                    // For now, return a generic texture based on slot
+                    const char* SlotTextures[] = {
+                        "Interface\\Icons\\INV_Helmet_02", // Head
+                        "Interface\\Icons\\INV_Jewelry_Necklace_03", // Neck
+                        "Interface\\Icons\\INV_Shoulder_05", // Shoulder
+                        "Interface\\Icons\\INV_Shirt_02", // Shirt
+                        "Interface\\Icons\\INV_Chest_Leather_01", // Chest
+                        "Interface\\Icons\\INV_Belt_05", // Waist
+                        "Interface\\Icons\\INV_Pants_03", // Legs
+                        "Interface\\Icons\\INV_Boots_08", // Feet
+                        "Interface\\Icons\\INV_Bracer_03", // Wrist
+                        "Interface\\Icons\\INV_Gauntlets_05", // Hands
+                        "Interface\\Icons\\INV_Jewelry_Ring_03", // Finger1
+                        "Interface\\Icons\\INV_Jewelry_Ring_02", // Finger2
+                        "Interface\\Icons\\INV_Jewelry_Talisman_01", // Trinket1
+                        "Interface\\Icons\\INV_Jewelry_Talisman_02", // Trinket2
+                        "Interface\\Icons\\INV_Misc_Cape_01", // Back
+                        "Interface\\Icons\\INV_Weapon_Rifle_01", // Main Hand
+                        "Interface\\Icons\\INV_Shield_05", // Off Hand
+                        "Interface\\Icons\\INV_Weapon_Bow_01", // Ranged
+                        "Interface\\Icons\\INV_Misc_Tabard_01" // Tabard
+                    };
+
+                    if (SlotId < UE_ARRAY_COUNT(SlotTextures))
+                    {
+                        lua_pushstring(L, SlotTextures[SlotId]);
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+
     lua_pushnil(L);
     return 1;
 }
@@ -2388,15 +2523,12 @@ static int L_GetShapeshiftFormInfo(lua_State* L)
 static int L_GetRealZoneText(lua_State* L)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    if (Ctx && Ctx->EntityManager)
+    if (Ctx && Ctx->ConnectionManager)
     {
-        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
-        if (Player)
-        {
-            // TODO: Look up zone name from AreaTable DBC based on player position
-            lua_pushstring(L, "Elwynn Forest");
-            return 1;
-        }
+        // Try to get zone from connection manager if available
+        // For now, return default since we don't have zone tracking implemented
+        lua_pushstring(L, "Stormwind City"); // Updated default zone
+        return 1;
     }
     lua_pushstring(L, "Unknown Zone");
     return 1;
@@ -2404,9 +2536,8 @@ static int L_GetRealZoneText(lua_State* L)
 
 static int L_GetSubZoneText(lua_State* L)
 {
-    // TODO: Look up subzone name from AreaTable DBC based on player position
-    lua_pushstring(L, "Goldshire");
-    return 1;
+    // Return the same as zone text for now as suggested
+    return L_GetRealZoneText(L);
 }
 
 static int L_GetMinimapZoneText(lua_State* L)
@@ -2664,6 +2795,309 @@ static int L_BNGetNumFriends(lua_State* L)
     return 4;
 }
 
+static int L_FillLocalizedClassList(lua_State* L)
+{
+    if (!lua_istable(L, 1)) return 0;
+    const char* keys[] = {"WARRIOR","PALADIN","HUNTER","ROGUE","PRIEST","DEATHKNIGHT","SHAMAN","MAGE","WARLOCK","DRUID"};
+    const char* vals[] = {"Warrior","Paladin","Hunter","Rogue","Priest","Death Knight","Shaman","Mage","Warlock","Druid"};
+    for (int i = 0; i < 10; i++)
+    {
+        lua_pushstring(L, vals[i]);
+        lua_setfield(L, 1, keys[i]);
+    }
+    return 0;
+}
+
+// ─── Combat Stats Functions ─────────────────────────────────────────────────────
+
+static int L_GetCritChance(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            // Try to get from combat rating first
+            int32 CritRating = Player->GetCombatRating(WowCombatRating::CRIT_MELEE);
+            if (CritRating > 0)
+            {
+                // Convert rating to percentage (approximate conversion for level 80)
+                float CritPercent = CritRating / 45.91f; // 45.91 rating = 1% crit at level 80
+                lua_pushnumber(L, CritPercent);
+            }
+            else
+            {
+                // Fallback: calculate from agility (approximate)
+                int32 Agility = Player->GetAgility();
+                float CritPercent = FMath::Max(0.0f, Agility / 52.0f + 5.0f); // Base 5% + agility bonus
+                lua_pushnumber(L, CritPercent);
+            }
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 5.0); // Default 5% crit
+    return 1;
+}
+
+static int L_GetRangedCritChance(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            // Try to get from combat rating first
+            int32 CritRating = Player->GetCombatRating(WowCombatRating::CRIT_RANGED);
+            if (CritRating > 0)
+            {
+                float CritPercent = CritRating / 45.91f;
+                lua_pushnumber(L, CritPercent);
+            }
+            else
+            {
+                // Fallback: calculate from agility
+                int32 Agility = Player->GetAgility();
+                float CritPercent = FMath::Max(0.0f, Agility / 52.0f + 5.0f);
+                lua_pushnumber(L, CritPercent);
+            }
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 5.0); // Default 5% crit
+    return 1;
+}
+
+static int L_GetSpellCritChance(lua_State* L)
+{
+    int32 School = static_cast<int32>(luaL_optnumber(L, 1, WowSpellSchool::PHYSICAL));
+
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            // Try to get from combat rating first
+            int32 CritRating = Player->GetCombatRating(WowCombatRating::CRIT_SPELL);
+            if (CritRating > 0)
+            {
+                float CritPercent = CritRating / 45.91f;
+                lua_pushnumber(L, CritPercent);
+            }
+            else
+            {
+                // Fallback: calculate from intellect
+                int32 Intellect = Player->GetIntellect();
+                float CritPercent = FMath::Max(0.0f, Intellect / 166.67f + 1.0f); // Base 1% + intellect bonus
+                lua_pushnumber(L, CritPercent);
+            }
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 1.0); // Default 1% spell crit
+    return 1;
+}
+
+static int L_GetDodgeChance(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            int32 DodgeRating = Player->GetCombatRating(WowCombatRating::DODGE);
+            if (DodgeRating > 0)
+            {
+                float DodgePercent = DodgeRating / 45.25f; // 45.25 rating = 1% dodge at level 80
+                lua_pushnumber(L, DodgePercent);
+            }
+            else
+            {
+                // Fallback: calculate from agility
+                int32 Agility = Player->GetAgility();
+                float DodgePercent = FMath::Max(0.0f, Agility / 52.0f + 5.0f); // Base 5% + agility bonus
+                lua_pushnumber(L, DodgePercent);
+            }
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 5.0); // Default 5% dodge
+    return 1;
+}
+
+static int L_GetParryChance(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            int32 ParryRating = Player->GetCombatRating(WowCombatRating::PARRY);
+            if (ParryRating > 0)
+            {
+                float ParryPercent = ParryRating / 45.25f;
+                lua_pushnumber(L, ParryPercent);
+            }
+            else
+            {
+                // Base parry chance varies by class, default to 5%
+                lua_pushnumber(L, 5.0);
+            }
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 5.0); // Default 5% parry
+    return 1;
+}
+
+static int L_GetBlockChance(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            // Check if player has a shield equipped in off-hand slot
+            uint64 OffhandGuid = Player->GetEquipmentItemGuid(PlayerField::EQUIPMENT_SLOT_OFFHAND);
+            bool HasShield = (OffhandGuid != 0); // If there's an item in off-hand, assume it could be a shield
+
+            if (HasShield)
+            {
+                int32 BlockRating = Player->GetCombatRating(WowCombatRating::BLOCK);
+                if (BlockRating > 0)
+                {
+                    float BlockPercent = BlockRating / 20.0f + 5.0f; // Base 5% + rating
+                    lua_pushnumber(L, BlockPercent);
+                }
+                else
+                {
+                    lua_pushnumber(L, 5.0); // Base 5% for shield users
+                }
+            }
+            else
+            {
+                lua_pushnumber(L, 0.0); // No shield = no block
+            }
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 0.0); // Default 0% block
+    return 1;
+}
+
+static int L_GetSpellBonusDamage(lua_State* L)
+{
+    int32 School = static_cast<int32>(luaL_optnumber(L, 1, WowSpellSchool::PHYSICAL));
+
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            // TODO: Get spell power from player fields when available
+            // For now, calculate from intellect
+            int32 Intellect = Player->GetIntellect();
+            int32 SpellPower = Intellect; // Simplified: 1 int = 1 spell power
+            lua_pushnumber(L, SpellPower);
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 0); // Default 0 spell power
+    return 1;
+}
+
+static int L_GetSpellBonusHealing(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            // TODO: Get healing power from player fields when available
+            // For now, calculate from intellect and spirit
+            int32 Intellect = Player->GetIntellect();
+            int32 Spirit = Player->GetSpirit();
+            int32 HealingPower = Intellect + Spirit / 2; // Simplified calculation
+            lua_pushnumber(L, HealingPower);
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 0); // Default 0 healing power
+    return 1;
+}
+
+static int L_GetManaRegen(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            // Calculate mana regen from spirit (simplified)
+            int32 Spirit = Player->GetSpirit();
+            int32 Level = Player->GetLevel();
+
+            // Base mana regen calculation (approximate)
+            float BaseRegen = Spirit / 4.0f + Level / 2.0f;
+            float CastingRegen = BaseRegen * 0.3f; // 30% while casting
+
+            lua_pushnumber(L, BaseRegen);   // base regen
+            lua_pushnumber(L, CastingRegen); // casting regen
+            return 2;
+        }
+    }
+    lua_pushnumber(L, 0); // base regen
+    lua_pushnumber(L, 0); // casting regen
+    return 2;
+}
+
+static int L_GetExpertise(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            int32 ExpertiseRating = Player->GetCombatRating(WowCombatRating::EXPERTISE);
+            float Expertise = ExpertiseRating / 8.2f; // 8.2 rating = 1 expertise at level 80
+
+            lua_pushnumber(L, Expertise); // main hand
+            lua_pushnumber(L, Expertise); // off hand (same for now)
+            return 2;
+        }
+    }
+    lua_pushnumber(L, 0); // main hand
+    lua_pushnumber(L, 0); // off hand
+    return 2;
+}
+
+static int L_GetHaste(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player)
+        {
+            int32 HasteRating = Player->GetCombatRating(WowCombatRating::HASTE);
+            float HastePercent = HasteRating / 32.78f; // 32.78 rating = 1% haste at level 80
+            lua_pushnumber(L, HastePercent);
+            return 1;
+        }
+    }
+    lua_pushnumber(L, 0.0); // Default 0% haste
+    return 1;
+}
+
 // ─── Registration ───────────────────────────────────────────────────────────────
 
 void WowLuaApi::RegisterStubs(lua_State* L)
@@ -2830,11 +3264,11 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     // lua_register(L, "GetNumShapeshiftForms", L_GetNumShapeshiftForms);
     // lua_register(L, "GetShapeshiftFormInfo", L_GetShapeshiftFormInfo);
 
-    // Map functions - temporarily disabled due to compilation issues
-    // lua_register(L, "GetRealZoneText", L_GetRealZoneText);
-    // lua_register(L, "GetSubZoneText", L_GetSubZoneText);
-    // lua_register(L, "GetMinimapZoneText", L_GetMinimapZoneText);
-    // lua_register(L, "GetZonePVPInfo", L_GetZonePVPInfo);
+    // Map functions
+    lua_register(L, "GetRealZoneText", L_GetRealZoneText);
+    lua_register(L, "GetSubZoneText", L_GetSubZoneText);
+    lua_register(L, "GetMinimapZoneText", L_GetMinimapZoneText);
+    lua_register(L, "GetZonePVPInfo", L_GetZonePVPInfo);
 
     // Talent functions - temporarily disabled due to compilation issues
     // lua_register(L, "GetNumTalentTabs", L_GetNumTalentTabs);
@@ -3167,7 +3601,23 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     });
     lua_register(L, "PetHasActionBar", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
     lua_register(L, "HasFullControl", [](lua_State* L2) -> int { lua_pushboolean(L2, 1); return 1; });
-    lua_register(L, "GetComboPoints", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetComboPoints", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->EntityManager)
+        {
+            FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+            if (Player)
+            {
+                // TODO: Get combo points from player entity fields
+                // For rogues and druids - check UNIT_FIELD_COMBATPOINTS or similar
+                // For now return 0 as combo points system needs proper field mapping
+                lua_pushnumber(L2, 0);
+                return 1;
+            }
+        }
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
     lua_register(L, "GetPVPLifetimeStats", [](lua_State* L2) -> int {
         lua_pushnumber(L2, 0);
         lua_pushnumber(L2, 0);
@@ -3195,30 +3645,22 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetArenaTeam", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetNumArenaTeams", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "IsInArenaTeam", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "GetDodgeChance", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetParryChance", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetBlockChance", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetDodgeChance", L_GetDodgeChance);
+    lua_register(L, "GetParryChance", L_GetParryChance);
+    lua_register(L, "GetBlockChance", L_GetBlockChance);
     lua_register(L, "GetShieldBlock", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetCritChance", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetRangedCritChance", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetSpellCritChance", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetCritChance", L_GetCritChance);
+    lua_register(L, "GetRangedCritChance", L_GetRangedCritChance);
+    lua_register(L, "GetSpellCritChance", L_GetSpellCritChance);
     lua_register(L, "GetCombatRating", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "GetCombatRatingBonus", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetManaRegen", [](lua_State* L2) -> int {
-        lua_pushnumber(L2, 0);
-        lua_pushnumber(L2, 0);
-        return 2;
-    });
-    lua_register(L, "GetExpertise", [](lua_State* L2) -> int {
-        lua_pushnumber(L2, 0);
-        lua_pushnumber(L2, 0);
-        return 2;
-    });
-    lua_register(L, "GetSpellBonusDamage", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetSpellBonusHealing", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetManaRegen", L_GetManaRegen);
+    lua_register(L, "GetExpertise", L_GetExpertise);
+    lua_register(L, "GetSpellBonusDamage", L_GetSpellBonusDamage);
+    lua_register(L, "GetSpellBonusHealing", L_GetSpellBonusHealing);
     lua_register(L, "GetSpellPenetration", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "GetMastery", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetHaste", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetHaste", L_GetHaste);
     lua_register(L, "GetVersatility", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
 
     // ── Final batch: remaining missing functions from error log ──
@@ -3275,7 +3717,21 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "InspectUnit", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "CheckInteractDistance", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
     lua_register(L, "GetGuildBankMoney", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "IsSpellKnown", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; }); // TODO: check spellbook
+    lua_register(L, "IsSpellKnown", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        int32 SpellId = static_cast<int32>(luaL_checknumber(L2, 1));
+
+        if (Ctx && Ctx->ConnectionManager && SpellId > 0)
+        {
+            const TSet<uint32>& KnownSpells = Ctx->ConnectionManager->PacketHandler.KnownSpells;
+            bool bKnown = KnownSpells.Contains(static_cast<uint32>(SpellId));
+            lua_pushboolean(L2, bKnown ? 1 : 0);
+            return 1;
+        }
+
+        lua_pushboolean(L2, 0);
+        return 1;
+    });
     lua_register(L, "GetSpellCharges", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetItemCooldown", [](lua_State* L2) -> int {
         lua_pushnumber(L2, 0); lua_pushnumber(L2, 0); lua_pushnumber(L2, 0);
@@ -3508,7 +3964,152 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     });
     lua_register(L, "GetVoiceChatMode", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
 
-    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua API (~375+ functions, entity-backed unit API, FrameXML-ready)"));
+    // Critical functions needed by FrameXML Lua files during load
+    lua_register(L, "FillLocalizedClassList", L_FillLocalizedClassList);
+    lua_register(L, "RegisterStaticConstants", [](lua_State* L2) -> int { return 0; });
+
+    // Trade system
+    lua_register(L, "GetCursorMoney", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetPlayerTradeMoney", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetTargetTradeMoney", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetTradePlayerItemLink", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+    lua_register(L, "GetTradeTargetItemLink", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+    lua_register(L, "GetTradePlayerItemInfo", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+    lua_register(L, "GetTradeTargetItemInfo", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+    lua_register(L, "GetNumTradeItems", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+
+    // Container/item operations
+    lua_register(L, "PickupContainerItem", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "UseContainerItem", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "SplitContainerItem", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "PickupInventoryItem", [](lua_State* L2) -> int { return 0; });
+
+    // Shaman multi-cast bar
+    lua_register(L, "GetMultiCastBarOffset", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+
+    // Chat window saved state (persistence)
+    lua_register(L, "GetChatWindowSavedDimensions", [](lua_State* L2) -> int {
+        // Returns: width, height (WoW units)
+        lua_pushnumber(L2, 430); // default chat width
+        lua_pushnumber(L2, 120); // default chat height
+        return 2;
+    });
+    lua_register(L, "GetChatWindowSavedPosition", [](lua_State* L2) -> int {
+        // WoW 3.3.5: GetChatWindowSavedPosition(index) -> point, xOffset, yOffset, shown
+        int32 Index = static_cast<int32>(luaL_optnumber(L2, 1, 1));
+        lua_pushstring(L2, "BOTTOMLEFT"); // point
+        lua_pushnumber(L2, 32);           // xOffset
+        lua_pushnumber(L2, 215);          // yOffset
+        lua_pushboolean(L2, Index == 1 ? 1 : 0); // shown (only ChatFrame1 visible by default)
+        return 4;
+    });
+    lua_register(L, "SetChatWindowSavedDimensions", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "SetChatWindowSavedPosition", [](lua_State* L2) -> int { return 0; });
+
+    // Party member lookup
+    lua_register(L, "GetPartyMember", [](lua_State* L2) -> int {
+        int32 Index = static_cast<int32>(luaL_optnumber(L2, 1, 0));
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Index >= 1 && Index <= 4)
+        {
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            int32 PartyIdx = Index - 1;
+            if (PartyIdx < GroupInfo.Members.Num())
+            {
+                lua_pushnumber(L2, PartyIdx + 1);
+                return 1;
+            }
+        }
+        lua_pushnil(L2);
+        return 1;
+    });
+    lua_register(L, "GetChatTypeIndex", [](lua_State* L2) -> int {
+        // GetChatTypeIndex(chatType) -> index
+        const char* chatType = luaL_optstring(L2, 1, "");
+        // Return a valid index for common chat types
+        lua_pushnumber(L2, 1);
+        return 1;
+    });
+    lua_register(L, "GetNumEquipmentSets", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetEquipmentSetInfo", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+
+    // Ready check
+    lua_register(L, "GetReadyCheckStatus", [](lua_State* L2) -> int {
+        lua_pushstring(L2, "ready");
+        return 1;
+    });
+    lua_register(L, "GetReadyCheckTimeLeft", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+
+    // Vehicle UI
+    lua_register(L, "UnitHasVehicleUI", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "UnitControllingVehicle", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "UnitUsingVehicle", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "CanExitVehicle", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "GetVehicleUIIndicator", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+    lua_register(L, "GetVehicleUIIndicatorSeat", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+
+    // Party leader functions
+    lua_register(L, "GetPartyLeaderIndex", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager)
+        {
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            if (!GroupInfo.IsEmpty() && GroupInfo.LeaderGuid != 0)
+            {
+                // Find the leader in the members array (1-based indexing for Lua)
+                for (int32 i = 0; i < GroupInfo.Members.Num(); ++i)
+                {
+                    if (GroupInfo.Members[i].Guid == GroupInfo.LeaderGuid)
+                    {
+                        lua_pushnumber(L2, i + 1); // Convert to 1-based
+                        return 1;
+                    }
+                }
+            }
+        }
+        lua_pushnumber(L2, 0); // Not in party or no leader
+        return 1;
+    });
+
+    // Bank slot functions
+    lua_register(L, "GetNumBankSlots", [](lua_State* L2) -> int {
+        // Bank data isn't tracked yet, return defaults
+        lua_pushnumber(L2, 0); // numSlots
+        lua_pushboolean(L2, false); // full
+        return 2;
+    });
+
+    // CreateFont function - creates a font object with frame metatable
+    lua_register(L, "CreateFont", [](lua_State* L2) -> int {
+        const char* fontName = luaL_optstring(L2, 1, "DefaultFont");
+
+        // Create a font table with basic properties
+        lua_newtable(L2);
+
+        // Set font name
+        lua_pushstring(L2, fontName);
+        lua_setfield(L2, -2, "fontName");
+
+        // Add basic font methods (stubs for now)
+        lua_pushcfunction(L2, [](lua_State* L3) -> int {
+            // SetFont(fontPath, size, flags)
+            return 0;
+        });
+        lua_setfield(L2, -2, "SetFont");
+
+        lua_pushcfunction(L2, [](lua_State* L3) -> int {
+            // GetFont() -> fontPath, size, flags
+            lua_pushstring(L3, "Fonts\\FRIZQT__.TTF");
+            lua_pushnumber(L3, 12);
+            lua_pushstring(L3, "");
+            return 3;
+        });
+        lua_setfield(L2, -2, "GetFont");
+
+        return 1;
+    });
+
+    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua API (~390+ functions, entity-backed unit API, FrameXML-ready)"));
 }
 
 #else
