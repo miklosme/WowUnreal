@@ -130,6 +130,30 @@ void FWowFrameManager::Initialize(UCanvasPanel* InRootCanvas)
 			UIParentW, UIParentH, ViewportSize.X, ViewportSize.Y, UIScale, DPIScale, ViewportDPIScale);
 	}
 
+	// Register built-in virtual templates that WoW defines in Lua but not in XML.
+	// These templates are referenced by inherits="..." but their Frame definitions
+	// aren't in the MPQ's XML files (they're defined implicitly by FrameXML Lua code).
+	{
+		// FadingFrame template — used by ZoneTextFrame, SubZoneTextFrame etc.
+		// Frames inheriting this should start hidden; OnUpdate runs FadingFrame_OnUpdate.
+		FWowFrameDef FadingFrameDef;
+		FadingFrameDef.Name = TEXT("FadingFrame");
+		FadingFrameDef.Type = EWowFrameType::Frame;
+		FadingFrameDef.bVirtual = true;
+		FadingFrameDef.bHidden = true;
+		FadingFrameDef.Width = 128.0f;
+		FadingFrameDef.Height = 128.0f;
+		FWowScriptHandler FadingOnLoad;
+		FadingOnLoad.Event = TEXT("OnLoad");
+		FadingOnLoad.Code = TEXT("FadingFrame_OnLoad(self);");
+		FadingFrameDef.Scripts.Add(FadingOnLoad);
+		FWowScriptHandler FadingOnUpdate;
+		FadingOnUpdate.Event = TEXT("OnUpdate");
+		FadingOnUpdate.Code = TEXT("FadingFrame_OnUpdate(self, elapsed);");
+		FadingFrameDef.Scripts.Add(FadingOnUpdate);
+		RegisterTemplate(TEXT("FadingFrame"), FadingFrameDef);
+	}
+
 	UE_LOG(LogWowFrame, Warning, TEXT("Frame manager initialized - WoW anchor positioning system ready"));
 }
 
@@ -1930,6 +1954,31 @@ void FWowFrameManager::SyncChildVisibility()
 	if (ForceShownCount > 0)
 	{
 		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: force-showed %d action bar frames"), ForceShownCount);
+	}
+
+	// Force-hide frames that WoW expects to start hidden but our XML/template
+	// system didn't mark as hidden (e.g., FadingFrame templates not in MPQ XML).
+	static const TCHAR* ForceHideFrames[] = {
+		TEXT("ZoneTextFrame"),
+		TEXT("SubZoneTextFrame"),
+		TEXT("AutoFollowStatusText"),
+		TEXT("PVPInfoTextString"),
+		TEXT("ReadyCheckListenerFrame"),
+		TEXT("ReadyCheckFrame"),
+	};
+	int32 ForceHiddenCount = 0;
+	for (const TCHAR* FrameName : ForceHideFrames)
+	{
+		int64 H = FindFrame(FrameName);
+		if (H >= 0)
+		{
+			SetFrameVisible(H, false);
+			ForceHiddenCount++;
+		}
+	}
+	if (ForceHiddenCount > 0)
+	{
+		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: force-hid %d frames (FadingFrame pattern)"), ForceHiddenCount);
 	}
 
 	// Dump all visible frames with their positions for debugging

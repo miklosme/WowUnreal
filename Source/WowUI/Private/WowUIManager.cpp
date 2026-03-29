@@ -14,6 +14,16 @@
 #include "Widgets/SOverlay.h"
 #include "Framework/Application/SlateApplication.h"
 
+#if __has_include("lua.h")
+extern "C" {
+#include "lua.h"
+#include "lauxlib.h"
+}
+#define HAS_LUA 1
+#else
+#define HAS_LUA 0
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogWowUIManager, Log, All);
 
 namespace WowLuaApi
@@ -227,6 +237,56 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	{
 		FrameManager->SyncChildVisibility();
 	}
+
+	// 2.5. Post-load Lua fixups: initialize fields that OnLoad should have set
+	// but didn't (e.g., frame templates missing from MPQ XML, OnLoad not reaching
+	// child frames, etc.). This runs after all frames and addons are loaded.
+#if HAS_LUA
+	if (LuaVM && LuaVM->IsInitialized())
+	{
+		const char* PostLoadFixup = R"LUA(
+			-- BuffFrame: ensure OnLoad fields exist (OnLoad may have run on wrong self)
+			if BuffFrame and BuffFrame.BuffFrameUpdateTime == nil then
+				BuffFrame.BuffFrameUpdateTime = 0
+				BuffFrame.BuffFrameFlashTime = 0
+				BuffFrame.BuffFrameFlashState = 1
+				BuffFrame.BuffAlphaValue = 1
+				BuffFrame.numEnchants = 0
+				BuffFrame.numConsolidated = 0
+			end
+			-- TemporaryEnchantFrame: needs TempEnchant button references
+			if TemporaryEnchantFrame and TemporaryEnchantFrame.TemporaryEnchantFrameUpdateTime == nil then
+				TemporaryEnchantFrame.TemporaryEnchantFrameUpdateTime = 0
+			end
+			-- CombatFeedback: initialize feedbackText directly on frames that have
+			-- CombatFeedback_OnUpdate but never had CombatFeedback_Initialize called.
+			-- The OnUpdate runs on these frames, not their child HitIndicator frames.
+			local function EnsureCombatFeedback(frameName)
+				local f = _G[frameName]
+				if f and not f.feedbackText then
+					-- Create a stub FontString that safely no-ops all method calls
+					local noop = function() end
+					local fs = setmetatable({ __objectType = "FontString" }, { __index = function(_, key)
+						if key == "IsShown" or key == "IsVisible" then return function() return false end end
+						return noop
+					end })
+					f.feedbackText = fs
+					f.feedbackFontHeight = 20
+				end
+			end
+			EnsureCombatFeedback("PlayerFrame")
+			EnsureCombatFeedback("TargetFrame")
+			EnsureCombatFeedback("PetFrame")
+		)LUA";
+
+		lua_State* L = LuaVM->GetState();
+		if (L && luaL_dostring(L, PostLoadFixup) != 0)
+		{
+			UE_LOG(LogWowUIManager, Warning, TEXT("Post-load fixup error: %hs"), lua_tostring(L, -1));
+			lua_pop(L, 1);
+		}
+	}
+#endif
 
 	// 3. Fire post-addon startup events in WoW order.
 	EventSystem->FireEvent(TEXT("VARIABLES_LOADED"));

@@ -1153,6 +1153,19 @@ static int LF_TextureSetTexture(lua_State* L)
 
 			NamedImage->SetBrush(Brush);
 			NamedImage->SetRenderOpacity(1.0f); // Make visible (may have been hidden as empty placeholder)
+
+			// If the slot was auto-sized (from creation with no explicit size),
+			// update it to match the texture dimensions × UIScale.
+			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(NamedImage->Slot))
+			{
+				FVector2D CurrentSize = Slot->GetSize();
+				if (CurrentSize.X <= 0.f || CurrentSize.Y <= 0.f)
+				{
+					float UIScale = Ctx->FrameManager->GetUIScale();
+					Slot->SetAutoSize(false);
+					Slot->SetSize(FVector2D(Brush.ImageSize.X * UIScale, Brush.ImageSize.Y * UIScale));
+				}
+			}
 			return 0;
 		}
 
@@ -2262,8 +2275,24 @@ static int LF_SetAttribute(lua_State* L)
 static int LF_GetAttribute(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
-	const char* AttrName = luaL_checkstring(L, 2);
-	FString Key = FString::Printf(TEXT("__attr_%s"), UTF8_TO_TCHAR(AttrName));
+	// WoW GetAttribute supports 1-3 string args: GetAttribute(name) or GetAttribute(prefix, name, suffix)
+	// With multiple args, the attribute key is their concatenation.
+	FString AttrName;
+	int32 NumArgs = lua_gettop(L) - 1; // exclude self
+	for (int32 i = 2; i <= lua_gettop(L); i++)
+	{
+		const char* Part = lua_tostring(L, i);
+		if (Part)
+		{
+			AttrName += UTF8_TO_TCHAR(Part);
+		}
+	}
+	if (AttrName.IsEmpty())
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+	FString Key = FString::Printf(TEXT("__attr_%s"), *AttrName);
 	FTCHARToUTF8 UTF8Key(*Key);
 	lua_getfield(L, 1, UTF8Key.Get());
 	return 1;
@@ -3128,6 +3157,7 @@ static const luaL_Reg FrameMethods[] =
 	{"SetTextInsets", LF_SetTextInsets},
 	{"SetMultiLine", LF_SetMultiLine},
 	{"SetFontObject", LF_SetFontObject},
+	{"GetInputLanguage", [](lua_State* L) -> int { lua_pushstring(L, "ROMAN"); return 1; }},
 
 	// ScrollFrame
 	{"SetScrollChild", LF_SetScrollChild},

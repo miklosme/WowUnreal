@@ -1142,6 +1142,43 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
         lua_pop(L, 1);
     }
 
+    // Create stub globals for FontStrings/frames that live in special frame types
+    // (e.g. WorldFrame) where widget creation is skipped. Without these, OnUpdate
+    // scripts crash trying to index nil globals.
+    const char* StubGlobalsLua = R"LUA(
+        local function MakeStubWidget(name)
+            local t = {}
+            local mt = {
+                __index = function(self, key)
+                    if key == "SetText" or key == "SetFormattedText" or key == "Show" or key == "Hide"
+                       or key == "SetAlpha" or key == "SetTextColor" or key == "SetPoint"
+                       or key == "SetWidth" or key == "SetHeight" or key == "SetFont"
+                       or key == "GetText" or key == "GetStringWidth" or key == "SetVertexColor" then
+                        return function() end
+                    elseif key == "IsShown" or key == "IsVisible" then
+                        return function() return false end
+                    elseif key == "GetText" then
+                        return function() return "" end
+                    end
+                    return nil
+                end
+            }
+            setmetatable(t, mt)
+            _G[name] = t
+        end
+
+        -- WorldFrame FontStrings (widget=0x0 so never created)
+        MakeStubWidget("FramerateText")
+        MakeStubWidget("FramerateLabelText")
+        MakeStubWidget("WorldFrameDropDown")
+    )LUA";
+
+    if (luaL_dostring(L, StubGlobalsLua) != 0)
+    {
+        UE_LOG(LogWowLuaApi, Error, TEXT("Stub globals Lua error: %hs"), lua_tostring(L, -1));
+        lua_pop(L, 1);
+    }
+
     UE_LOG(LogWowLuaApi, Log, TEXT("Registered WoW Lua globals (Phase 1 bootstrap + FrameXML globals)"));
 }
 

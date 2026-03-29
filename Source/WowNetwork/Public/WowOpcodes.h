@@ -15,6 +15,8 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_CAST_SPELL             = 0x012E;
     inline constexpr uint16 CMSG_ATTACKSWING            = 0x0141;
     inline constexpr uint16 CMSG_ATTACKSTOP             = 0x0142;
+    inline constexpr uint16 SMSG_ATTACKSTART            = 0x0143;
+    inline constexpr uint16 SMSG_ATTACKSTOP             = 0x0144;
     inline constexpr uint16 CMSG_TEXT_EMOTE             = 0x0104;
     inline constexpr uint16 CMSG_SET_ACTION_BUTTON      = 0x0128;
     inline constexpr uint16 CMSG_AUTH_SESSION            = 0x01ED;
@@ -145,6 +147,17 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_DUEL_ACCEPTED           = 0x016C;
     inline constexpr uint16 CMSG_DUEL_CANCELLED          = 0x016D;
     inline constexpr uint16 SMSG_DUEL_COUNTDOWN          = 0x02B7;
+
+    // Pet opcodes
+    inline constexpr uint16 CMSG_PET_SET_ACTION          = 0x0174;
+    inline constexpr uint16 CMSG_PET_ACTION              = 0x0175;
+    inline constexpr uint16 SMSG_PET_SPELLS              = 0x0179;
+    inline constexpr uint16 SMSG_PET_MODE                = 0x017A;
+    inline constexpr uint16 CMSG_PET_CAST_SPELL          = 0x01F0;
+    inline constexpr uint16 CMSG_REQUEST_PET_INFO        = 0x0279;
+    inline constexpr uint16 SMSG_PET_ACTION_FEEDBACK     = 0x02C6;
+    inline constexpr uint16 CMSG_PET_STOP_ATTACK         = 0x02EA;
+    inline constexpr uint16 CMSG_PET_SPELL_AUTOCAST      = 0x02F3;
 
     // Vendor opcodes
     inline constexpr uint16 SMSG_LIST_INVENTORY          = 0x019F;

@@ -314,6 +314,7 @@ private:
     void OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags);
     void OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason);
     void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
+    void OnServerAttackStop(uint64 AttackerGuid, uint64 VictimGuid);
     void OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel);
     void OnEmote(uint64 EntityGuid, uint32 EmoteId);
     void OnInitialSpells(const TArray<uint32>& SpellIds);
@@ -375,6 +376,7 @@ private:
 
     /** Handle P key for spellbook */
     void OnSpellbookKey();
+    void OnEscapeKey();
 
     /** Create spellbook widget */
     void CreateSpellbook();

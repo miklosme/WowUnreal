@@ -113,8 +113,11 @@ bool IsWowUiConsumingKeyboardInput()
 		return false;
 	}
 
-	const TSharedPtr<SWidget> GameViewportWidget = GetWowGameViewportWidget();
-	return !GameViewportWidget.IsValid() || FocusedWidget != GameViewportWidget;
+	// Only suppress gameplay hotkeys when a text input widget has focus.
+	// In WoW, only chat edit boxes and similar text fields consume keyboard input.
+	// Regular frame clicks don't steal keyboard focus from gameplay.
+	const FString WidgetType = FocusedWidget->GetType().ToString();
+	return WidgetType.Contains(TEXT("EditableText")) || WidgetType.Contains(TEXT("SEditableText"));
 }
 
 bool ShouldSuppressGameplayHotkey(const FKey& Key)
@@ -232,6 +235,9 @@ void AWowGameplayController::SetupInputComponent()
 	// Chat input
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &AWowGameplayController::OnEnterKey);
 
+	// Escape — clear target, stop auto-attack, close UI panels
+	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &AWowGameplayController::OnEscapeKey);
+
 	// Inventory UI keys
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &AWowGameplayController::OnBagKey);
 	InputComponent->BindKey(EKeys::C, IE_Pressed, this, &AWowGameplayController::OnCharacterKey);
@@ -286,6 +292,8 @@ void AWowGameplayController::BindEntityEvents()
 		this, &AWowGameplayController::OnSpellFailure);
 	ConnectionManager->PacketHandler.OnAttackerStateUpdate.AddUObject(
 		this, &AWowGameplayController::OnAttackerStateUpdate);
+	ConnectionManager->PacketHandler.OnAttackStop.AddUObject(
+		this, &AWowGameplayController::OnServerAttackStop);
 	ConnectionManager->PacketHandler.OnChatMessage.AddUObject(
 		this, &AWowGameplayController::OnChatMessage);
 
@@ -709,11 +717,21 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 			int32 EntityMaxHealth = Entity.GetMaxHealth();
 			uint8 StandState = Entity.GetFieldByte(UnitField::BYTES_1, 0);
 
-			if ((EntityHealth <= 0 && EntityMaxHealth > 0) || StandState == WowStandState::DEAD)
+			// Only mark as dead via standState (authoritative) or confirmed zero health
+			// with valid maxHealth. Don't mark dead when both are 0 (no data yet).
+			bool bIsDead = (StandState == WowStandState::DEAD) ||
+				(EntityMaxHealth > 0 && EntityHealth <= 0);
+			if (bIsDead && !DeadEntityGuids.Contains(Entity.Guid))
 			{
 				UE_LOG(LogWowGameplay, Log, TEXT("OnEntityUpdated: Entity %llu is dead (health=%d, maxHealth=%d, standState=%d)"),
 					Entity.Guid, EntityHealth, EntityMaxHealth, StandState);
 				OnEntityDeath(Entity.Guid);
+			}
+			// Resurrect if previously dead but now has health
+			else if (!bIsDead && DeadEntityGuids.Contains(Entity.Guid) && EntityHealth > 0)
+			{
+				DeadEntityGuids.Remove(Entity.Guid);
+				UE_LOG(LogWowGameplay, Log, TEXT("Entity %llu resurrected (health=%d)"), Entity.Guid, EntityHealth);
 			}
 		}
 
@@ -942,7 +960,7 @@ void AWowGameplayController::OnLeftClick()
 		}
 	}
 
-	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick fired"));
+	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick: no UI hit, trying world target"));
 	TryTargetUnderCursor();
 }
 
@@ -954,14 +972,14 @@ void AWowGameplayController::TryTargetUnderCursor()
 	float MouseX, MouseY;
 	if (!GetMousePosition(MouseX, MouseY))
 	{
-		UE_LOG(LogWowGameplay, Verbose, TEXT("TryTarget: no mouse position"));
+		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: no mouse position"));
 		return;
 	}
 
 	FVector WorldLoc, WorldDir;
 	if (!DeprojectScreenPositionToWorld(MouseX, MouseY, WorldLoc, WorldDir))
 	{
-		UE_LOG(LogWowGameplay, Verbose, TEXT("TryTarget: deproject failed"));
+		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: deproject failed at mouse (%.0f,%.0f)"), MouseX, MouseY);
 		return;
 	}
 
@@ -1018,12 +1036,30 @@ void AWowGameplayController::TryTargetUnderCursor()
 			}
 		}
 
-		UE_LOG(LogWowGameplay, Verbose, TEXT("Hit non-entity: %s"), *HitActor->GetName());
+		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: hit non-entity actor: %s (class: %s) component: %s"),
+			*HitActor->GetName(), *HitActor->GetClass()->GetName(),
+			Hit.GetComponent() ? *Hit.GetComponent()->GetName() : TEXT("none"));
+	}
+	else
+	{
+		// Count entities with capsule components for debugging
+		int32 EntitiesWithCapsules = 0;
+		for (const auto& Pair : SpawnedEntityActors)
+		{
+			if (Pair.Value && Pair.Value->FindComponentByClass<UCapsuleComponent>())
+				EntitiesWithCapsules++;
+		}
+		UE_LOG(LogWowGameplay, Log, TEXT("TryTarget: no hit (mouse %.0f,%.0f) entities=%d withCapsules=%d traceFrom=%s"),
+			MouseX, MouseY, SpawnedEntityActors.Num(), EntitiesWithCapsules, *WorldLoc.ToString());
 	}
 
-	// Clicked on nothing or non-entity — clear target
+	// Clicked on nothing or non-entity — clear target and stop attacking
 	if (TargetGuid != 0)
 	{
+		if (bIsAutoAttacking)
+		{
+			StopAutoAttack();
+		}
 		SetTarget(0);
 	}
 }
@@ -1252,8 +1288,8 @@ void AWowGameplayController::SpawnEntityModel(const FWowEntity& Entity)
 		if (TargetCapsule)
 		{
 			TargetCapsule->SetupAttachment(SpawnedActor->GetRootComponent());
-			TargetCapsule->SetCapsuleSize(50.0f, 100.0f); // Roughly character-sized
-			TargetCapsule->SetRelativeLocation(FVector(0, 0, 100.0f)); // Center at waist height
+			TargetCapsule->SetCapsuleSize(100.0f, 200.0f); // ~1 WoW yard radius, ~2 yards tall (with 100x scale)
+			TargetCapsule->SetRelativeLocation(FVector(0, 0, 200.0f)); // Center at waist height
 			TargetCapsule->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 			TargetCapsule->SetCollisionObjectType(ECC_Pawn);
 			TargetCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
@@ -1652,6 +1688,20 @@ void AWowGameplayController::StopAutoAttack()
 	AutoAttackTargetGuid = 0;
 	ConnectionManager->SendAttackStop();
 	UE_LOG(LogWowGameplay, Log, TEXT("Stopped auto-attack"));
+}
+
+void AWowGameplayController::OnServerAttackStop(uint64 AttackerGuid, uint64 VictimGuid)
+{
+	// Server tells us to stop attacking (target died, out of range, etc.)
+	if (ConnectionManager && AttackerGuid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid)
+	{
+		if (bIsAutoAttacking)
+		{
+			bIsAutoAttacking = false;
+			AutoAttackTargetGuid = 0;
+			UE_LOG(LogWowGameplay, Log, TEXT("Server stopped our auto-attack on %llu"), VictimGuid);
+		}
+	}
 }
 
 void AWowGameplayController::OnRightClick()
@@ -4625,6 +4675,36 @@ void AWowGameplayController::OnSpellbookKey()
 	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
 	{
 		UIManager->GetLuaVM()->ExecuteString(TEXT("ToggleSpellBook(BOOKTYPE_SPELL)"), TEXT("=keybind_P"));
+	}
+}
+
+void AWowGameplayController::OnEscapeKey()
+{
+	if (IsWowUiConsumingKeyboardInput())
+	{
+		return; // Don't process escape when typing in chat
+	}
+
+	// 1. Stop auto-attack
+	if (bIsAutoAttacking)
+	{
+		StopAutoAttack();
+	}
+
+	// 2. Clear target
+	if (TargetGuid != 0)
+	{
+		SetTarget(0);
+		return;
+	}
+
+	// 3. If no target, try closing UI panels via WoW Lua
+	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
+	{
+		UIManager->GetLuaVM()->ExecuteString(
+			TEXT("if GameMenuFrame and GameMenuFrame:IsShown() then HideUIPanel(GameMenuFrame) ")
+			TEXT("elseif CloseAllWindows then CloseAllWindows() end"),
+			TEXT("=keybind_Escape"));
 	}
 }
 

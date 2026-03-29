@@ -23,6 +23,8 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_SPELL_FAILURE,            &FWowPacketHandler::HandleSpellFailure);
     Handlers.Add(WowOpcode::SMSG_SPELL_COOLDOWN,           &FWowPacketHandler::HandleSpellCooldown);
     Handlers.Add(WowOpcode::SMSG_ATTACKERSTATEUPDATE,      &FWowPacketHandler::HandleAttackerStateUpdate);
+    Handlers.Add(WowOpcode::SMSG_ATTACKSTART,              &FWowPacketHandler::HandleAttackStart);
+    Handlers.Add(WowOpcode::SMSG_ATTACKSTOP,               &FWowPacketHandler::HandleAttackStop);
     Handlers.Add(WowOpcode::SMSG_AURA_UPDATE,              &FWowPacketHandler::HandleAuraUpdate);
     Handlers.Add(WowOpcode::SMSG_POWER_UPDATE,             &FWowPacketHandler::HandlePowerUpdate);
     Handlers.Add(WowOpcode::SMSG_MONSTER_MOVE,             &FWowPacketHandler::HandleMonsterMove);
@@ -120,6 +122,9 @@ FWowPacketHandler::FWowPacketHandler()
     // ── Mail system handlers ────────────────────────────────────────────────
     Handlers.Add(WowOpcode::SMSG_SHOW_MAILBOX,            &FWowPacketHandler::HandleShowMailbox);
     Handlers.Add(WowOpcode::SMSG_MAIL_LIST_RESULT,        &FWowPacketHandler::HandleMailListResult);
+
+    // ── Pet system handlers ─────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_PET_SPELLS,              &FWowPacketHandler::HandlePetSpells);
 
     // ── Duel system handlers ────────────────────────────────────────────────
     Handlers.Add(WowOpcode::SMSG_DUEL_REQUESTED,          &FWowPacketHandler::HandleDuelRequested);
@@ -964,6 +969,23 @@ void FWowPacketHandler::HandleAttackerStateUpdate(FPacketReader& R)
         AttackerGuid, TargetGuid, TotalDamage, HitInfo);
 
     OnAttackerStateUpdate.Broadcast(AttackerGuid, TargetGuid, HitInfo, TotalDamage);
+}
+
+void FWowPacketHandler::HandleAttackStart(FPacketReader& R)
+{
+    uint64 AttackerGuid = R.ReadU64();
+    uint64 VictimGuid = R.ReadU64();
+    UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTART: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
+    OnAttackStart.Broadcast(AttackerGuid, VictimGuid);
+}
+
+void FWowPacketHandler::HandleAttackStop(FPacketReader& R)
+{
+    uint64 AttackerGuid = R.ReadPackedGuid();
+    uint64 VictimGuid = R.ReadPackedGuid();
+    // uint32 unknown = R.ReadU32(); // sometimes present
+    UE_LOG(LogWowPacket, Log, TEXT("SMSG_ATTACKSTOP: attacker=%llu victim=%llu"), AttackerGuid, VictimGuid);
+    OnAttackStop.Broadcast(AttackerGuid, VictimGuid);
 }
 
 // ── SMSG_AURA_UPDATE ────────────────────────────────────────────────────
@@ -2998,6 +3020,102 @@ void FWowPacketHandler::HandleMailListResult(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("MAIL_LIST_RESULT: received %d displayed mails (%u total)"), MailInbox.Num(), MailInboxTotalCount);
     OnMailListReceived.Broadcast(MailInbox);
+}
+
+void FWowPacketHandler::HandlePetSpells(FPacketReader& R)
+{
+    if (!R.CanRead(8))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: packet too short"));
+        return;
+    }
+
+    const uint64 PetGuid = R.ReadU64();
+    PetActionBar.Clear();
+
+    if (PetGuid == 0)
+    {
+        UE_LOG(LogWowPacket, Log, TEXT("PET_SPELLS: cleared pet action bar"));
+        OnPetBarUpdated.Broadcast(PetActionBar);
+        return;
+    }
+
+    if (!R.CanRead(2 + 4 + 1 + 1 + 2))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: missing action bar header"));
+        return;
+    }
+
+    PetActionBar.PetGuid = PetGuid;
+    PetActionBar.Family = R.ReadU16();
+    PetActionBar.DurationMs = R.ReadU32();
+    PetActionBar.ReactState = R.ReadU8();
+    PetActionBar.CommandState = R.ReadU8();
+    PetActionBar.Flags = R.ReadU16();
+
+    for (int32 SlotIndex = 0; SlotIndex < WOW_PET_ACTION_SLOT_COUNT; ++SlotIndex)
+    {
+        if (!R.CanRead(4))
+        {
+            UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: truncated action bar at slot %d"), SlotIndex);
+            break;
+        }
+
+        PetActionBar.ActionSlots[SlotIndex].SetPackedData(R.ReadU32());
+    }
+
+    if (!R.CanRead(1))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: missing spell count"));
+        OnPetBarUpdated.Broadcast(PetActionBar);
+        return;
+    }
+
+    const uint8 SpellCount = R.ReadU8();
+    PetActionBar.KnownSpells.Reserve(SpellCount);
+    for (uint8 SpellIndex = 0; SpellIndex < SpellCount && R.CanRead(4); ++SpellIndex)
+    {
+        const uint32 PackedSpell = R.ReadU32();
+        const uint32 SpellId = PackedSpell & 0x00FFFFFF;
+        if (SpellId != 0)
+        {
+            PetActionBar.KnownSpells.Add(SpellId);
+        }
+    }
+
+    if (!R.CanRead(1))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("PET_SPELLS: missing cooldown count"));
+        OnPetBarUpdated.Broadcast(PetActionBar);
+        return;
+    }
+
+    const uint8 CooldownCount = R.ReadU8();
+    const double NowSeconds = FPlatformTime::Seconds();
+    for (uint8 CooldownIndex = 0; CooldownIndex < CooldownCount; ++CooldownIndex)
+    {
+        if (!R.CanRead(4 + 2 + 4 + 4))
+        {
+            break;
+        }
+
+        const uint32 SpellId = R.ReadU32();
+        R.ReadU16(); // category
+        const uint32 CooldownMs = R.ReadU32();
+        const uint32 CategoryCooldownMs = R.ReadU32();
+        const uint32 EffectiveCooldownMs = FMath::Max(CooldownMs, CategoryCooldownMs);
+        if (SpellId != 0 && EffectiveCooldownMs > 0)
+        {
+            PetActionBar.SpellCooldownExpirySeconds.Add(
+                SpellId,
+                NowSeconds + static_cast<double>(EffectiveCooldownMs) / 1000.0);
+        }
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("PET_SPELLS: pet=%llu family=%u actions=%d spells=%d cooldowns=%d"),
+        PetActionBar.PetGuid, PetActionBar.Family, PetActionBar.ActionSlots.Num(), PetActionBar.KnownSpells.Num(), CooldownCount);
+
+    OnPetBarUpdated.Broadcast(PetActionBar);
 }
 
 void FWowPacketHandler::HandleDuelRequested(FPacketReader& R)

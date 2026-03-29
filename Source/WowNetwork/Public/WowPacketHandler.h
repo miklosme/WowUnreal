@@ -11,6 +11,8 @@ DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellGo, uint64 /*CasterGuid*/, uint32
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnSpellFailure, uint64 /*CasterGuid*/, uint32 /*SpellId*/, uint8 /*FailureReason*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnSpellCooldown, uint32 /*SpellId*/, float /*Duration*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnAttackerStateUpdate, uint64 /*AttackerGuid*/, uint64 /*TargetGuid*/, uint32 /*HitInfo*/, uint32 /*Damage*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAttackStart, uint64 /*AttackerGuid*/, uint64 /*VictimGuid*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnAttackStop, uint64 /*AttackerGuid*/, uint64 /*VictimGuid*/);
 DECLARE_MULTICAST_DELEGATE_FourParams(FOnLootOpened, uint64 /*LootGuid*/, uint8 /*LootType*/, uint32 /*Gold*/, const TArray<FWowLootItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, const TArray<FWowVendorItem>& /*Items*/);
@@ -18,6 +20,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailListReceived, const TArray<FWowMailMe
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailboxShown, uint64 /*MailboxGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTradeUpdated, const FWowTradeState& /*TradeState*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnDuelUpdated, const FWowDuelState& /*DuelState*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnPetBarUpdated, const FWowPetActionBarState& /*PetActionBar*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnBankOpened, uint64 /*BankerGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestDialog, const FWowQuestDetails& /*QuestDetails*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestRewardDialog, const FWowQuestDetails& /*QuestDetails*/);
@@ -203,6 +206,9 @@ public:
     /** Current duel state */
     FWowDuelState CurrentDuel;
 
+    /** Current pet action bar state */
+    FWowPetActionBarState PetActionBar;
+
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
@@ -211,6 +217,8 @@ public:
     FOnSpellFailure OnSpellFailure;
     FOnSpellCooldown OnSpellCooldown;
     FOnAttackerStateUpdate OnAttackerStateUpdate;
+    FOnAttackStart OnAttackStart;
+    FOnAttackStop OnAttackStop;
     FOnLootOpened OnLootOpened;
     FOnLootClosed OnLootClosed;
     FOnVendorOpened OnVendorOpened;
@@ -218,6 +226,7 @@ public:
     FOnMailboxShown OnMailboxShown;
     FOnTradeUpdated OnTradeUpdated;
     FOnDuelUpdated OnDuelUpdated;
+    FOnPetBarUpdated OnPetBarUpdated;
     FOnBankOpened OnBankOpened;
     FOnQuestDialog OnQuestDialog;
     FOnQuestRewardDialog OnQuestRewardDialog;
@@ -292,6 +301,8 @@ private:
     void HandleSpellFailure(FPacketReader& R);
     void HandleSpellCooldown(FPacketReader& R);
     void HandleAttackerStateUpdate(FPacketReader& R);
+    void HandleAttackStart(FPacketReader& R);
+    void HandleAttackStop(FPacketReader& R);
     void HandleAuraUpdate(FPacketReader& R);
     void HandlePowerUpdate(FPacketReader& R);
     void HandleMonsterMove(FPacketReader& R);
@@ -373,6 +384,9 @@ private:
     // ── Mail system handlers ────────────────────────────────────────────────
     void HandleShowMailbox(FPacketReader& R);
     void HandleMailListResult(FPacketReader& R);
+
+    // ── Pet system handlers ─────────────────────────────────────────────────
+    void HandlePetSpells(FPacketReader& R);
 
     // ── Duel system handlers ────────────────────────────────────────────────
     void HandleDuelRequested(FPacketReader& R);

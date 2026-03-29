@@ -6080,7 +6080,214 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         return 1;
     });
 
-    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua API (~390+ functions, entity-backed unit API, FrameXML-ready)"));
+    // ── Functions needed by OnUpdate/OnEvent handlers (function="..." attribute) ──
+
+    // Achievement system
+    lua_register(L, "HasCompletedAnyAchievement", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "GetAchievementInfo", [](lua_State* L2) -> int {
+        // Returns: id, name, points, completed, month, day, year, description, flags, icon, rewardText, isGuild, wasEarnedByMe, earnedBy
+        lua_pushnumber(L2, luaL_optnumber(L2, 1, 0));
+        lua_pushstring(L2, "");
+        lua_pushnumber(L2, 0);
+        lua_pushboolean(L2, false);
+        lua_pushnil(L2); lua_pushnil(L2); lua_pushnil(L2);
+        lua_pushstring(L2, "");
+        lua_pushnumber(L2, 0);
+        lua_pushstring(L2, "Interface\\Icons\\INV_Misc_QuestionMark");
+        lua_pushstring(L2, "");
+        lua_pushboolean(L2, false);
+        lua_pushboolean(L2, false);
+        lua_pushnil(L2);
+        return 14;
+    });
+
+    // Voice chat
+    lua_register(L, "VoiceChat_IsRecordingLoopbackSound", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "VoiceChat_IsPlayingLoopbackSound", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "VoiceChat_GetCurrentMicrophoneSignalLevel", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+
+    // Calendar
+    lua_register(L, "CalendarGetDate", [](lua_State* L2) -> int {
+        // Returns: weekday, month, day, year
+        FDateTime Now = FDateTime::Now();
+        lua_pushnumber(L2, static_cast<int>(Now.GetDayOfWeek()) + 1);
+        lua_pushnumber(L2, Now.GetMonth());
+        lua_pushnumber(L2, Now.GetDay());
+        lua_pushnumber(L2, Now.GetYear());
+        return 4;
+    });
+    lua_register(L, "CalendarGetNumPendingInvites", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+
+    // Guild
+    lua_register(L, "GuildControlGetNumRanks", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+    lua_register(L, "GuildControlGetRankName", [](lua_State* L2) -> int {
+        lua_pushstring(L2, "");
+        return 1;
+    });
+
+    // World map
+    lua_register(L, "UpdateWorldMapArrowFrames", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "PositionWorldMapArrowFrame", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "ShowWorldMapArrowFrame", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "HideWorldMapArrowFrame", [](lua_State* L2) -> int { return 0; });
+
+    // PVP / Wintergrasp
+    lua_register(L, "GetWintergraspWaitTime", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+    lua_register(L, "CanQueueForWintergrasp", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+
+    // PVP battlefield
+    lua_register(L, "PlayerIsPVPInactive", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "GetNumBattlefieldPositions", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+    lua_register(L, "GetBattlefieldPosition", [](lua_State* L2) -> int {
+        // Returns: x, y
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        return 2;
+    });
+    lua_register(L, "GetNumBattlefieldFlagPositions", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+    lua_register(L, "GetBattlefieldFlagPosition", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        lua_pushstring(L2, "");
+        return 3;
+    });
+    lua_register(L, "GetCorpseMapPosition", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        return 2;
+    });
+    lua_register(L, "GetDeathReleasePosition", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        return 2;
+    });
+    lua_register(L, "GetCurrentMapContinent", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+    lua_register(L, "GetCurrentMapZone", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+
+    // Container/bag
+    lua_register(L, "GetContainerNumFreeSlots", [](lua_State* L2) -> int {
+        // Returns: numFreeSlots, bagType
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        return 2;
+    });
+
+    // GM ticket system
+    lua_register(L, "GetGMTicket", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "GMEuropaBugsEnabled", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+
+    // Voice system
+    lua_register(L, "GetVoiceStatus", [](lua_State* L2) -> int {
+        // Returns: isEnabled, isTalking
+        lua_pushboolean(L2, false);
+        lua_pushboolean(L2, false);
+        return 2;
+    });
+    lua_register(L, "GetMuteStatus", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "UnitIsTalking", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "UnitIsMuted", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+
+    // Spell targeting
+    lua_register(L, "SpellCanTargetItem", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "SpellCanTargetUnit", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "SpellIsTargeting", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "SpellTargetUnit", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "SpellStopTargeting", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "SpellStopCasting", [](lua_State* L2) -> int { return 0; });
+
+    // Unit state queries
+    lua_register(L, "UnitIsCorpse", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "UnitIsGhost", [](lua_State* L2) -> int {
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "UnitIsDeadOrGhost", [](lua_State* L2) -> int {
+        FWowEntity* Entity = ResolveUnit(L2);
+        if (Entity && Entity->IsUnit()) {
+            const FWowUnitEntity* Unit = static_cast<const FWowUnitEntity*>(Entity);
+            lua_pushboolean(L2, Unit->IsDead());
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+
+    // Buff frame needs GetWeaponEnchantInfo for timeLeft
+    lua_register(L, "GetWeaponEnchantInfo", [](lua_State* L2) -> int {
+        // Returns: hasMainHandEnchant, mainHandExpiration, mainHandCharges, hasOffHandEnchant, offHandExpiration, offHandCharges
+        lua_pushboolean(L2, false);
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        lua_pushboolean(L2, false);
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        return 6;
+    });
+
+    UE_LOG(LogWowLuaStub, Log, TEXT("Registered WoW Lua API (~400+ functions, entity-backed unit API, FrameXML-ready)"));
 }
 
 #else
