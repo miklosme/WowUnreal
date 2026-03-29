@@ -1344,6 +1344,19 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		if (Def.Type == EWowFrameType::Button || Def.Type == EWowFrameType::CheckButton)
 		{
 			UButton* Button = NewObject<UButton>(ContainerWidget);
+			// Make button transparent — WoW buttons have no default background.
+			// Visual appearance comes from NormalTexture/PushedTexture/HighlightTexture.
+			FButtonStyle TransparentStyle;
+			FSlateBrush EmptyBrush;
+			EmptyBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
+			TransparentStyle.SetNormal(EmptyBrush);
+			TransparentStyle.SetHovered(EmptyBrush);
+			TransparentStyle.SetPressed(EmptyBrush);
+			TransparentStyle.SetDisabled(EmptyBrush);
+			TransparentStyle.SetNormalPadding(FMargin(0));
+			TransparentStyle.SetPressedPadding(FMargin(0));
+			Button->SetStyle(TransparentStyle);
+			Button->SetBackgroundColor(FLinearColor::Transparent);
 			AddFillChild(Button, -100, ESlateVisibility::SelfHitTestInvisible);
 			ButtonWidgets.Add(Handle, Button);
 
@@ -1372,6 +1385,16 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		else if (Def.Type == EWowFrameType::EditBox)
 		{
 			UEditableTextBox* EditBox = NewObject<UEditableTextBox>(ContainerWidget);
+			// Make edit box background transparent — WoW edit boxes use XML textures for appearance
+			FEditableTextBoxStyle BoxStyle = EditBox->GetWidgetStyle();
+			FSlateBrush EmptyBrush;
+			EmptyBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
+			BoxStyle.SetBackgroundImageNormal(EmptyBrush);
+			BoxStyle.SetBackgroundImageHovered(EmptyBrush);
+			BoxStyle.SetBackgroundImageFocused(EmptyBrush);
+			BoxStyle.SetBackgroundImageReadOnly(EmptyBrush);
+			BoxStyle.SetPadding(FMargin(2.f));
+			EditBox->SetWidgetStyle(BoxStyle);
 			AddFillChild(EditBox, 50, ESlateVisibility::Visible);
 			EditBoxWidgets.Add(Handle, EditBox);
 		}
@@ -1382,6 +1405,8 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			{
 				Slider->SetOrientation(EOrientation::Orient_Vertical);
 			}
+			// Use transparent bar — WoW sliders use XML textures
+			Slider->SetSliderBarColor(FLinearColor::Transparent);
 			AddFillChild(Slider, 50, ESlateVisibility::SelfHitTestInvisible);
 			SliderWidgets.Add(Handle, Slider);
 		}
