@@ -100,6 +100,20 @@ public:
 	/** Debug: dump key frame layout info to log */
 	void DebugDumpLayout() const;
 
+	/** Post-load pass: hide children of hidden parents (catches frames made visible
+	 *  before their parent's OnLoad script hid the parent) */
+	void SyncChildVisibility();
+
+	/** Find the topmost interactive frame under a screen position (pixels).
+	 *  Returns frame handle or -1 if no interactive frame found. */
+	int64 HitTestFrames(float ScreenX, float ScreenY) const;
+
+	/** Dispatch a mouse click event to a frame's Lua scripts.
+	 *  Button: "LeftButton", "RightButton", "MiddleButton" */
+	void DispatchMouseDown(int64 Handle, const FString& Button);
+	void DispatchMouseUp(int64 Handle, const FString& Button);
+	void DispatchClick(int64 Handle, const FString& Button);
+
 	/** Set the UI scale factor (typically calculated from viewport size vs WoW's base resolution) */
 	void SetUIScale(float InScale) { UIScale = InScale; }
 
@@ -122,8 +136,12 @@ private:
 	TWeakObjectPtr<UCanvasPanel> RootCanvas;
 	int64 NextHandle = 1;
 
-	/** UI scale factor to convert WoW coordinates to UE5 viewport coordinates */
+	/** UI scale factor to convert WoW coordinates to UMG design pixels (includes DPI adjustment) */
 	float UIScale = 1.0f;
+
+	/** Raw viewport-to-WoW scale: viewportHeight / 768. Used for converting
+	 *  viewport pixel positions (e.g. mouse cursor) to WoW coordinates. */
+	float RawViewportScale = 1.0f;
 
 	/** Cache for loaded UI textures to avoid loading the same BLP twice */
 	TMap<FString, TWeakObjectPtr<UTexture2D>> TextureCache;

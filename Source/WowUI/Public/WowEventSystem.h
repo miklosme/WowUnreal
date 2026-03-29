@@ -49,6 +49,11 @@ public:
 	/** Dispatch OnUpdate handlers on all frames that have one (call every tick) */
 	void TickOnUpdate(float DeltaTime);
 
+	/** Run a named script handler on a specific frame.
+	 *  StringArgs are pushed as string arguments after self.
+	 *  Returns true if the script existed and ran. */
+	bool RunFrameScript(int64 Handle, const FString& ScriptName, const TArray<FString>& StringArgs = {});
+
 	/** Map a server opcode to a WoW event name */
 	static FString OpcodeToEvent(uint16 Opcode);
 

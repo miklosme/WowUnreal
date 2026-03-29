@@ -21,7 +21,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameViewportClient.h"
 #include "Components/CanvasPanel.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Widgets/SOverlay.h"
+// SOverlay.h already included above
 #include "Formats/Dbc/DbcStore.h"
 #include "WowAssetCache.h"
 #include "Mpq/MpqManager.h"
@@ -29,6 +31,26 @@
 #include "Formats/BlpParser.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLogin, Log, All);
+
+namespace
+{
+void ApplyWowUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
+{
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    FInputModeGameAndUI InputMode;
+    if (WidgetToFocus.IsValid())
+    {
+        InputMode.SetWidgetToFocus(WidgetToFocus);
+    }
+    InputMode.SetHideCursorDuringCapture(false);
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    PlayerController->SetInputMode(InputMode);
+}
+}
 
 AWowLoginController::AWowLoginController()
 {
@@ -68,7 +90,7 @@ void AWowLoginController::StartLoginFlow()
     if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
     {
         PC->bShowMouseCursor = true;
-        PC->SetInputMode(FInputModeGameAndUI());
+        ApplyWowUiInputMode(PC, GEngine && GEngine->GameViewport ? GEngine->GameViewport->GetGameViewportWidget() : nullptr);
     }
 }
 
@@ -301,12 +323,33 @@ void AWowLoginController::InitializeWorldSystems()
                 // Create root canvas for WoW UI frame system
                 if (GEngine && GEngine->GameViewport)
                 {
+                    // Create the root canvas and add it to the viewport via a
+                    // full-screen Slate wrapper. The key is that the SConstraintCanvas
+                    // must be the TOP widget added to the viewport overlay — then the
+                    // overlay slot's HAlign_Fill / VAlign_Fill will give it the full
+                    // viewport geometry, and the inner anchored slot stretches to match.
                     UCanvasPanel* UIRootCanvas = NewObject<UCanvasPanel>(UIManager, TEXT("WowUIRootCanvas"));
                     UIRootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
                     UIRootCanvas->AddToRoot(); // Prevent GC
-                    GEngine->GameViewport->AddViewportWidgetContent(
-                        UIRootCanvas->TakeWidget(), 50);
+
+                    TSharedRef<SWidget> CanvasWidget = UIRootCanvas->TakeWidget();
+
+                    // Use a simple SOverlay → SConstraintCanvas → Canvas chain.
+                    // SOverlay children always stretch to fill their parent.
+                    TSharedRef<SOverlay> Wrapper = SNew(SOverlay)
+                        + SOverlay::Slot()
+                        .HAlign(HAlign_Fill)
+                        .VAlign(VAlign_Fill)
+                        [
+                            CanvasWidget
+                        ];
+
+                    GEngine->GameViewport->AddViewportWidgetContent(Wrapper, 50);
                     UIManager->SetRootCanvas(UIRootCanvas);
+                    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+                    {
+                        ApplyWowUiInputMode(PC, CanvasWidget);
+                    }
                     UE_LOG(LogWowLogin, Log, TEXT("Created WoW UI root canvas at z-order 50"));
                 }
 
@@ -526,10 +569,11 @@ void AWowLoginController::FinalizeWorldEntry()
         GPC->bShowMouseCursor = true;
         GPC->bEnableClickEvents = true;
         GPC->bEnableMouseOverEvents = true;
-        FInputModeGameAndUI InputMode;
-        InputMode.SetHideCursorDuringCapture(false);
-        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-        GPC->SetInputMode(InputMode);
+        ApplyWowUiInputMode(GPC, GEngine && GEngine->GameViewport ? GEngine->GameViewport->GetGameViewportWidget() : nullptr);
+        if (FSlateApplication::IsInitialized())
+        {
+            FSlateApplication::Get().SetAllUserFocusToGameViewport(EFocusCause::SetDirectly);
+        }
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));

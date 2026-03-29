@@ -201,9 +201,10 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI loaded successfully (%d frames total)"),
 		FrameManager ? FrameManager->GetFrameCount() : 0);
 
-	// Dump key frame layout for debugging
+	// Post-load: sync visibility (hide children of parents that got hidden by OnLoad)
 	if (FrameManager)
 	{
+		FrameManager->SyncChildVisibility();
 		FrameManager->DebugDumpLayout();
 	}
 }

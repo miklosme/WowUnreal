@@ -368,6 +368,61 @@ void FWowEventSystem::RemoveFrameScripts(int64 Handle)
 #endif
 }
 
+bool FWowEventSystem::RunFrameScript(int64 Handle, const FString& ScriptName, const TArray<FString>& StringArgs)
+{
+#if HAS_LUA
+	if (!LuaVM) return false;
+	lua_State* L = LuaVM->GetState();
+	if (!L) return false;
+
+	TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
+	if (!FrameScripts) return false;
+
+	int32* ScriptRef = FrameScripts->Find(ScriptName);
+	if (!ScriptRef) return false;
+
+	// Push the compiled script function
+	lua_rawgeti(L, LUA_REGISTRYINDEX, *ScriptRef);
+	if (!lua_isfunction(L, -1))
+	{
+		lua_pop(L, 1);
+		return false;
+	}
+
+	// Push self (frame table)
+	int32* FrameRef = FrameObjectRefs.Find(Handle);
+	if (FrameRef)
+	{
+		lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
+	}
+	else
+	{
+		lua_newtable(L);
+	}
+
+	// Push string args
+	for (const FString& Arg : StringArgs)
+	{
+		FTCHARToUTF8 UTF8Arg(*Arg);
+		lua_pushstring(L, UTF8Arg.Get());
+	}
+
+	// Call: func(self, arg1, arg2, ...)
+	int32 NumArgs = 1 + StringArgs.Num();
+	if (lua_pcall(L, NumArgs, 0, 0) != 0)
+	{
+		const char* Err = lua_tostring(L, -1);
+		UE_LOG(LogWowEvent, Error, TEXT("RunFrameScript error [%lld] %s: %s"),
+			Handle, *ScriptName, Err ? UTF8_TO_TCHAR(Err) : TEXT("unknown"));
+		lua_pop(L, 1);
+		return false;
+	}
+	return true;
+#else
+	return false;
+#endif
+}
+
 // Helper: given "PlayerFrameHealthBar" and parent "PlayerFrame", return "healthBar"
 static FString GetChildFieldKey(const FString& ChildName, const FString& ParentName)
 {

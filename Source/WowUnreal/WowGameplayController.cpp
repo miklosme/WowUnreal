@@ -61,6 +61,86 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
+namespace
+{
+TSharedPtr<SViewport> GetWowGameViewportWidget()
+{
+	if (!GEngine || !GEngine->GameViewport)
+	{
+		return nullptr;
+	}
+
+	return GEngine->GameViewport->GetGameViewportWidget();
+}
+
+void ApplyWowGameAndUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
+{
+	if (!PlayerController)
+	{
+		return;
+	}
+
+	FInputModeGameAndUI InputMode;
+	if (WidgetToFocus.IsValid())
+	{
+		InputMode.SetWidgetToFocus(WidgetToFocus);
+	}
+	InputMode.SetHideCursorDuringCapture(false);
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	PlayerController->SetInputMode(InputMode);
+}
+
+void FocusWowGameViewport()
+{
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication::Get().SetAllUserFocusToGameViewport(EFocusCause::SetDirectly);
+	}
+}
+
+bool IsWowUiConsumingKeyboardInput()
+{
+	if (!FSlateApplication::IsInitialized())
+	{
+		return false;
+	}
+
+	const TSharedPtr<SWidget> FocusedWidget = FSlateApplication::Get().GetKeyboardFocusedWidget();
+	if (!FocusedWidget.IsValid())
+	{
+		return false;
+	}
+
+	const TSharedPtr<SViewport> GameViewportWidget = GetWowGameViewportWidget();
+	return !GameViewportWidget.IsValid() || FocusedWidget != GameViewportWidget;
+}
+
+bool ShouldSuppressGameplayHotkey(const FKey& Key)
+{
+	return Key == EKeys::Tab
+		|| Key == EKeys::Enter
+		|| Key == EKeys::One
+		|| Key == EKeys::Two
+		|| Key == EKeys::Three
+		|| Key == EKeys::Four
+		|| Key == EKeys::Five
+		|| Key == EKeys::Six
+		|| Key == EKeys::Seven
+		|| Key == EKeys::Eight
+		|| Key == EKeys::Nine
+		|| Key == EKeys::Zero
+		|| Key == EKeys::Hyphen
+		|| Key == EKeys::Equals
+		|| Key == EKeys::M
+		|| Key == EKeys::B
+		|| Key == EKeys::C
+		|| Key == EKeys::L
+		|| Key == EKeys::J
+		|| Key == EKeys::N
+		|| Key == EKeys::P;
+}
+}
+
 AWowGameplayController::AWowGameplayController()
 {
 	bShowMouseCursor = true;
@@ -75,12 +155,8 @@ AWowGameplayController::AWowGameplayController()
 void AWowGameplayController::BeginPlay()
 {
 	Super::BeginPlay();
-	// WoW-style input: cursor visible, game + UI both get input.
-	// Mouse clicks are detected via Tick polling (not InputKey) for reliability.
-	FInputModeGameAndUI InputMode;
-	InputMode.SetHideCursorDuringCapture(false);
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	SetInputMode(InputMode);
+	ApplyWowGameAndUiInputMode(this, GetWowGameViewportWidget());
+	FocusWowGameViewport();
 	bShowMouseCursor = true;
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
@@ -122,8 +198,7 @@ void AWowGameplayController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
 
-	// Left click for targeting - use IE_Pressed for immediate responsiveness
-	InputComponent->BindAction(TEXT("LeftClick"), IE_Pressed, this, &AWowGameplayController::OnLeftClick);
+	// Left click for targeting and WoW UI hit testing
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AWowGameplayController::OnLeftClick);
 
 	// Right click for auto-attack - use IE_Pressed for immediate responsiveness
@@ -611,41 +686,6 @@ void AWowGameplayController::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// Poll mouse via FSlateApplication (always works regardless of input mode)
-	// Poll keyboard via WasInputKeyJustPressed (works on APlayerController)
-	if (IsLocalController() && FSlateApplication::IsInitialized())
-	{
-		// Mouse — use Slate's pressed mouse buttons (most reliable)
-		const TSet<FKey>& MouseButtons = FSlateApplication::Get().GetPressedMouseButtons();
-		bool bLeftDown = MouseButtons.Contains(EKeys::LeftMouseButton);
-		bool bRightDown = MouseButtons.Contains(EKeys::RightMouseButton);
-
-		if (bLeftDown && !bLeftMouseWasDown)
-			OnLeftClick();
-		if (bRightDown && !bRightMouseWasDown)
-			OnRightClick();
-
-		bLeftMouseWasDown = bLeftDown;
-		bRightMouseWasDown = bRightDown;
-	}
-	if (IsLocalController())
-	{
-		// Keyboard — WasInputKeyJustPressed checks the controller's input buffer
-		if (WasInputKeyJustPressed(EKeys::One)) CastSpellFromSlot(0);
-		if (WasInputKeyJustPressed(EKeys::Two)) CastSpellFromSlot(1);
-		if (WasInputKeyJustPressed(EKeys::Three)) CastSpellFromSlot(2);
-		if (WasInputKeyJustPressed(EKeys::Four)) CastSpellFromSlot(3);
-		if (WasInputKeyJustPressed(EKeys::Five)) CastSpellFromSlot(4);
-		if (WasInputKeyJustPressed(EKeys::Six)) CastSpellFromSlot(5);
-		if (WasInputKeyJustPressed(EKeys::Seven)) CastSpellFromSlot(6);
-		if (WasInputKeyJustPressed(EKeys::Eight)) CastSpellFromSlot(7);
-		if (WasInputKeyJustPressed(EKeys::Nine)) CastSpellFromSlot(8);
-		if (WasInputKeyJustPressed(EKeys::Zero)) CastSpellFromSlot(9);
-		if (WasInputKeyJustPressed(EKeys::Hyphen)) CastSpellFromSlot(10);
-		if (WasInputKeyJustPressed(EKeys::Equals)) CastSpellFromSlot(11);
-		if (WasInputKeyJustPressed(EKeys::Tab)) OnTabTarget();
-	}
-
 	// Dispatch OnUpdate to all WoW UI frames each tick
 	if (UIManager && UIManager->GetEventSystem())
 	{
@@ -805,42 +845,35 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 
 bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 {
-	// Handle game input directly — bypasses Slate focus issues
-	if (Params.Event == IE_Pressed)
+	if (Params.Event == IE_Pressed
+		&& IsWowUiConsumingKeyboardInput()
+		&& ShouldSuppressGameplayHotkey(Params.Key))
 	{
-		if (Params.Key == EKeys::LeftMouseButton)
-		{
-			OnLeftClick();
-		}
-		else if (Params.Key == EKeys::RightMouseButton)
-		{
-			OnRightClick();
-		}
-		else if (Params.Key == EKeys::Tab)
-		{
-			OnTabTarget();
-			return true; // Consume Tab so Slate doesn't cycle widget focus
-		}
-		else if (Params.Key == EKeys::One) { CastSpellFromSlot(0); }
-		else if (Params.Key == EKeys::Two) { CastSpellFromSlot(1); }
-		else if (Params.Key == EKeys::Three) { CastSpellFromSlot(2); }
-		else if (Params.Key == EKeys::Four) { CastSpellFromSlot(3); }
-		else if (Params.Key == EKeys::Five) { CastSpellFromSlot(4); }
-		else if (Params.Key == EKeys::Six) { CastSpellFromSlot(5); }
-		else if (Params.Key == EKeys::Seven) { CastSpellFromSlot(6); }
-		else if (Params.Key == EKeys::Eight) { CastSpellFromSlot(7); }
-		else if (Params.Key == EKeys::Nine) { CastSpellFromSlot(8); }
-		else if (Params.Key == EKeys::Zero) { CastSpellFromSlot(9); }
-		else if (Params.Key == EKeys::L) { OnQuestLogKey(); }
-		else if (Params.Key == EKeys::J) { OnGuildRosterKey(); }
+		return true;
 	}
 
-	// Let parent handle the input too (for movement etc.)
 	return Super::InputKey(Params);
 }
 
 void AWowGameplayController::OnLeftClick()
 {
+	// Check if a WoW UI frame is under the cursor first
+	if (UIManager && UIManager->GetFrameManager())
+	{
+		float MX, MY;
+		if (GetMousePosition(MX, MY))
+		{
+			int64 HitFrame = UIManager->GetFrameManager()->HitTestFrames(MX, MY);
+			if (HitFrame >= 0)
+			{
+				UIManager->GetFrameManager()->DispatchMouseDown(HitFrame, TEXT("LeftButton"));
+				UIManager->GetFrameManager()->DispatchClick(HitFrame, TEXT("LeftButton"));
+				UIManager->GetFrameManager()->DispatchMouseUp(HitFrame, TEXT("LeftButton"));
+				return; // Don't target through UI
+			}
+		}
+	}
+
 	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick fired"));
 	TryTargetUnderCursor();
 }
@@ -1555,6 +1588,23 @@ void AWowGameplayController::StopAutoAttack()
 
 void AWowGameplayController::OnRightClick()
 {
+	// Check if a WoW UI frame is under the cursor first
+	if (UIManager && UIManager->GetFrameManager())
+	{
+		float MX, MY;
+		if (GetMousePosition(MX, MY))
+		{
+			int64 HitFrame = UIManager->GetFrameManager()->HitTestFrames(MX, MY);
+			if (HitFrame >= 0)
+			{
+				UIManager->GetFrameManager()->DispatchMouseDown(HitFrame, TEXT("RightButton"));
+				UIManager->GetFrameManager()->DispatchClick(HitFrame, TEXT("RightButton"));
+				UIManager->GetFrameManager()->DispatchMouseUp(HitFrame, TEXT("RightButton"));
+				return; // Don't interact through UI
+			}
+		}
+	}
+
 	UE_LOG(LogWowGameplay, Log, TEXT("OnRightClick: TargetGuid=%llu DeadEntities=%d"), TargetGuid, DeadEntityGuids.Num());
 
 	if (TargetGuid == 0)
@@ -3312,37 +3362,31 @@ void AWowGameplayController::OnEnterKey()
 
 void AWowGameplayController::OnChatInputModeChanged(bool bChatActive)
 {
-	// Always use GameAndUI — cursor visible, both game and UI get input
-	FInputModeGameAndUI InputMode;
-	InputMode.SetHideCursorDuringCapture(false);
-	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-	SetInputMode(InputMode);
+	if (bChatActive && FSlateApplication::IsInitialized())
+	{
+		ApplyWowGameAndUiInputMode(this, FSlateApplication::Get().GetKeyboardFocusedWidget());
+		return;
+	}
+
+	ApplyWowGameAndUiInputMode(this, GetWowGameViewportWidget());
+	FocusWowGameViewport();
 }
 
 void AWowGameplayController::OnBagKey()
 {
-	// Fire WoW Lua event — FrameXML handles ToggleBackpack
+	// Use FrameXML ToggleBackpack — no native fallback
 	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
 	{
 		UIManager->GetLuaVM()->ExecuteString(TEXT("ToggleBackpack()"), TEXT("=keybind_B"));
-	}
-	// Also toggle native bag window as fallback
-	if (UIManager)
-	{
-		UIManager->ToggleBagWindow();
 	}
 }
 
 void AWowGameplayController::OnCharacterKey()
 {
-	// Fire WoW Lua — ToggleCharacter("PaperDollFrame")
+	// Use FrameXML ToggleCharacter — no native fallback
 	if (UIManager && UIManager->GetLuaVM() && UIManager->GetLuaVM()->IsInitialized())
 	{
 		UIManager->GetLuaVM()->ExecuteString(TEXT("ToggleCharacter('PaperDollFrame')"), TEXT("=keybind_C"));
-	}
-	if (UIManager)
-	{
-		UIManager->ToggleCharacterPanel();
 	}
 }
 
@@ -4421,4 +4465,3 @@ void AWowGameplayController::FireUIEvent(const FString& EventName, const TArray<
 		UIManager->GetEventSystem()->FireEvent(EventName, Args);
 	}
 }
-

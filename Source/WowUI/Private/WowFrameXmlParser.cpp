@@ -1,6 +1,8 @@
 #include "WowFrameXmlParser.h"
 #include "Mpq/MpqManager.h"
 #include "XmlParser.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 #if HAS_PUGIXML
 THIRD_PARTY_INCLUDES_START
@@ -9,6 +11,237 @@ THIRD_PARTY_INCLUDES_END
 #endif
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowXml, Log, All);
+
+static bool IsFrameTypeTag(const FString& Tag);
+static FWowFrameDef ParseFrameNode(const FXmlNode* Node);
+
+namespace
+{
+FString NormalizeWowPath(const FString& InPath)
+{
+	FString Normalized = InPath;
+	Normalized.ReplaceInline(TEXT("/"), TEXT("\\"));
+	Normalized.ReplaceInline(TEXT("\\.\\"), TEXT("\\"));
+
+	while (Normalized.Contains(TEXT("\\\\")))
+	{
+		Normalized.ReplaceInline(TEXT("\\\\"), TEXT("\\"));
+	}
+
+	TArray<FString> Segments;
+	Normalized.ParseIntoArray(Segments, TEXT("\\"), true);
+
+	TArray<FString> CleanSegments;
+	for (const FString& Segment : Segments)
+	{
+		if (Segment.IsEmpty() || Segment == TEXT("."))
+		{
+			continue;
+		}
+
+		if (Segment == TEXT(".."))
+		{
+			if (CleanSegments.Num() > 0)
+			{
+				CleanSegments.Pop();
+			}
+			continue;
+		}
+
+		CleanSegments.Add(Segment);
+	}
+
+	return FString::Join(CleanSegments, TEXT("\\"));
+}
+
+FString GetWowDirectory(const FString& InPath)
+{
+	const FString Normalized = NormalizeWowPath(InPath);
+	int32 SlashIndex = INDEX_NONE;
+	if (Normalized.FindLastChar(TEXT('\\'), SlashIndex))
+	{
+		return Normalized.Left(SlashIndex + 1);
+	}
+
+	return FString();
+}
+
+FString ResolveWowPath(const FString& BaseDirectory, const FString& RelativePath)
+{
+	const FString Candidate = NormalizeWowPath(RelativePath);
+	if (Candidate.StartsWith(TEXT("Interface\\"), ESearchCase::IgnoreCase))
+	{
+		return Candidate;
+	}
+
+	return NormalizeWowPath(BaseDirectory + Candidate);
+}
+
+bool TryReadWowFile(FMpqManager* Mpq, const FString& InPath, TArray<uint8>& OutData)
+{
+	if (!Mpq)
+	{
+		return false;
+	}
+
+	TArray<FString> Candidates;
+	const FString Normalized = NormalizeWowPath(InPath);
+	Candidates.AddUnique(Normalized);
+	Candidates.AddUnique(Normalized.ToLower());
+	Candidates.AddUnique(Normalized.Replace(TEXT("\\"), TEXT("/")));
+	Candidates.AddUnique(Normalized.ToLower().Replace(TEXT("\\"), TEXT("/")));
+
+	for (const FString& Candidate : Candidates)
+	{
+		if (Mpq->ReadFile(Candidate, OutData))
+		{
+			return true;
+		}
+	}
+
+	for (const FString& Candidate : Candidates)
+	{
+		const FString FileSystemPath = FPaths::Combine(Mpq->GetDataPath(), Candidate.Replace(TEXT("\\"), TEXT("/")));
+		if (FFileHelper::LoadFileToArray(OutData, *FileSystemPath))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void AppendResolvedXmlDirectives(
+	FMpqManager* Mpq,
+	const FString& XmlPath,
+	TSet<FString>& VisitedXmlFiles,
+	TArray<FWowXmlDirective>& OutDirectives)
+{
+	if (!Mpq)
+	{
+		return;
+	}
+
+	const FString NormalizedXmlPath = NormalizeWowPath(XmlPath);
+	const FString VisitKey = NormalizedXmlPath.ToLower();
+	if (VisitedXmlFiles.Contains(VisitKey))
+	{
+		UE_LOG(LogWowXml, Verbose, TEXT("Skipping already processed XML include: %s"), *NormalizedXmlPath);
+		return;
+	}
+
+	VisitedXmlFiles.Add(VisitKey);
+
+	TArray<uint8> FileData;
+	if (!TryReadWowFile(Mpq, NormalizedXmlPath, FileData))
+	{
+		UE_LOG(LogWowXml, Warning, TEXT("Could not read FrameXML file: %s"), *NormalizedXmlPath);
+		return;
+	}
+
+	const FString BaseDirectory = GetWowDirectory(NormalizedXmlPath);
+	const TArray<FWowXmlDirective> ParsedDirectives = FWowFrameXmlParser::ParseXml(FileData, NormalizedXmlPath);
+	for (const FWowXmlDirective& Directive : ParsedDirectives)
+	{
+		if (Directive.Type == FWowXmlDirective::EType::Include)
+		{
+			if (!Directive.FilePath.IsEmpty())
+			{
+				AppendResolvedXmlDirectives(Mpq, ResolveWowPath(BaseDirectory, Directive.FilePath), VisitedXmlFiles, OutDirectives);
+			}
+			continue;
+		}
+
+		FWowXmlDirective ResolvedDirective = Directive;
+		if (ResolvedDirective.Type == FWowXmlDirective::EType::Script && !ResolvedDirective.FilePath.IsEmpty())
+		{
+			ResolvedDirective.FilePath = ResolveWowPath(BaseDirectory, ResolvedDirective.FilePath);
+		}
+
+		OutDirectives.Add(MoveTemp(ResolvedDirective));
+	}
+}
+
+TArray<FWowXmlDirective> ParseXmlWithFXmlFallback(const FString& XmlContent, const FString& FileName)
+{
+	TArray<FWowXmlDirective> Directives;
+
+	FXmlFile XmlFile;
+	if (!XmlFile.LoadFile(XmlContent, EConstructMethod::ConstructFromBuffer))
+	{
+		UE_LOG(LogWowXml, Warning, TEXT("Fallback XML parse also failed: %s - %s"), *FileName, *XmlFile.GetLastError());
+		return Directives;
+	}
+
+	const FXmlNode* Root = XmlFile.GetRootNode();
+	if (!Root)
+	{
+		UE_LOG(LogWowXml, Warning, TEXT("No root node in XML: %s"), *FileName);
+		return Directives;
+	}
+
+	for (const FXmlNode* Child = Root->GetFirstChildNode(); Child; Child = Child->GetNextNode())
+	{
+		const FString Tag = Child->GetTag();
+
+		if (IsFrameTypeTag(Tag))
+		{
+			FWowXmlDirective Dir;
+			Dir.Type = FWowXmlDirective::EType::Frame;
+			Dir.FrameDef = ParseFrameNode(Child);
+			Directives.Add(MoveTemp(Dir));
+		}
+		else if (Tag.Equals(TEXT("Include"), ESearchCase::IgnoreCase))
+		{
+			FWowXmlDirective Dir;
+			Dir.Type = FWowXmlDirective::EType::Include;
+			Dir.FilePath = Child->GetAttribute(TEXT("file"));
+			Directives.Add(MoveTemp(Dir));
+		}
+		else if (Tag.Equals(TEXT("Script"), ESearchCase::IgnoreCase))
+		{
+			FWowXmlDirective Dir;
+			Dir.Type = FWowXmlDirective::EType::Script;
+			Dir.FilePath = Child->GetAttribute(TEXT("file"));
+			Directives.Add(MoveTemp(Dir));
+		}
+		else if (Tag.Equals(TEXT("Font"), ESearchCase::IgnoreCase))
+		{
+			FWowXmlDirective Dir;
+			Dir.Type = FWowXmlDirective::EType::Font;
+			Dir.FontName = Child->GetAttribute(TEXT("name"));
+			Dir.FontInherits = Child->GetAttribute(TEXT("inherits"));
+
+			const FString FontHeightAttr = Child->GetAttribute(TEXT("height"));
+			if (!FontHeightAttr.IsEmpty())
+			{
+				Dir.FontHeight = FCString::Atof(*FontHeightAttr);
+			}
+
+			Dir.FontFlags = Child->GetAttribute(TEXT("flags"));
+
+			const FXmlNode* FontHeightNode = Child->FindChildNode(TEXT("FontHeight"));
+			if (FontHeightNode)
+			{
+				const FXmlNode* AbsValue = FontHeightNode->FindChildNode(TEXT("AbsValue"));
+				if (AbsValue)
+				{
+					const FString Value = AbsValue->GetAttribute(TEXT("val"));
+					if (!Value.IsEmpty())
+					{
+						Dir.FontHeight = FCString::Atof(*Value);
+					}
+				}
+			}
+
+			Directives.Add(MoveTemp(Dir));
+		}
+	}
+
+	UE_LOG(LogWowXml, Log, TEXT("Fallback parsed %s: %d directives"), *FileName, Directives.Num());
+	return Directives;
+}
+} // namespace
 
 // ─── Enum parsers ──────────────────────────────────────────────────────────────
 
@@ -856,14 +1089,30 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 #if HAS_PUGIXML
 	// Use pugixml for robust WoW XML parsing (handles namespaces, entities, comments, CDATA)
 	pugi::xml_document Doc;
-	pugi::xml_parse_result ParseResult = Doc.load_buffer(Data.GetData(), Data.Num(),
-		pugi::parse_default | pugi::parse_comments | pugi::parse_declaration);
+	constexpr unsigned int ParseFlags =
+		pugi::parse_default |
+		pugi::parse_comments |
+		pugi::parse_declaration |
+		pugi::parse_doctype |
+		pugi::parse_pi;
+
+	pugi::xml_parse_result ParseResult = Doc.load_buffer(Data.GetData(), Data.Num(), ParseFlags);
 
 	if (!ParseResult)
 	{
-		UE_LOG(LogWowXml, Warning, TEXT("Failed to parse XML: %s - %hs (offset %d)"),
-			*FileName, ParseResult.description(), static_cast<int32>(ParseResult.offset));
-		return Directives;
+		FTCHARToUTF8 SanitizedUtf8(*XmlContent);
+		ParseResult = Doc.load_buffer(
+			SanitizedUtf8.Get(),
+			SanitizedUtf8.Length(),
+			ParseFlags,
+			pugi::encoding_utf8);
+
+		if (!ParseResult)
+		{
+			UE_LOG(LogWowXml, Warning, TEXT("Failed to parse XML with pugixml: %s - %hs (offset %d)"),
+				*FileName, ParseResult.description(), static_cast<int32>(ParseResult.offset));
+			return ParseXmlWithFXmlFallback(XmlContent, FileName);
+		}
 	}
 
 	// Find the <Ui> root (may be nested under xml declaration)
@@ -920,7 +1169,21 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 		{
 			FWowXmlDirective Dir;
 			Dir.Type = FWowXmlDirective::EType::Font;
-			Dir.FilePath = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			Dir.FontName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			Dir.FontInherits = UTF8_TO_TCHAR(Child.attribute("inherits").as_string());
+			Dir.FontFlags = UTF8_TO_TCHAR(Child.attribute("flags").as_string());
+			Dir.FontHeight = Child.attribute("height").as_float(12.0f);
+
+			pugi::xml_node FontHeightNode = Child.child("FontHeight");
+			if (FontHeightNode)
+			{
+				pugi::xml_node AbsValue = FontHeightNode.child("AbsValue");
+				if (AbsValue)
+				{
+					Dir.FontHeight = AbsValue.attribute("val").as_float(Dir.FontHeight);
+				}
+			}
+
 			Directives.Add(Dir);
 		}
 		else
@@ -940,73 +1203,7 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::ParseXml(const TArray<uint8>& Data,
 	UE_LOG(LogWowXml, Log, TEXT("Parsed XML: %s (%d directives)"), *FileName, Directives.Num());
 
 #else
-	// Fallback: FXmlFile parser (doesn't handle WoW XML well)
-	FXmlFile XmlFile;
-	if (!XmlFile.LoadFile(XmlContent, EConstructMethod::ConstructFromBuffer))
-	{
-		UE_LOG(LogWowXml, Warning, TEXT("Failed to parse XML: %s - %s"), *FileName, *XmlFile.GetLastError());
-		return Directives;
-	}
-
-	const FXmlNode* Root = XmlFile.GetRootNode();
-	if (!Root)
-	{
-		UE_LOG(LogWowXml, Warning, TEXT("No root node in XML: %s"), *FileName);
-		return Directives;
-	}
-
-	for (const FXmlNode* Child = Root->GetFirstChildNode(); Child; Child = Child->GetNextNode())
-	{
-		FString Tag = Child->GetTag();
-
-		if (IsFrameTypeTag(Tag))
-		{
-			FWowXmlDirective Dir;
-			Dir.Type = FWowXmlDirective::EType::Frame;
-			Dir.FrameDef = ParseFrameNode(Child);
-			Directives.Add(MoveTemp(Dir));
-		}
-		else if (Tag.Equals(TEXT("Include"), ESearchCase::IgnoreCase))
-		{
-			FWowXmlDirective Dir;
-			Dir.Type = FWowXmlDirective::EType::Include;
-			Dir.FilePath = Child->GetAttribute(TEXT("file"));
-			Directives.Add(MoveTemp(Dir));
-		}
-		else if (Tag.Equals(TEXT("Script"), ESearchCase::IgnoreCase))
-		{
-			FWowXmlDirective Dir;
-			Dir.Type = FWowXmlDirective::EType::Script;
-			Dir.FilePath = Child->GetAttribute(TEXT("file"));
-			Directives.Add(MoveTemp(Dir));
-		}
-		else if (Tag.Equals(TEXT("Font"), ESearchCase::IgnoreCase))
-		{
-			FWowXmlDirective Dir;
-			Dir.Type = FWowXmlDirective::EType::Font;
-			Dir.FontName = Child->GetAttribute(TEXT("name"));
-			Dir.FontInherits = Child->GetAttribute(TEXT("inherits"));
-			FString FH = Child->GetAttribute(TEXT("height"));
-			if (!FH.IsEmpty()) Dir.FontHeight = FCString::Atof(*FH);
-			Dir.FontFlags = Child->GetAttribute(TEXT("flags"));
-
-			// Check for FontHeight child
-			const FXmlNode* FHNode = Child->FindChildNode(TEXT("FontHeight"));
-			if (FHNode)
-			{
-				const FXmlNode* AbsVal = FHNode->FindChildNode(TEXT("AbsValue"));
-				if (AbsVal)
-				{
-					FString Val = AbsVal->GetAttribute(TEXT("val"));
-					if (!Val.IsEmpty()) Dir.FontHeight = FCString::Atof(*Val);
-				}
-			}
-
-			Directives.Add(MoveTemp(Dir));
-		}
-	}
-
-	UE_LOG(LogWowXml, Log, TEXT("Parsed %s: %d directives"), *FileName, Directives.Num());
+	Directives = ParseXmlWithFXmlFallback(XmlContent, FileName);
 #endif // !HAS_PUGIXML fallback end
 
 	return Directives;
@@ -1022,64 +1219,51 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::LoadFrameXml(FMpqManager* Mpq)
 		return AllDirectives;
 	}
 
-	// Read the FrameXML.toc - try both slash styles
 	TArray<uint8> TocData;
-	if (!Mpq->ReadFile(TEXT("Interface\\FrameXML\\FrameXML.toc"), TocData))
+	const FString FrameXmlTocPath = TEXT("Interface\\FrameXML\\FrameXML.toc");
+	if (!TryReadWowFile(Mpq, FrameXmlTocPath, TocData))
 	{
-		// Try forward slashes
-		if (!Mpq->ReadFile(TEXT("Interface/FrameXML/FrameXML.toc"), TocData))
-		{
-			UE_LOG(LogWowXml, Error, TEXT("Failed to read Interface\\FrameXML\\FrameXML.toc (tried both slash styles)"));
-			return AllDirectives;
-		}
-		else
-		{
-			UE_LOG(LogWowXml, Warning, TEXT("Found FrameXML.toc using forward slashes"));
-		}
+		UE_LOG(LogWowXml, Error, TEXT("Failed to read %s"), *FrameXmlTocPath);
+		return AllDirectives;
+	}
+
+	FString TocContent;
+	if (TocData.Num() >= 3 && TocData[0] == 0xEF && TocData[1] == 0xBB && TocData[2] == 0xBF)
+	{
+		FUTF8ToTCHAR Conv((const ANSICHAR*)TocData.GetData() + 3, TocData.Num() - 3);
+		TocContent = FString(Conv.Length(), Conv.Get());
 	}
 	else
 	{
-		UE_LOG(LogWowXml, Warning, TEXT("Found FrameXML.toc using backslashes"));
+		FUTF8ToTCHAR Conv((const ANSICHAR*)TocData.GetData(), TocData.Num());
+		TocContent = FString(Conv.Length(), Conv.Get());
 	}
-
-	// Parse TOC lines
-	FString TocContent;
-	FUTF8ToTCHAR Conv((const ANSICHAR*)TocData.GetData(), TocData.Num());
-	TocContent = FString(Conv.Length(), Conv.Get());
 
 	TArray<FString> Lines;
 	TocContent.ParseIntoArrayLines(Lines);
+	TSet<FString> VisitedXmlFiles;
+	const FString FrameXmlBaseDirectory = TEXT("Interface\\FrameXML\\");
 
 	for (const FString& Line : Lines)
 	{
 		FString Trimmed = Line.TrimStartAndEnd();
 
-		// Skip empty lines and ## metadata
-		if (Trimmed.IsEmpty() || Trimmed.StartsWith(TEXT("##")))
+		if (Trimmed.IsEmpty() || Trimmed.StartsWith(TEXT("##")) || Trimmed.StartsWith(TEXT("#")))
 		{
 			continue;
 		}
 
-		// Determine type from extension
+		Trimmed.ReplaceInline(TEXT("/"), TEXT("\\"));
+
 		if (Trimmed.EndsWith(TEXT(".xml"), ESearchCase::IgnoreCase))
 		{
-			FString FullPath = FString::Printf(TEXT("Interface\\FrameXML\\%s"), *Trimmed);
-			TArray<uint8> FileData;
-			if (Mpq->ReadFile(FullPath, FileData))
-			{
-				TArray<FWowXmlDirective> Parsed = ParseXml(FileData, Trimmed);
-				AllDirectives.Append(MoveTemp(Parsed));
-			}
-			else
-			{
-				UE_LOG(LogWowXml, Warning, TEXT("Could not read FrameXML file: %s"), *FullPath);
-			}
+			AppendResolvedXmlDirectives(Mpq, ResolveWowPath(FrameXmlBaseDirectory, Trimmed), VisitedXmlFiles, AllDirectives);
 		}
 		else if (Trimmed.EndsWith(TEXT(".lua"), ESearchCase::IgnoreCase))
 		{
 			FWowXmlDirective Dir;
 			Dir.Type = FWowXmlDirective::EType::Script;
-			Dir.FilePath = Trimmed; // Just the filename; UIManager prepends the FrameXML path
+			Dir.FilePath = ResolveWowPath(FrameXmlBaseDirectory, Trimmed);
 			AllDirectives.Add(MoveTemp(Dir));
 		}
 	}

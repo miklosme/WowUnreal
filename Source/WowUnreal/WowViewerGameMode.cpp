@@ -7,6 +7,7 @@
 #include "WowWorldManager.h"
 #include "WowSkyManager.h"
 #include "WowUIManager.h"
+#include "Widgets/SOverlay.h"
 #include "WowConnectionManager.h"
 #include "Engine/World.h"
 #include "Engine/PostProcessVolume.h"
@@ -28,6 +29,26 @@
 #include "Components/CanvasPanel.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
+
+namespace
+{
+void ApplyWowUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
+{
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    FInputModeGameAndUI InputMode;
+    if (WidgetToFocus.IsValid())
+    {
+        InputMode.SetWidgetToFocus(WidgetToFocus);
+    }
+    InputMode.SetHideCursorDuringCapture(false);
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    PlayerController->SetInputMode(InputMode);
+}
+}
 
 AWowViewerGameMode::AWowViewerGameMode()
 {
@@ -225,9 +246,20 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
                 {
                     UCanvasPanel* UIRootCanvas = NewObject<UCanvasPanel>(GetTransientPackage());
                     UIRootCanvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-                    GEngine->GameViewport->AddViewportWidgetContent(
-                        UIRootCanvas->TakeWidget(), 50);
+                    TSharedRef<SWidget> CanvasWidget = UIRootCanvas->TakeWidget();
+                    TSharedRef<SOverlay> Wrapper = SNew(SOverlay)
+                        + SOverlay::Slot()
+                        .HAlign(HAlign_Fill)
+                        .VAlign(VAlign_Fill)
+                        [
+                            CanvasWidget
+                        ];
+                    GEngine->GameViewport->AddViewportWidgetContent(Wrapper, 50);
                     UIManager->SetRootCanvas(UIRootCanvas);
+                    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+                    {
+                        ApplyWowUiInputMode(PC, CanvasWidget);
+                    }
                     UE_LOG(LogWowGameMode, Log, TEXT("Created root canvas for WoW UI"));
                 }
 

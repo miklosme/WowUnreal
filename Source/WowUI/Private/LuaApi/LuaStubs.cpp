@@ -3586,7 +3586,33 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         return 1;
     });
     lua_register(L, "GetMouseFocus", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
-    lua_register(L, "GetMousePosition", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); lua_pushnumber(L2, 0); return 2; });
+    lua_register(L, "GetMousePosition", [](lua_State* L2) -> int {
+        if (FSlateApplication::IsInitialized())
+        {
+            FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
+            // Convert to WoW UI coordinates by dividing by UIScale (viewport_height / 768.0)
+            if (GEngine && GEngine->GameViewport)
+            {
+                FViewport* Viewport = GEngine->GameViewport->Viewport;
+                if (Viewport)
+                {
+                    FIntPoint ViewportSize = Viewport->GetSizeXY();
+                    float UIScale = ViewportSize.Y / 768.0f;
+                    float WowX = CursorPos.X / UIScale;
+                    float WowY = CursorPos.Y / UIScale;
+                    lua_pushnumber(L2, WowX);
+                    lua_pushnumber(L2, WowY);
+                    return 2;
+                }
+            }
+            lua_pushnumber(L2, CursorPos.X);
+            lua_pushnumber(L2, CursorPos.Y);
+            return 2;
+        }
+        lua_pushnumber(L2, 0);
+        lua_pushnumber(L2, 0);
+        return 2;
+    });
 
     // Zone/Map functions
     lua_register(L, "GetRealZoneText", [](lua_State* L2) -> int { lua_pushstring(L2, "Elwynn Forest"); return 1; });
@@ -3695,8 +3721,19 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "ResetCursor", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "ShowCursor", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "HideCursor", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "GetCursorInfo", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "ClearCursor", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "GetCursorInfo", [](lua_State* L2) -> int {
+        // GetCursorInfo() → type, id, ... (or nothing if empty cursor)
+        // For now, return nothing (cursor is empty)
+        return 0;
+    });
+    lua_register(L, "ClearCursor", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager) {
+            // TODO: Send CMSG_CLEAR_CURSOR when opcode is available
+            UE_LOG(LogWowLuaStub, Log, TEXT("ClearCursor: clearing held item"));
+        }
+        return 0;
+    });
     lua_register(L, "GetItemQualityColor", [](lua_State* L2) -> int {
         // Returns r,g,b,hex for item quality. Simplified: return white for all.
         lua_pushnumber(L2, 1); lua_pushnumber(L2, 1); lua_pushnumber(L2, 1);
@@ -3704,7 +3741,18 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         return 4;
     });
     lua_register(L, "GetNumEquipmentSets", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "UnitCharacterPoints", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "UnitCharacterPoints", [](lua_State* L2) -> int {
+        // UnitCharacterPoints(unit) → unspentTalentPoints
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsUnit()) {
+            FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
+            // TODO: Get from entity data when talent system is implemented
+            lua_pushnumber(L2, 0);
+        } else {
+            lua_pushnumber(L2, 0);
+        }
+        return 1;
+    });
 
     // Chat system functions
     lua_register(L, "ChatFrame_OnLoad", [](lua_State* L2) -> int { return 0; });
@@ -3755,8 +3803,30 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         for (int i = 0; i < 8; i++) lua_pushnil(L2);
         return 8;
     });
-    lua_register(L, "UnitCreatureType", [](lua_State* L2) -> int { lua_pushstring(L2, "Humanoid"); return 1; });
-    lua_register(L, "UnitCreatureFamily", [](lua_State* L2) -> int { lua_pushstring(L2, ""); return 1; });
+    lua_register(L, "UnitCreatureType", [](lua_State* L2) -> int {
+        // UnitCreatureType(unit) → "Humanoid", "Beast", etc.
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsPlayer()) {
+            lua_pushstring(L2, "Humanoid");
+        } else if (Entity && Entity->IsUnit()) {
+            // TODO: Check creature type from NPC data when available
+            lua_pushstring(L2, "Humanoid");
+        } else {
+            lua_pushstring(L2, "Humanoid");
+        }
+        return 1;
+    });
+    lua_register(L, "UnitCreatureFamily", [](lua_State* L2) -> int {
+        // UnitCreatureFamily(unit) → family name for beasts, "" for most
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsUnit()) {
+            // TODO: Check creature family from NPC data for beasts
+            lua_pushstring(L2, "");
+        } else {
+            lua_pushstring(L2, "");
+        }
+        return 1;
+    });
     lua_register(L, "UnitClassification", [](lua_State* L2) -> int {
         FWowEntity* Entity = ResolveUnit(L2, 1);
         if (!Entity || !Entity->IsUnit())
@@ -3796,7 +3866,19 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         }
         return 1;
     });
-    lua_register(L, "UnitIsPVP", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "UnitIsPVP", [](lua_State* L2) -> int {
+        // UnitIsPVP(unit) → boolean (true if flagged for PVP)
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsUnit()) {
+            FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
+            uint32 UnitFlags = Unit->GetUnitFlags();
+            // UNIT_FLAG_PVP = 0x1000
+            lua_pushboolean(L2, (UnitFlags & 0x1000) != 0);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "UnitIsPVPFreeForAll", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
     lua_register(L, "UnitPlayerControlled", [](lua_State* L2) -> int {
         FWowEntity* Entity = ResolveUnit(L2, 1);
@@ -3834,8 +3916,34 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     });
     lua_register(L, "UnitIsCharmed", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
     lua_register(L, "UnitIsPossessed", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "UnitCanAssist", [](lua_State* L2) -> int { lua_pushboolean(L2, 1); return 1; });
-    lua_register(L, "UnitCanAttack", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "UnitCanAssist", [](lua_State* L2) -> int {
+        // UnitCanAssist(unit1, unit2) → boolean (can unit1 assist unit2?)
+        FWowEntity* Entity1 = ResolveUnit(L2, 1);
+        FWowEntity* Entity2 = ResolveUnit(L2, 2);
+        if (Entity1 && Entity2 && Entity1->IsUnit() && Entity2->IsUnit()) {
+            // TODO: Use faction data for proper friend/enemy checks
+            // For now, assume same faction = can assist
+            lua_pushboolean(L2, true);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "UnitCanAttack", [](lua_State* L2) -> int {
+        // UnitCanAttack(unit1, unit2) → boolean (can unit1 attack unit2?)
+        FWowEntity* Entity1 = ResolveUnit(L2, 1);
+        FWowEntity* Entity2 = ResolveUnit(L2, 2);
+        if (Entity1 && Entity2 && Entity1->IsUnit() && Entity2->IsUnit()) {
+            // TODO: Use faction data for proper enemy checks
+            // For now, check if one is player and other is NPC
+            bool CanAttack = (Entity1->IsPlayer() && !Entity2->IsPlayer()) ||
+                           (!Entity1->IsPlayer() && Entity2->IsPlayer());
+            lua_pushboolean(L2, CanAttack);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "UnitInRaid", [](lua_State* L2) -> int {
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         if (!Ctx || !Ctx->ConnectionManager)
@@ -3919,9 +4027,45 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         return 1;
     });
     lua_register(L, "UnitInVehicle", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "UnitOnTaxi", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "UnitIsAFK", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "UnitIsDND", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "UnitOnTaxi", [](lua_State* L2) -> int {
+        // UnitOnTaxi(unit) → boolean (true if on taxi/flight)
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsUnit()) {
+            FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
+            uint32 UnitFlags = Unit->GetUnitFlags();
+            // UNIT_FLAG_TAXI_FLIGHT = 0x100000
+            lua_pushboolean(L2, (UnitFlags & 0x100000) != 0);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "UnitIsAFK", [](lua_State* L2) -> int {
+        // UnitIsAFK(unit) → boolean (true if AFK)
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsPlayer()) {
+            FWowPlayerEntity* Player = static_cast<FWowPlayerEntity*>(Entity);
+            uint32 PlayerFlags = Player->GetPlayerFlags();
+            // PLAYER_FLAG_AFK = 0x01
+            lua_pushboolean(L2, (PlayerFlags & 0x01) != 0);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "UnitIsDND", [](lua_State* L2) -> int {
+        // UnitIsDND(unit) → boolean (true if Do Not Disturb)
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsPlayer()) {
+            FWowPlayerEntity* Player = static_cast<FWowPlayerEntity*>(Entity);
+            uint32 PlayerFlags = Player->GetPlayerFlags();
+            // PLAYER_FLAG_DND = 0x02
+            lua_pushboolean(L2, (PlayerFlags & 0x02) != 0);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "UnitXP", L_UnitXP);
     lua_register(L, "UnitXPMax", L_UnitXPMax);
     lua_register(L, "GetXPExhaustion", [](lua_State* L2) -> int {
@@ -3977,7 +4121,12 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushnumber(L2, 0);
         return 3;
     });
-    lua_register(L, "CursorHasItem", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "CursorHasItem", [](lua_State* L2) -> int {
+        // CursorHasItem() → boolean (true if holding something)
+        // For now, no drag system, so always false
+        lua_pushboolean(L2, false);
+        return 1;
+    });
     lua_register(L, "IsEquippedAction", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
 
     // Loot
@@ -4130,7 +4279,23 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushnumber(L2, 0);
         return 3;
     });
-    lua_register(L, "GetLifetimeHonorableKills", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetLifetimeHonorableKills", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->EntityManager)
+        {
+            FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+            if (Player)
+            {
+                // Try to read from player honor fields if available
+                // Honor kills field isn't defined in current PlayerField enum, return 0 for now
+                uint32 HonorKills = 0; // Player->GetField(PlayerField::LIFETIME_HONORABLE_KILLS);
+                lua_pushnumber(L2, HonorKills);
+                return 1;
+            }
+        }
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
     lua_register(L, "GetArenaTeam", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetNumArenaTeams", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "IsInArenaTeam", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
@@ -4167,16 +4332,102 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetCritChance", L_GetCritChance);
     lua_register(L, "GetRangedCritChance", L_GetRangedCritChance);
     lua_register(L, "GetSpellCritChance", L_GetSpellCritChance);
-    lua_register(L, "GetCombatRating", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetCombatRatingBonus", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetCombatRating", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        int32 RatingIndex = static_cast<int32>(luaL_checknumber(L2, 1));
+
+        if (Ctx && Ctx->EntityManager)
+        {
+            FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+            if (Player)
+            {
+                int32 Rating = Player->GetCombatRating(RatingIndex);
+                lua_pushnumber(L2, Rating);
+                return 1;
+            }
+        }
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+    lua_register(L, "GetCombatRatingBonus", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        int32 RatingIndex = static_cast<int32>(luaL_checknumber(L2, 1));
+
+        if (Ctx && Ctx->EntityManager)
+        {
+            FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+            if (Player)
+            {
+                int32 Rating = Player->GetCombatRating(RatingIndex);
+                // Convert rating to percentage bonus using level 80 conversion rates
+                float BonusPercent = 0.0f;
+                switch (RatingIndex)
+                {
+                case WowCombatRating::CRIT_MELEE:
+                case WowCombatRating::CRIT_RANGED:
+                case WowCombatRating::CRIT_SPELL:
+                    BonusPercent = Rating / 45.91f;
+                    break;
+                case WowCombatRating::HASTE:
+                case WowCombatRating::HASTE_MELEE:
+                case WowCombatRating::HASTE_RANGED:
+                case WowCombatRating::HASTE_SPELL:
+                    BonusPercent = Rating / 32.78f;
+                    break;
+                case WowCombatRating::HIT_MELEE:
+                case WowCombatRating::HIT_RANGED:
+                case WowCombatRating::HIT_SPELL:
+                    BonusPercent = Rating / 32.78f;
+                    break;
+                case WowCombatRating::DODGE:
+                case WowCombatRating::PARRY:
+                    BonusPercent = Rating / 45.25f;
+                    break;
+                case WowCombatRating::EXPERTISE:
+                    BonusPercent = Rating / 8.2f;
+                    break;
+                default:
+                    BonusPercent = Rating / 32.78f; // Default conversion
+                    break;
+                }
+                lua_pushnumber(L2, BonusPercent);
+                return 1;
+            }
+        }
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
     lua_register(L, "GetManaRegen", L_GetManaRegen);
     lua_register(L, "GetExpertise", L_GetExpertise);
     lua_register(L, "GetSpellBonusDamage", L_GetSpellBonusDamage);
     lua_register(L, "GetSpellBonusHealing", L_GetSpellBonusHealing);
-    lua_register(L, "GetSpellPenetration", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
-    lua_register(L, "GetMastery", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetSpellPenetration", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->EntityManager)
+        {
+            FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+            if (Player)
+            {
+                // Spell penetration isn't a combat rating in WotLK, but could be in stats
+                // For now return 0 as it's not commonly tracked
+                lua_pushnumber(L2, 0);
+                return 1;
+            }
+        }
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
+    lua_register(L, "GetMastery", [](lua_State* L2) -> int {
+        // Mastery doesn't exist in WotLK (3.3.5), added in Cataclysm
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
     lua_register(L, "GetHaste", L_GetHaste);
-    lua_register(L, "GetVersatility", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "GetVersatility", [](lua_State* L2) -> int {
+        // Versatility doesn't exist in WotLK (3.3.5), added in Warlords of Draenor
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
 
     // ── Final batch: remaining missing functions from error log ──
     lua_register(L, "FauxScrollFrame_GetOffset", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
@@ -4205,27 +4456,203 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "RequestBattlefieldPositions", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "GetNumBattlefieldScores", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "RequestBattlefieldScoreData", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "UnitCastingInfo", [](lua_State* L2) -> int { return 0; }); // returns nil = not casting
+    lua_register(L, "UnitCastingInfo", [](lua_State* L2) -> int {
+        // UnitCastingInfo(unit) → spell, rank, displayName, icon, startTime, endTime, isTradeSkill, castID, notInterruptible
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity && Entity->IsUnit()) {
+            FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
+            // TODO: Check if unit is casting from spell state
+            // For now, return nil (not casting)
+        }
+        return 0;
+    });
     lua_register(L, "MoneyFrame_SetType", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "IsEquippedAction", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "IsEquippedAction", [](lua_State* L2) -> int {
+        // IsEquippedAction(slot) → boolean (true if action corresponds to an equipped item)
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144) {
+            const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
+            if (Slot < ActionButtons.Num()) {
+                uint32 Data = ActionButtons[Slot];
+                uint8 Type = (Data >> 24) & 0xFF;
+                uint32 ItemId = Data & 0x00FFFFFF;
+                // TODO: Check if this item ID corresponds to an equipped item
+                lua_pushboolean(L2, false);
+            } else {
+                lua_pushboolean(L2, false);
+            }
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "ScrollFrame_OnScrollRangeChanged", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "IsConsumableAction", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "IsStackableAction", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "IsItemAction", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "IsConsumableAction", [](lua_State* L2) -> int {
+        // IsConsumableAction(slot) → boolean (true if action is a consumable)
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144) {
+            const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
+            if (Slot < ActionButtons.Num()) {
+                uint32 Data = ActionButtons[Slot];
+                uint8 Type = (Data >> 24) & 0xFF;
+                // Type 1 = Item, would need to check item data for consumable flag
+                lua_pushboolean(L2, Type == 1);
+            } else {
+                lua_pushboolean(L2, false);
+            }
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "IsStackableAction", [](lua_State* L2) -> int {
+        // IsStackableAction(slot) → boolean (true if action is stackable)
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144) {
+            const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
+            if (Slot < ActionButtons.Num()) {
+                uint32 Data = ActionButtons[Slot];
+                uint8 Type = (Data >> 24) & 0xFF;
+                // Items can be stackable, would need to check item data
+                lua_pushboolean(L2, Type == 1);
+            } else {
+                lua_pushboolean(L2, false);
+            }
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "IsItemAction", [](lua_State* L2) -> int {
+        // IsItemAction(slot) → boolean (true if action is an item)
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144) {
+            const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
+            if (Slot < ActionButtons.Num()) {
+                uint32 Data = ActionButtons[Slot];
+                uint8 Type = (Data >> 24) & 0xFF;
+                lua_pushboolean(L2, Type == 1); // Type 1 = Item
+            } else {
+                lua_pushboolean(L2, false);
+            }
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "GetActionBarToggles", [](lua_State* L2) -> int {
         lua_pushnumber(L2, 1); lua_pushnumber(L2, 1); lua_pushnumber(L2, 1); lua_pushnumber(L2, 1);
         return 4;
     });
 
     lua_register(L, "MoneyFrame_Update", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "IsAutoRepeatAction", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "IsAutoRepeatSpell", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "OffhandHasWeapon", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
-    lua_register(L, "GetActionText", [](lua_State* L2) -> int { lua_pushstring(L2, ""); return 1; });
+    lua_register(L, "IsAutoRepeatAction", [](lua_State* L2) -> int {
+        // IsAutoRepeatAction(slot) → boolean (true if action is auto-attack)
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
+        // Slot 1 (0-based slot 0) is usually auto-attack
+        lua_pushboolean(L2, Slot == 0);
+        return 1;
+    });
+    lua_register(L, "IsAutoRepeatSpell", [](lua_State* L2) -> int {
+        // IsAutoRepeatSpell(slot) → boolean (true if spell is auto-repeat like Shoot)
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144) {
+            const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
+            if (Slot < ActionButtons.Num()) {
+                uint32 Data = ActionButtons[Slot];
+                uint8 Type = (Data >> 24) & 0xFF;
+                uint32 SpellId = Data & 0x00FFFFFF;
+                // TODO: Check if spell is auto-repeat (like hunter Auto Shot)
+                lua_pushboolean(L2, false);
+            } else {
+                lua_pushboolean(L2, false);
+            }
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "OffhandHasWeapon", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->EntityManager)
+        {
+            FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+            if (Player)
+            {
+                // Check offhand equipment slot (slot 16 in WoW)
+                uint64 OffhandGuid = Player->GetEquipmentItemGuid(PlayerField::EQUIPMENT_SLOT_OFFHAND);
+                if (OffhandGuid != 0)
+                {
+                    // Find the item entity and check if it's a weapon
+                    FWowEntity* ItemEntity = Ctx->EntityManager->Find(OffhandGuid);
+                    if (ItemEntity && ItemEntity->IsItem())
+                    {
+                        // Would need item template to determine weapon type
+                        // For now, assume any offhand item could be a weapon
+                        lua_pushboolean(L2, 1);
+                        return 1;
+                    }
+                }
+            }
+        }
+        lua_pushboolean(L2, 0);
+        return 1;
+    });
+    lua_register(L, "GetActionText", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 1)) - 1; // Convert to 0-based
+
+        if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144)
+        {
+            const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
+            if (Slot < ActionButtons.Num() && ActionButtons[Slot] != 0)
+            {
+                uint32 ActionData = ActionButtons[Slot];
+                uint8 ActionType = (ActionData >> 24) & 0xFF;
+                uint32 ActionId = ActionData & 0x00FFFFFF;
+
+                if (ActionType == 0) // Spell action
+                {
+                    // For spells, return empty string (spells don't have text)
+                    lua_pushstring(L2, "");
+                    return 1;
+                }
+                else if (ActionType == 64) // Macro action
+                {
+                    // For macros, we would need to look up macro name
+                    // For now return empty as we don't have macro data structure
+                    lua_pushstring(L2, "");
+                    return 1;
+                }
+            }
+        }
+        lua_pushstring(L2, "");
+        return 1;
+    });
     lua_register(L, "GetNumVoiceSessionMembersBySessionID", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
 
     // Priority 4 - Additional missing API functions that cause Lua errors
-    lua_register(L, "GetSpellLink", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+    lua_register(L, "GetSpellLink", [](lua_State* L2) -> int {
+        int32 SpellId = static_cast<int32>(luaL_checknumber(L2, 1));
+        
+        // Look up spell name from SpellDbc
+        const FSpellDbcEntry* SpellEntry = FDbcStore::Get().Spells().GetById(SpellId);
+        if (SpellEntry)
+        {
+            // Construct WoW spell link: |cff71d5ff|Hspell:ID|h[SpellName]|h|r
+            FString SpellLink = FString::Printf(TEXT("|cff71d5ff|Hspell:%d|h[%s]|h|r"), 
+                SpellId, *SpellEntry->SpellName);
+            lua_pushstring(L2, TCHAR_TO_UTF8(*SpellLink));
+            return 1;
+        }
+        lua_pushnil(L2);
+        return 1;
+    });
     lua_register(L, "GetTradeSkillLine", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "GetAuctionItemInfo", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "CanInspect", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
@@ -4247,7 +4674,11 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushboolean(L2, 0);
         return 1;
     });
-    lua_register(L, "GetSpellCharges", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
+    lua_register(L, "GetSpellCharges", [](lua_State* L2) -> int {
+        // Spell charges system doesn't exist in WotLK (3.3.5)
+        lua_pushnil(L2);
+        return 1;
+    });
     lua_register(L, "GetItemCooldown", [](lua_State* L2) -> int {
         lua_pushnumber(L2, 0); lua_pushnumber(L2, 0); lua_pushnumber(L2, 0);
         return 3;
@@ -4327,7 +4758,12 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushnumber(L2, 0); lua_pushnumber(L2, 0); lua_pushnumber(L2, 1);
         return 3;
     });
-    lua_register(L, "UnitThreatSituation", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
+    lua_register(L, "UnitThreatSituation", [](lua_State* L2) -> int {
+        // UnitThreatSituation(unit, otherUnit) → threatStatus (0=none, 1=low, 2=medium, 3=high)
+        // For now, return 0 (no threat)
+        lua_pushnumber(L2, 0);
+        return 1;
+    });
     lua_register(L, "GetThreatStatusColor", [](lua_State* L2) -> int {
         lua_pushnumber(L2, 0); lua_pushnumber(L2, 1); lua_pushnumber(L2, 0);
         return 3;
@@ -4339,10 +4775,36 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     });
     lua_register(L, "GetPetActionInfo", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetPetActionsUsable", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
-    lua_register(L, "UnitInRange", [](lua_State* L2) -> int { lua_pushboolean(L2, true); return 1; });
-    lua_register(L, "SpellIsTargeting", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
-    lua_register(L, "SpellStopCasting", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "SpellStopTargeting", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "UnitInRange", [](lua_State* L2) -> int {
+        // UnitInRange(unit) → boolean (true if unit is in range)
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Entity) {
+            // TODO: Calculate actual distance based on spell ranges, interaction distance, etc.
+            // For now, return true (assume in range)
+            lua_pushboolean(L2, true);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "SpellIsTargeting", [](lua_State* L2) -> int {
+        // SpellIsTargeting() → boolean (true if in targeting mode)
+        lua_pushboolean(L2, false);
+        return 1;
+    });
+    lua_register(L, "SpellStopCasting", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager) {
+            // TODO: Send CMSG_CANCEL_CAST when opcode is available
+            UE_LOG(LogWowLuaStub, Log, TEXT("SpellStopCasting: canceling current cast"));
+        }
+        return 0;
+    });
+    lua_register(L, "SpellStopTargeting", [](lua_State* L2) -> int {
+        // Cancel targeting mode - no-op for now but accept silently
+        UE_LOG(LogWowLuaStub, Verbose, TEXT("SpellStopTargeting: stopping targeting mode"));
+        return 0;
+    });
     lua_register(L, "GetTotemInfo", [](lua_State* L2) -> int {
         lua_pushboolean(L2, false); lua_pushstring(L2, ""); lua_pushnumber(L2, 0);
         lua_pushnumber(L2, 0); lua_pushnil(L2);
@@ -4458,8 +4920,31 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushboolean(L2, strcmp(u1, u2) == 0);
         return 1;
     });
-    lua_register(L, "UnitIsGroupLeader", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
-    lua_register(L, "UnitIsGroupAssistant", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "UnitIsGroupLeader", [](lua_State* L2) -> int {
+        // UnitIsGroupLeader(unit) → boolean (true if unit is group leader)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Ctx && Ctx->ConnectionManager && Entity) {
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            lua_pushboolean(L2, Entity->Guid == GroupInfo.LeaderGuid);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "UnitIsGroupAssistant", [](lua_State* L2) -> int {
+        // UnitIsGroupAssistant(unit) → boolean (true if unit is group assistant)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        FWowEntity* Entity = ResolveUnit(L2, 1);
+        if (Ctx && Ctx->ConnectionManager && Entity) {
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            // TODO: Check if unit is an assistant (when that data is available)
+            lua_pushboolean(L2, false);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "UnitReaction", [](lua_State* L2) -> int {
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
         if (!Ctx || !Ctx->EntityManager)
@@ -4498,9 +4983,41 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     });
 
     // Party/raid leadership
-    lua_register(L, "IsPartyLeader", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
-    lua_register(L, "IsRaidLeader", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
-    lua_register(L, "IsRaidOfficer", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "IsPartyLeader", [](lua_State* L2) -> int {
+        // IsPartyLeader() → boolean (true if player is party leader)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager) {
+            uint64 PlayerGuid = Ctx->EntityManager->LocalPlayerGuid;
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            lua_pushboolean(L2, PlayerGuid == GroupInfo.LeaderGuid && GroupInfo.GroupType == 0);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "IsRaidLeader", [](lua_State* L2) -> int {
+        // IsRaidLeader() → boolean (true if player is raid leader)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager) {
+            uint64 PlayerGuid = Ctx->EntityManager->LocalPlayerGuid;
+            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+            lua_pushboolean(L2, PlayerGuid == GroupInfo.LeaderGuid && GroupInfo.GroupType == 1);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
+    lua_register(L, "IsRaidOfficer", [](lua_State* L2) -> int {
+        // IsRaidOfficer() → boolean (true if player is raid officer)
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager) {
+            // TODO: Check raid officer status when that data is available
+            lua_pushboolean(L2, false);
+        } else {
+            lua_pushboolean(L2, false);
+        }
+        return 1;
+    });
     lua_register(L, "PromoteToLeader", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "DemoteAssistant", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "UninviteUnit", [](lua_State* L2) -> int { return 0; });
@@ -4641,15 +5158,36 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         return 0;
     });
     lua_register(L, "ToggleSpellBook", L_ToggleSpellBook);
-    lua_register(L, "ToggleCharacter", [](lua_State* L2) -> int {
-        UE_LOG(LogWowLuaStub, Log, TEXT("ToggleCharacter() called"));
-        return 0;
-    });
+    // NOTE: ToggleCharacter is registered earlier with a full implementation that
+    // toggles CharacterFrame visibility. Do NOT re-register here.
 
     // Chat frame utility functions (normally defined in ChatFrame.lua)
-    lua_register(L, "ChatEdit_SetLastActiveWindow", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "ChatEdit_GetActiveWindow", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
-    lua_register(L, "ChatEdit_SetLastTellTarget", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "ChatEdit_SetLastActiveWindow", [](lua_State* L2) -> int {
+        // ChatEdit_SetLastActiveWindow(editBox) - store active chat edit box reference
+        if (!lua_isnil(L2, 1)) {
+            lua_pushvalue(L2, 1);
+            lua_setglobal(L2, "_LastActiveChatEditBox");
+            UE_LOG(LogWowLuaStub, Verbose, TEXT("ChatEdit_SetLastActiveWindow: stored active edit box"));
+        }
+        return 0;
+    });
+    lua_register(L, "ChatEdit_GetActiveWindow", [](lua_State* L2) -> int {
+        // ChatEdit_GetActiveWindow() → editBox or nil
+        lua_getglobal(L2, "_LastActiveChatEditBox");
+        if (lua_isnil(L2, -1)) {
+            // Return ChatFrame1EditBox as fallback
+            lua_getglobal(L2, "ChatFrame1EditBox");
+        }
+        return 1;
+    });
+    lua_register(L, "ChatEdit_SetLastTellTarget", [](lua_State* L2) -> int {
+        // ChatEdit_SetLastTellTarget(name) - store last whisper target
+        const char* Name = luaL_checkstring(L2, 1);
+        lua_pushstring(L2, Name);
+        lua_setglobal(L2, "_LastTellTarget");
+        UE_LOG(LogWowLuaStub, Verbose, TEXT("ChatEdit_SetLastTellTarget: %s"), UTF8_TO_TCHAR(Name));
+        return 0;
+    });
     lua_register(L, "FCF_GetCurrentChatFrame", [](lua_State* L2) -> int {
         lua_getglobal(L2, "ChatFrame1");
         return 1;
@@ -4675,10 +5213,38 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetNumTradeItems", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
 
     // Container/item operations
-    lua_register(L, "PickupContainerItem", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "UseContainerItem", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "SplitContainerItem", [](lua_State* L2) -> int { return 0; });
-    lua_register(L, "PickupInventoryItem", [](lua_State* L2) -> int { return 0; });
+    lua_register(L, "PickupContainerItem", [](lua_State* L2) -> int {
+        int32 Bag = static_cast<int32>(luaL_checknumber(L2, 1));
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 2));
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager) {
+            // TODO: Send CMSG_AUTOSTORE_BAG_ITEM when available
+            UE_LOG(LogWowLuaStub, Log, TEXT("PickupContainerItem: bag %d slot %d"), Bag, Slot);
+        }
+        return 0;
+    });
+    lua_register(L, "UseContainerItem", [](lua_State* L2) -> int {
+        int32 Bag = static_cast<int32>(luaL_checknumber(L2, 1));
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 2));
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (Ctx && Ctx->ConnectionManager) {
+            // TODO: Send CMSG_USE_ITEM when available
+            UE_LOG(LogWowLuaStub, Log, TEXT("UseContainerItem: bag %d slot %d"), Bag, Slot);
+        }
+        return 0;
+    });
+    lua_register(L, "SplitContainerItem", [](lua_State* L2) -> int {
+        int32 Bag = static_cast<int32>(luaL_checknumber(L2, 1));
+        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 2));
+        int32 Count = static_cast<int32>(luaL_checknumber(L2, 3));
+        UE_LOG(LogWowLuaStub, Log, TEXT("SplitContainerItem: bag %d slot %d count %d"), Bag, Slot, Count);
+        return 0;
+    });
+    lua_register(L, "PickupInventoryItem", [](lua_State* L2) -> int {
+        int32 InvSlot = static_cast<int32>(luaL_checknumber(L2, 1));
+        UE_LOG(LogWowLuaStub, Log, TEXT("PickupInventoryItem: slot %d"), InvSlot);
+        return 0;
+    });
 
     // Shaman multi-cast bar
     lua_register(L, "GetMultiCastBarOffset", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
