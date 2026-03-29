@@ -232,7 +232,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] RAF summon helper API coverage for UnitPopup/FriendsFrame (`GetSummonFriendCooldown`, `CanSummonFriend`, `CanGrantLevel`, `SummonFriend`, `GrantLevel`)
 - [x] Video options dropdown API shape parity (`GetMultisampleFormats`, `GetRefreshRates`, and no-op setters return the types Blizzard expects)
 - [x] FrameXML animation-object global exposure for tutorial callouts (named `<Animations>` descendants resolve `$parent`, register in Lua, and support `Play`/`Stop`)
-- [?] Frame hover hit-testing parity for `IsMouseOver` (Lua method routes through cached frame rects and cursor position with WoW-style top/bottom/left/right offsets)
+- [x] Frame hover hit-testing parity for `IsMouseOver` (Lua method routes through cached frame rects and cursor position with WoW-style top/bottom/left/right offsets)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
