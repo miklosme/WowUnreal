@@ -1297,13 +1297,31 @@ static int LF_CreateTexture(lua_State* L)
 	// Create a minimal texture table with a metatable
 	lua_newtable(L);
 
+	// Self should be a table (frame) at arg 1 from colon-syntax call
+	if (!lua_istable(L, 1))
+	{
+		// Gracefully handle wrong arg types - return empty texture table
+		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
+		if (!lua_isnil(L, -1)) lua_setmetatable(L, -2); else lua_pop(L, 1);
+		return 1;
+	}
+
 	// Store parent frame handle for texture regions
 	int64 ParentHandle = GetFrameHandle(L);
 	lua_pushinteger(L, ParentHandle);
 	lua_setfield(L, -2, "__parentHandle");
 
-	// Store name if provided
-	const char* Name = luaL_optstring(L, 2, nullptr);
+	// Store name if provided (more forgiving - accept string, nil, or ignore tables)
+	const char* Name = nullptr;
+	if (lua_isstring(L, 2)) {
+		Name = lua_tostring(L, 2);
+	} else if (lua_isnil(L, 2) || lua_isnone(L, 2)) {
+		Name = nullptr;
+	} else {
+		// Ignore other types (like tables) - don't error
+		Name = nullptr;
+	}
+
 	if (Name && Name[0])
 	{
 		lua_pushstring(L, Name);
@@ -1574,6 +1592,145 @@ static int LF_CreateFontString(lua_State* L)
 	return 1;
 }
 
+// Global CreateTexture(name, parent, drawLayer, inherits, subLevel) - WoW 3.3.5 API
+static int LF_CreateTextureGlobal(lua_State* L)
+{
+	// Create a minimal texture table with a metatable
+	lua_newtable(L);
+
+	// Store name if provided (arg 1)
+	const char* Name = luaL_optstring(L, 1, nullptr);
+	if (Name && Name[0]) {
+		lua_pushstring(L, Name);
+		lua_setfield(L, -2, "__name");
+	}
+
+	// Store parent frame handle if provided (arg 2)
+	if (lua_istable(L, 2)) {
+		lua_pushvalue(L, 2); // Push parent table to top
+		int64 ParentHandle = GetFrameHandle(L);
+		lua_pop(L, 1); // Remove parent table copy
+		lua_pushinteger(L, ParentHandle);
+		lua_setfield(L, -2, "__parentHandle");
+	}
+
+	// Store draw layer if provided (arg 3)
+	const char* DrawLayer = luaL_optstring(L, 3, nullptr);
+	if (DrawLayer && DrawLayer[0]) {
+		lua_pushstring(L, DrawLayer);
+		lua_setfield(L, -2, "__drawLayer");
+	}
+
+	// Store inherits template if provided (arg 4)
+	const char* Inherits = luaL_optstring(L, 4, nullptr);
+	if (Inherits && Inherits[0]) {
+		lua_pushstring(L, Inherits);
+		lua_setfield(L, -2, "__inherits");
+	}
+
+	// Store sublevel if provided (arg 5)
+	if (lua_isnumber(L, 5)) {
+		lua_pushvalue(L, 5);
+		lua_setfield(L, -2, "__subLevel");
+	}
+
+	// Texture methods
+	lua_pushcfunction(L, LF_TextureSetTexture);
+	lua_setfield(L, -2, "SetTexture");
+	lua_pushcfunction(L, LF_TextureSetTexCoord);
+	lua_setfield(L, -2, "SetTexCoord");
+	lua_pushcfunction(L, LF_TextureSetVertexColor);
+	lua_setfield(L, -2, "SetVertexColor");
+	lua_pushcfunction(L, LF_TextureSetAlpha);
+	lua_setfield(L, -2, "SetAlpha");
+	lua_pushcfunction(L, LF_TextureShow);
+	lua_setfield(L, -2, "Show");
+	lua_pushcfunction(L, LF_TextureHide);
+	lua_setfield(L, -2, "Hide");
+
+	// Common region methods
+	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetPoint
+	lua_setfield(L, -2, "SetPoint");
+	lua_pushcfunction(L, [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; }); // GetWidth
+	lua_setfield(L, -2, "GetWidth");
+	lua_pushcfunction(L, [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; }); // GetHeight
+	lua_setfield(L, -2, "GetHeight");
+	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetWidth
+	lua_setfield(L, -2, "SetWidth");
+	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetHeight
+	lua_setfield(L, -2, "SetHeight");
+	lua_pushcfunction(L, [](lua_State* L2) -> int {
+		lua_pushstring(L2, "Texture");
+		return 1;
+	}); // GetObjectType
+	lua_setfield(L, -2, "GetObjectType");
+
+	return 1;
+}
+
+// Global CreateFont() - WoW 3.3.5 API for creating font objects
+static int LF_CreateFont(lua_State* L)
+{
+	// Create a minimal font table with required methods
+	lua_newtable(L);
+
+	// Store font name if provided (optional parameter)
+	const char* FontName = luaL_optstring(L, 1, "");
+	if (FontName && FontName[0]) {
+		lua_pushstring(L, FontName);
+		lua_setfield(L, -2, "__name");
+	}
+
+	// Font object methods - MoneyFrame.lua and similar scripts expect these
+	lua_pushcfunction(L, [](lua_State* L2) -> int {
+		// SetFont(fontFile, size, flags)
+		// Store the font properties in the table
+		if (lua_isstring(L2, 2)) {
+			lua_pushvalue(L2, 2);
+			lua_setfield(L2, 1, "__fontFile");
+		}
+		if (lua_isnumber(L2, 3)) {
+			lua_pushvalue(L2, 3);
+			lua_setfield(L2, 1, "__fontSize");
+		}
+		if (lua_isstring(L2, 4)) {
+			lua_pushvalue(L2, 4);
+			lua_setfield(L2, 1, "__fontFlags");
+		}
+		return 0;
+	});
+	lua_setfield(L, -2, "SetFont");
+
+	lua_pushcfunction(L, [](lua_State* L2) -> int {
+		// GetFont() returns fontFile, size, flags
+		lua_getfield(L2, 1, "__fontFile");
+		if (lua_isnil(L2, -1)) { lua_pop(L2, 1); lua_pushstring(L2, ""); }
+		lua_getfield(L2, 1, "__fontSize");
+		if (lua_isnil(L2, -1)) { lua_pop(L2, 1); lua_pushnumber(L2, 12); }
+		lua_getfield(L2, 1, "__fontFlags");
+		if (lua_isnil(L2, -1)) { lua_pop(L2, 1); lua_pushstring(L2, ""); }
+		return 3;
+	});
+	lua_setfield(L, -2, "GetFont");
+
+	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetShadowOffset
+	lua_setfield(L, -2, "SetShadowOffset");
+
+	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetShadowColor
+	lua_setfield(L, -2, "SetShadowColor");
+
+	lua_pushcfunction(L, [](lua_State* L2) -> int { return 0; }); // SetSpacing
+	lua_setfield(L, -2, "SetSpacing");
+
+	lua_pushcfunction(L, [](lua_State* L2) -> int {
+		lua_pushstring(L2, "Font");
+		return 1;
+	}); // GetObjectType
+	lua_setfield(L, -2, "GetObjectType");
+
+	return 1;
+}
+
 // frame:SetBackdrop(backdrop)
 static int LF_SetBackdrop(lua_State* L)
 {
@@ -1815,7 +1972,23 @@ static int LF_SetNormalTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
 	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
+
+	const char* TexturePath = "";
+	if (lua_isstring(L, 2)) {
+		TexturePath = lua_tostring(L, 2);
+	} else if (lua_istable(L, 2)) {
+		// Handle texture object tables - extract path if available
+		lua_getfield(L, 2, "__texturePath");
+		if (lua_isstring(L, -1)) {
+			TexturePath = lua_tostring(L, -1);
+		}
+		lua_pop(L, 1);
+		// If no path, silently accept the texture table
+		if (!TexturePath || !TexturePath[0]) return 0;
+	} else {
+		// Silently ignore other types to prevent errors
+		return 0;
+	}
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -1849,7 +2022,23 @@ static int LF_SetPushedTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
 	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
+
+	const char* TexturePath = "";
+	if (lua_isstring(L, 2)) {
+		TexturePath = lua_tostring(L, 2);
+	} else if (lua_istable(L, 2)) {
+		// Handle texture object tables - extract path if available
+		lua_getfield(L, 2, "__texturePath");
+		if (lua_isstring(L, -1)) {
+			TexturePath = lua_tostring(L, -1);
+		}
+		lua_pop(L, 1);
+		// If no path, silently accept the texture table
+		if (!TexturePath || !TexturePath[0]) return 0;
+	} else {
+		// Silently ignore other types to prevent errors
+		return 0;
+	}
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -1883,7 +2072,23 @@ static int LF_SetHighlightTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
 	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
+
+	const char* TexturePath = "";
+	if (lua_isstring(L, 2)) {
+		TexturePath = lua_tostring(L, 2);
+	} else if (lua_istable(L, 2)) {
+		// Handle texture object tables - extract path if available
+		lua_getfield(L, 2, "__texturePath");
+		if (lua_isstring(L, -1)) {
+			TexturePath = lua_tostring(L, -1);
+		}
+		lua_pop(L, 1);
+		// If no path, silently accept the texture table
+		if (!TexturePath || !TexturePath[0]) return 0;
+	} else {
+		// Silently ignore other types to prevent errors
+		return 0;
+	}
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -1917,7 +2122,23 @@ static int LF_SetDisabledTexture(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
 	if (lua_isnil(L, 2) || lua_isnone(L, 2)) return 0;
-	const char* TexturePath = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
+
+	const char* TexturePath = "";
+	if (lua_isstring(L, 2)) {
+		TexturePath = lua_tostring(L, 2);
+	} else if (lua_istable(L, 2)) {
+		// Handle texture object tables - extract path if available
+		lua_getfield(L, 2, "__texturePath");
+		if (lua_isstring(L, -1)) {
+			TexturePath = lua_tostring(L, -1);
+		}
+		lua_pop(L, 1);
+		// If no path, silently accept the texture table
+		if (!TexturePath || !TexturePath[0]) return 0;
+	} else {
+		// Silently ignore other types to prevent errors
+		return 0;
+	}
 
 	// Store in Lua table
 	lua_pushstring(L, TexturePath);
@@ -2691,6 +2912,19 @@ static const luaL_Reg FrameMethods[] =
 	{"SetTimeVisible", [](lua_State* L) -> int { return 0; }},
 	{"SetInsertMode", [](lua_State* L) -> int { return 0; }},
 	{"Clear", [](lua_State* L) -> int { return 0; }},
+	{"GetVerticalScrollRange", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"GetHorizontalScrollRange", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"SetScrollRange", [](lua_State* L) -> int { return 0; }},
+	{"GetNumMessages", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"GetNumLinesDisplayed", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"AtTop", [](lua_State* L) -> int { lua_pushboolean(L, 1); return 1; }},
+	{"AtBottom", [](lua_State* L) -> int { lua_pushboolean(L, 1); return 1; }},
+	{"ScrollUp", [](lua_State* L) -> int { return 0; }},
+	{"ScrollDown", [](lua_State* L) -> int { return 0; }},
+	{"ScrollToTop", [](lua_State* L) -> int { return 0; }},
+	{"ScrollToBottom", [](lua_State* L) -> int { return 0; }},
+	{"PageUp", [](lua_State* L) -> int { return 0; }},
+	{"PageDown", [](lua_State* L) -> int { return 0; }},
 
 	// Model/Dress methods
 	{"SetModel", [](lua_State* L) -> int { return 0; }},
@@ -2789,6 +3023,13 @@ void WowLuaApi::RegisterFrameApi(lua_State* L)
 
 	// Register global CreateFrame
 	lua_register(L, "CreateFrame", L_CreateFrame);
+
+	// Register global CreateTexture(name, parent, drawLayer, inherits, subLevel)
+	// WoW API — MoneyFrame.lua and others call this as a global function
+	lua_register(L, "CreateTexture", LF_CreateTextureGlobal);
+
+	// Register global CreateFont() - WoW 3.3.5 API for creating font objects
+	lua_register(L, "CreateFont", LF_CreateFont);
 
 	UE_LOG(LogWowLuaFrame, Log, TEXT("Registered WoW Frame API (CreateFrame + %d methods)"),
 		(int)(sizeof(FrameMethods) / sizeof(FrameMethods[0]) - 1));

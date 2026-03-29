@@ -836,6 +836,9 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
         QUEST_TAG_DAILY = "Daily"
         QUEST_TAG_WEEKLY = "Weekly"
 
+        -- Tutorial globals
+        TUTORIAL_QUEST_TO_WATCH = TUTORIAL_QUEST_TO_WATCH or {}
+
         -- Bit library placeholder table (real functions registered from C)
         bit = bit or {}
 

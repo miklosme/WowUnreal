@@ -18,7 +18,8 @@
 #include "Rendering/SkeletalMeshModel.h"
 #include "Rendering/SkeletalMeshLODModel.h"
 #include "Rendering/SkeletalMeshRenderData.h"
-#include "IMeshBuilderModule.h"
+// TODO: Fix UE 5.7 compatibility
+// #include "IMeshBuilderModule.h"
 #include "Interfaces/ITargetPlatform.h"
 #include "Interfaces/ITargetPlatformManagerModule.h"
 
@@ -242,7 +243,7 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	LODInfo.ReductionSettings.NumOfTrianglesPercentage = 1.0f;
 	LODInfo.ReductionSettings.NumOfVertPercentage = 1.0f;
 
-	// UE 5.7: CreateMeshDescription() removed, create FMeshDescription directly
+	// UE 5.7: Create FMeshDescription locally, then move it to skeletal mesh
 	FMeshDescription MeshDesc;
 	// Register skeletal mesh attributes
 	FSkeletalMeshAttributes SkelAttrs(MeshDesc);
@@ -494,7 +495,16 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 		LOD0Info->BuildSettings.bUseMikkTSpace = false;
 	}
 
-	// Commit the mesh description for LOD 0
+	// Ensure LODModel exists BEFORE CommitMeshDescription is called.
+	// CommitMeshDescription accesses LODModels[InLODIndex] to store bulk data IDs.
+	FSkeletalMeshModel* ImportedModel = SkelMesh->GetImportedModel();
+	if (ImportedModel && !ImportedModel->LODModels.IsValidIndex(0))
+	{
+		ImportedModel->LODModels.Add(new FSkeletalMeshLODModel());
+	}
+
+	// Store the mesh description in the skeletal mesh, then commit it for LOD 0
+	SkelMesh->CreateMeshDescription(0, MoveTemp(MeshDesc));
 	SkelMesh->CommitMeshDescription(0);
 
 	// Set bounds BEFORE Build() so the build pipeline has valid bounds data.
@@ -515,37 +525,10 @@ USkeletalMesh* FWowSkeletalMeshBuilder::CreateSkeletalMesh(const FM2Data& Data, 
 	// CalculateInvRefMatrices must run before Build() so the build has valid inverse reference matrices.
 	SkelMesh->CalculateInvRefMatrices();
 
-	// UE 5.7: Use new render data pipeline with MeshBuilderModule
-	// AllocateResourceForRendering creates FSkeletalMeshRenderData
-	SkelMesh->AllocateResourceForRendering();
-
-	// Get the render data and build it using the MeshBuilderModule
-	FSkeletalMeshRenderData* RenderData = SkelMesh->GetResourceForRendering();
-	if (RenderData)
-	{
-		// Cache derived data for the current platform
-		ITargetPlatform* RunningPlatform = GetTargetPlatformManagerRef().GetRunningTargetPlatform();
-		check(RunningPlatform);
-
-		// Build parameters for the mesh builder
-		FSkeletalMeshBuildParameters BuildParams(SkelMesh, RunningPlatform, 0, false);
-
-		// Use MeshBuilderModule to build the render data from the mesh description
-		IMeshBuilderModule& MeshBuilderModule = IMeshBuilderModule::GetForPlatform(RunningPlatform);
-		if (!MeshBuilderModule.BuildSkeletalMesh(*RenderData, BuildParams))
-		{
-			UE_LOG(LogWowSkelMesh, Error, TEXT("Failed to build skeletal mesh render data for '%s'"), *ModelName);
-			return nullptr;
-		}
-
-		// Initialize rendering resources
-		RenderData->InitResources(false, SkelMesh);
-	}
-	else
-	{
-		UE_LOG(LogWowSkelMesh, Error, TEXT("Failed to allocate render data for skeletal mesh '%s'"), *ModelName);
-		return nullptr;
-	}
+	// Build() converts mesh description to render data and initializes GPU resources.
+	// Requires: mesh description stored via CreateMeshDescription(), InvRefMatrices calculated,
+	// bounds set, and LODInfo configured.
+	SkelMesh->Build();
 
 	UE_LOG(LogWowSkelMesh, Log, TEXT("Created skeletal mesh '%s' with %d verts, %d tris, %d bones"),
 		*ModelName, NumVerts, NumTris, NumBones);

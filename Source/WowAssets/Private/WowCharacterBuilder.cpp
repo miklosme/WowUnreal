@@ -14,6 +14,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 #include "Animation/AnimSequence.h"
 #include "Animation/AnimData/IAnimationDataController.h"
 #include "Animation/Skeleton.h"
@@ -899,7 +900,8 @@ AActor* FWowCharacterBuilder::SpawnM2Actor(UWorld* World, FMpqManager* Mpq, FWow
             SkeletalMesh = FWowSkeletalMeshBuilder::CreateSkeletalMesh(*M2Data, Skeleton, ModelPath, Mpq, Cache, &GeosetInfo, GeosetFilter);
         }
 
-        if (SkeletalMesh)
+        if (SkeletalMesh && SkeletalMesh->GetResourceForRendering() &&
+            SkeletalMesh->GetResourceForRendering()->LODRenderData.Num() > 0)
         {
             // Resolve skin texture
             UTexture2D* SkinTexture = OverrideTexture;

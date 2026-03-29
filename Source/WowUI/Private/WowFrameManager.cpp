@@ -1230,10 +1230,13 @@ void FWowFrameManager::ResolveParentReferences(FWowFrameDef& Def, const FString&
 			Def.DisabledTextureName.ReplaceInline(TEXT("$parent"), *FrameName);
 	}
 
-	// Recursively resolve $parent in child frames
+	// Recursively resolve $parent in child frames.
+	// For anonymous frames (empty name), pass the effective name (ParentName)
+	// so grandchildren can still resolve $parent.
+	const FString& EffectiveName = Def.Name.IsEmpty() ? ParentName : Def.Name;
 	for (FWowFrameDef& Child : Def.Children)
 	{
-		ResolveParentReferences(Child, Def.Name);
+		ResolveParentReferences(Child, EffectiveName);
 	}
 }
 

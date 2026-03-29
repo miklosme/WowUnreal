@@ -1079,7 +1079,7 @@ TArray<FWowXmlDirective> FWowFrameXmlParser::LoadFrameXml(FMpqManager* Mpq)
 		{
 			FWowXmlDirective Dir;
 			Dir.Type = FWowXmlDirective::EType::Script;
-			Dir.FilePath = FString::Printf(TEXT("Interface\\FrameXML\\%s"), *Trimmed);
+			Dir.FilePath = Trimmed; // Just the filename; UIManager prepends the FrameXML path
 			AllDirectives.Add(MoveTemp(Dir));
 		}
 	}
