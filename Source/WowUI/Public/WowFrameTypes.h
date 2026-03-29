@@ -49,6 +49,7 @@ struct FWowAnchor
 struct FWowTextureElement
 {
 	FString Name;
+	FString ParentKey;
 	FString File;
 	float Width = 0.f;
 	float Height = 0.f;
@@ -64,6 +65,7 @@ struct FWowTextureElement
 struct FWowFontStringElement
 {
 	FString Name;
+	FString ParentKey;
 	FString Inherits;
 	FString Text;
 	float Width = 0.f;
@@ -133,6 +135,7 @@ struct WOWUI_API FWowFrameDef
 {
 	EWowFrameType Type = EWowFrameType::Frame;
 	FString Name;
+	FString ParentKey;
 	FString Parent;
 	FString Inherits; // Comma-separated template names
 	bool bVirtual = false;
@@ -157,6 +160,7 @@ struct WOWUI_API FWowFrameDef
 	FString ButtonText;
 	FString NormalTexture, PushedTexture, HighlightTexture, DisabledTexture;
 	FString NormalTextureName, PushedTextureName, HighlightTextureName, DisabledTextureName;
+	FString NormalTextureParentKey, PushedTextureParentKey, HighlightTextureParentKey, DisabledTextureParentKey;
 	float MinValue = 0.f, MaxValue = 100.f, DefaultValue = 0.f;
 	FString Orientation; // HORIZONTAL, VERTICAL (for Slider/StatusBar)
 };

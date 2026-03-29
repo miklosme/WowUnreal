@@ -32,7 +32,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowGameMode, Log, All);
 
 namespace
 {
-void ApplyWowUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
+void ApplyWowViewerUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
 {
     if (!PlayerController)
     {
@@ -258,7 +258,7 @@ void AWowViewerGameMode::SetupDefaultScene(UWorld* World)
                     UIManager->SetRootCanvas(UIRootCanvas);
                     if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
                     {
-                        ApplyWowUiInputMode(PC, CanvasWidget);
+                        ApplyWowViewerUiInputMode(PC, CanvasWidget);
                     }
                     UE_LOG(LogWowGameMode, Log, TEXT("Created root canvas for WoW UI"));
                 }

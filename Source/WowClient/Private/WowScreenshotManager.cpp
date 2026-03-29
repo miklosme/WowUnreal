@@ -12,6 +12,6 @@ FString UWowScreenshotManager::TakeScreenshot()
     IPlatformFile& PF = FPlatformFileManager::Get().GetPlatformFile();
     PF.CreateDirectoryTree(*Dir);
     FString File = FPaths::Combine(Dir, FString::Printf(TEXT("WoW_%s.png"), *FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"))));
-    FScreenshotRequest::RequestScreenshot(File, false, false);
+    FScreenshotRequest::RequestScreenshot(File, true, false);
     return File;
 }

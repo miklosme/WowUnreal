@@ -63,14 +63,14 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowGameplay, Log, All);
 
 namespace
 {
-TSharedPtr<SViewport> GetWowGameViewportWidget()
+TSharedPtr<SWidget> GetWowGameViewportWidget()
 {
 	if (!GEngine || !GEngine->GameViewport)
 	{
 		return nullptr;
 	}
 
-	return GEngine->GameViewport->GetGameViewportWidget();
+	return StaticCastSharedPtr<SWidget>(GEngine->GameViewport->GetGameViewportWidget());
 }
 
 void ApplyWowGameAndUiInputMode(APlayerController* PlayerController, const TSharedPtr<SWidget>& WidgetToFocus)
@@ -111,7 +111,7 @@ bool IsWowUiConsumingKeyboardInput()
 		return false;
 	}
 
-	const TSharedPtr<SViewport> GameViewportWidget = GetWowGameViewportWidget();
+	const TSharedPtr<SWidget> GameViewportWidget = GetWowGameViewportWidget();
 	return !GameViewportWidget.IsValid() || FocusedWidget != GameViewportWidget;
 }
 

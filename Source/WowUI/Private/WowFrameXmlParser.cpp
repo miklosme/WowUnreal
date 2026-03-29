@@ -437,6 +437,7 @@ static FWowTextureElement ParseTextureNode(const FXmlNode* Node)
 {
 	FWowTextureElement Tex;
 	Tex.Name = Node->GetAttribute(TEXT("name"));
+	Tex.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	Tex.File = Node->GetAttribute(TEXT("file"));
 
 	// Size from attributes or child
@@ -477,6 +478,7 @@ static FWowFontStringElement ParseFontStringNode(const FXmlNode* Node)
 {
 	FWowFontStringElement FS;
 	FS.Name = Node->GetAttribute(TEXT("name"));
+	FS.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	FS.Inherits = Node->GetAttribute(TEXT("inherits"));
 	FS.Text = Node->GetAttribute(TEXT("text"));
 
@@ -555,6 +557,29 @@ static TArray<FWowLayer> ParseLayers(const FXmlNode* LayersNode)
 		Result.Add(MoveTemp(Layer));
 	}
 	return Result;
+}
+
+static void AppendInlineTexturesToLayers(FWowFrameDef& Def, TArray<FWowTextureElement>& InlineTextures)
+{
+	if (InlineTextures.Num() == 0)
+	{
+		return;
+	}
+
+	for (FWowLayer& Layer : Def.Layers)
+	{
+		if (Layer.Level == EWowDrawLayer::ARTWORK)
+		{
+			Layer.Textures.Append(InlineTextures);
+			InlineTextures.Reset();
+			return;
+		}
+	}
+
+	FWowLayer InlineLayer;
+	InlineLayer.Level = EWowDrawLayer::ARTWORK;
+	InlineLayer.Textures = MoveTemp(InlineTextures);
+	Def.Layers.Add(MoveTemp(InlineLayer));
 }
 
 // ─── Helper: parse Scripts ─────────────────────────────────────────────────────
@@ -645,6 +670,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	FWowFrameDef Def;
 	Def.Type = FWowFrameXmlParser::ParseFrameType(UTF8_TO_TCHAR(Node.name()));
 	Def.Name = UTF8_TO_TCHAR(Node.attribute("name").as_string());
+	Def.ParentKey = UTF8_TO_TCHAR(Node.attribute("parentKey").as_string());
 	Def.Parent = UTF8_TO_TCHAR(Node.attribute("parent").as_string());
 	Def.Inherits = UTF8_TO_TCHAR(Node.attribute("inherits").as_string());
 	Def.bVirtual = Node.attribute("virtual").as_bool(false);
@@ -659,6 +685,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.MinValue = Node.attribute("minValue").as_float(0.0f);
 	Def.MaxValue = Node.attribute("maxValue").as_float(100.0f);
 	Def.DefaultValue = Node.attribute("defaultValue").as_float(0.0f);
+	TArray<FWowTextureElement> InlineTextures;
 
 	// Parse child elements
 	for (pugi::xml_node Child = Node.first_child(); Child; Child = Child.next_sibling())
@@ -731,6 +758,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 					{
 						FWowTextureElement T;
 						T.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
+						T.ParentKey = UTF8_TO_TCHAR(Tex.attribute("parentKey").as_string());
 						T.File = UTF8_TO_TCHAR(Tex.attribute("file").as_string());
 						T.bSetAllPoints = Tex.attribute("setAllPoints").as_bool(false);
 						T.bHidden = Tex.attribute("hidden").as_bool(false);
@@ -815,6 +843,7 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 					{
 						FWowFontStringElement FS;
 						FS.Name = UTF8_TO_TCHAR(Tex.attribute("name").as_string());
+						FS.ParentKey = UTF8_TO_TCHAR(Tex.attribute("parentKey").as_string());
 						FS.Text = UTF8_TO_TCHAR(Tex.attribute("text").as_string());
 						FS.Inherits = UTF8_TO_TCHAR(Tex.attribute("inherits").as_string());
 						FS.JustifyH = UTF8_TO_TCHAR(Tex.attribute("justifyH").as_string("LEFT"));
@@ -901,7 +930,12 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 				FWowScriptHandler SH;
 				SH.Event = UTF8_TO_TCHAR(Script.name());
 				SH.Code = UTF8_TO_TCHAR(Script.child_value());
-				if (!SH.Code.IsEmpty())
+				SH.File = UTF8_TO_TCHAR(Script.attribute("function").as_string());
+				if (SH.File.IsEmpty())
+				{
+					SH.File = UTF8_TO_TCHAR(Script.attribute("file").as_string());
+				}
+				if (!SH.Code.IsEmpty() || !SH.File.IsEmpty())
 				{
 					Def.Scripts.Add(SH);
 				}
@@ -913,6 +947,17 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 			{
 				if (ChildFrame.type() != pugi::node_element) continue;
 				Def.Children.Add(ParseFrameNode_Pugi(ChildFrame));
+			}
+		}
+		else if (Tag == TEXT("ScrollChild"))
+		{
+			for (pugi::xml_node ChildFrame = Child.first_child(); ChildFrame; ChildFrame = ChildFrame.next_sibling())
+			{
+				if (ChildFrame.type() != pugi::node_element) continue;
+				if (IsFrameTypeTag(UTF8_TO_TCHAR(ChildFrame.name())))
+				{
+					Def.Children.Add(ParseFrameNode_Pugi(ChildFrame));
+				}
 			}
 		}
 		else if (Tag == TEXT("Backdrop"))
@@ -931,21 +976,78 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 		{
 			Def.NormalTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
 			Def.NormalTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			Def.NormalTextureParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
 		}
 		else if (Tag == TEXT("PushedTexture"))
 		{
 			Def.PushedTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
 			Def.PushedTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			Def.PushedTextureParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
 		}
 		else if (Tag == TEXT("HighlightTexture"))
 		{
 			Def.HighlightTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
 			Def.HighlightTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			Def.HighlightTextureParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
 		}
 		else if (Tag == TEXT("DisabledTexture"))
 		{
 			Def.DisabledTexture = UTF8_TO_TCHAR(Child.attribute("file").as_string());
 			Def.DisabledTextureName = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			Def.DisabledTextureParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
+		}
+		else if (Tag == TEXT("ThumbTexture"))
+		{
+			FWowTextureElement ThumbTexture;
+			ThumbTexture.Name = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+			ThumbTexture.ParentKey = UTF8_TO_TCHAR(Child.attribute("parentKey").as_string());
+			ThumbTexture.File = UTF8_TO_TCHAR(Child.attribute("file").as_string());
+			ThumbTexture.bSetAllPoints = Child.attribute("setAllPoints").as_bool(false);
+			ThumbTexture.bHidden = Child.attribute("hidden").as_bool(false);
+
+			pugi::xml_node ThumbSize = Child.child("Size");
+			if (ThumbSize)
+			{
+				pugi::xml_node ThumbAbsDim = ThumbSize.child("AbsDimension");
+				if (ThumbAbsDim)
+				{
+					ThumbTexture.Width = ThumbAbsDim.attribute("x").as_float(0.0f);
+					ThumbTexture.Height = ThumbAbsDim.attribute("y").as_float(0.0f);
+				}
+			}
+
+			pugi::xml_node ThumbAnchors = Child.child("Anchors");
+			if (ThumbAnchors)
+			{
+				for (pugi::xml_node ThumbAnchor = ThumbAnchors.child("Anchor"); ThumbAnchor; ThumbAnchor = ThumbAnchor.next_sibling("Anchor"))
+				{
+					FWowAnchor A;
+					A.Point = FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(ThumbAnchor.attribute("point").as_string()));
+					A.RelativeTo = UTF8_TO_TCHAR(ThumbAnchor.attribute("relativeTo").as_string());
+					const char* ThumbRelPoint = ThumbAnchor.attribute("relativePoint").as_string("");
+					A.RelativePoint = (ThumbRelPoint[0] != '\0')
+						? FWowFrameXmlParser::ParseAnchorPoint(UTF8_TO_TCHAR(ThumbRelPoint))
+						: A.Point;
+					pugi::xml_node ThumbOffset = ThumbAnchor.child("Offset");
+					if (ThumbOffset)
+					{
+						pugi::xml_node ThumbOffAbsDim = ThumbOffset.child("AbsDimension");
+						if (ThumbOffAbsDim)
+						{
+							A.OffsetX = ThumbOffAbsDim.attribute("x").as_float(0.0f);
+							A.OffsetY = ThumbOffAbsDim.attribute("y").as_float(0.0f);
+						}
+						else
+						{
+							A.OffsetX = ThumbOffset.attribute("x").as_float(0.0f);
+							A.OffsetY = ThumbOffset.attribute("y").as_float(0.0f);
+						}
+					}
+					ThumbTexture.Anchors.Add(A);
+				}
+			}
+
+			InlineTextures.Add(MoveTemp(ThumbTexture));
 		}
 		else if (Tag == TEXT("ButtonText"))
 		{
@@ -953,6 +1055,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 			Def.ButtonText = FS ? UTF8_TO_TCHAR(FS.attribute("text").as_string()) : UTF8_TO_TCHAR(Child.child_value());
 		}
 	}
+
+	AppendInlineTexturesToLayers(Def, InlineTextures);
 
 	return Def;
 }
@@ -965,8 +1069,10 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 	FWowFrameDef Def;
 	Def.Type = FWowFrameXmlParser::ParseFrameType(Node->GetTag());
 	Def.Name = Node->GetAttribute(TEXT("name"));
+	Def.ParentKey = Node->GetAttribute(TEXT("parentKey"));
 	Def.Parent = Node->GetAttribute(TEXT("parent"));
 	Def.Inherits = Node->GetAttribute(TEXT("inherits"));
+	TArray<FWowTextureElement> InlineTextures;
 
 	FString Virtual = Node->GetAttribute(TEXT("virtual"));
 	Def.bVirtual = Virtual.Equals(TEXT("true"), ESearchCase::IgnoreCase);
@@ -1032,6 +1138,16 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 				}
 			}
 		}
+		else if (Tag.Equals(TEXT("ScrollChild"), ESearchCase::IgnoreCase))
+		{
+			for (const FXmlNode* ChildFrame = Child->GetFirstChildNode(); ChildFrame; ChildFrame = ChildFrame->GetNextNode())
+			{
+				if (IsFrameTypeTag(ChildFrame->GetTag()))
+				{
+					Def.Children.Add(ParseFrameNode(ChildFrame));
+				}
+			}
+		}
 		else if (Tag.Equals(TEXT("ButtonText"), ESearchCase::IgnoreCase))
 		{
 			// ButtonText can have a FontString child or just text content
@@ -1048,20 +1164,34 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 		else if (Tag.Equals(TEXT("NormalTexture"), ESearchCase::IgnoreCase))
 		{
 			Def.NormalTexture = Child->GetAttribute(TEXT("file"));
+			Def.NormalTextureName = Child->GetAttribute(TEXT("name"));
+			Def.NormalTextureParentKey = Child->GetAttribute(TEXT("parentKey"));
 		}
 		else if (Tag.Equals(TEXT("PushedTexture"), ESearchCase::IgnoreCase))
 		{
 			Def.PushedTexture = Child->GetAttribute(TEXT("file"));
+			Def.PushedTextureName = Child->GetAttribute(TEXT("name"));
+			Def.PushedTextureParentKey = Child->GetAttribute(TEXT("parentKey"));
 		}
 		else if (Tag.Equals(TEXT("HighlightTexture"), ESearchCase::IgnoreCase))
 		{
 			Def.HighlightTexture = Child->GetAttribute(TEXT("file"));
+			Def.HighlightTextureName = Child->GetAttribute(TEXT("name"));
+			Def.HighlightTextureParentKey = Child->GetAttribute(TEXT("parentKey"));
 		}
 		else if (Tag.Equals(TEXT("DisabledTexture"), ESearchCase::IgnoreCase))
 		{
 			Def.DisabledTexture = Child->GetAttribute(TEXT("file"));
+			Def.DisabledTextureName = Child->GetAttribute(TEXT("name"));
+			Def.DisabledTextureParentKey = Child->GetAttribute(TEXT("parentKey"));
+		}
+		else if (Tag.Equals(TEXT("ThumbTexture"), ESearchCase::IgnoreCase))
+		{
+			InlineTextures.Add(ParseTextureNode(Child));
 		}
 	}
+
+	AppendInlineTexturesToLayers(Def, InlineTextures);
 
 	return Def;
 }

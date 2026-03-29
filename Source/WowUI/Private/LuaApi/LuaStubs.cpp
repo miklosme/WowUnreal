@@ -13,6 +13,7 @@
 #include "Mpq/MpqManager.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+#include "UnrealClient.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Misc/App.h"
 // WowAudioManager is in WowWorld module — not directly accessible from WowUI
@@ -2217,42 +2218,151 @@ static int L_GetFramerate(lua_State* L)
 // ─── CVar system ────────────────────────────────────────────────────────────────
 static TMap<FString, FString> CVarStorage;
 
+static FString NormalizeCVarName(const FString& Name)
+{
+    return Name.ToLower();
+}
+
+static FString GetDefaultCVarValue(const FString& Name)
+{
+    static const TMap<FString, FString> ExplicitDefaults = {
+        { TEXT("chatstyle"), TEXT("classic") },
+        { TEXT("conversationmode"), TEXT("inline") },
+        { TEXT("showtimestamps"), TEXT("none") },
+        { TEXT("locale"), TEXT("enUS") },
+        { TEXT("targetoftargetmode"), TEXT("5") },
+        { TEXT("displayworldpvpobjectives"), TEXT("2") },
+        { TEXT("threatwarning"), TEXT("0") },
+        { TEXT("combattextfloatmode"), TEXT("1") },
+        { TEXT("camerasmoothstyle"), TEXT("0") },
+        { TEXT("camerasmoothtrackingstyle"), TEXT("0") },
+        { TEXT("enablevoicechat"), TEXT("0") },
+        { TEXT("enablemicrophone"), TEXT("0") },
+        { TEXT("voicechatmode"), TEXT("0") },
+        { TEXT("pushtotalkbutton"), TEXT("") },
+        { TEXT("pushtotalksound"), TEXT("1") },
+        { TEXT("voiceactivationsensitivity"), TEXT("0.5") },
+        { TEXT("sound_outputdriverindex"), TEXT("0") },
+        { TEXT("sound_voicechatinputdriverindex"), TEXT("0") },
+        { TEXT("sound_voicechatoutputdriverindex"), TEXT("0") },
+        { TEXT("sound_numchannels"), TEXT("32") },
+        { TEXT("sound_outputquality"), TEXT("1") },
+        { TEXT("sound_mastervolume"), TEXT("1") },
+        { TEXT("sound_musicvolume"), TEXT("1") },
+        { TEXT("sound_ambiencevolume"), TEXT("1") },
+        { TEXT("sound_sfxvolume"), TEXT("1") },
+        { TEXT("chatsoundvolume"), TEXT("1") },
+        { TEXT("chatmusicvolume"), TEXT("1") },
+        { TEXT("chatambiencevolume"), TEXT("1") },
+        { TEXT("inboundchatvolume"), TEXT("1") },
+        { TEXT("outboundchatvolume"), TEXT("1") },
+        { TEXT("sound_enableallsound"), TEXT("1") },
+        { TEXT("sound_enablemusic"), TEXT("1") },
+        { TEXT("sound_enableambience"), TEXT("1") },
+        { TEXT("sound_enablesfx"), TEXT("1") },
+        { TEXT("sound_enableerrorspeech"), TEXT("1") },
+        { TEXT("sound_enableemotesounds"), TEXT("1") },
+        { TEXT("sound_enablepetsounds"), TEXT("1") },
+        { TEXT("sound_enablehardware"), TEXT("1") },
+        { TEXT("sound_enablereverb"), TEXT("1") },
+        { TEXT("sound_enabledspeffects"), TEXT("1") },
+        { TEXT("sound_enablesoftwarehrtf"), TEXT("0") },
+        { TEXT("sound_enablesoundwhengameisinbg"), TEXT("0") },
+        { TEXT("sound_listeneratcharacter"), TEXT("0") },
+        { TEXT("sound_zonemusicnodelay"), TEXT("0") },
+    };
+
+    const FString Normalized = NormalizeCVarName(Name);
+    if (const FString* Explicit = ExplicitDefaults.Find(Normalized))
+    {
+        return *Explicit;
+    }
+
+    if (Normalized.Contains(TEXT("driverindex")))
+    {
+        return TEXT("0");
+    }
+
+    if (Normalized.Contains(TEXT("volume")))
+    {
+        return TEXT("1");
+    }
+
+    if (Normalized.Contains(TEXT("style")) || Normalized.Contains(TEXT("mode")))
+    {
+        return TEXT("0");
+    }
+
+    if (Normalized.StartsWith(TEXT("sound_enable")))
+    {
+        return TEXT("1");
+    }
+
+    if (Normalized.StartsWith(TEXT("show"))
+        || Normalized.StartsWith(TEXT("display"))
+        || Normalized.StartsWith(TEXT("auto"))
+        || Normalized.StartsWith(TEXT("enable"))
+        || Normalized.StartsWith(TEXT("nameplate"))
+        || Normalized.StartsWith(TEXT("unitname"))
+        || Normalized.StartsWith(TEXT("fct"))
+        || Normalized.StartsWith(TEXT("camera"))
+        || Normalized.StartsWith(TEXT("chat"))
+        || Normalized.StartsWith(TEXT("threat"))
+        || Normalized.StartsWith(TEXT("combat"))
+        || Normalized.StartsWith(TEXT("mouse"))
+        || Normalized.StartsWith(TEXT("movie"))
+        || Normalized.StartsWith(TEXT("loot"))
+        || Normalized.StartsWith(TEXT("guild"))
+        || Normalized.StartsWith(TEXT("showtoast")))
+    {
+        return TEXT("0");
+    }
+
+    return TEXT("0");
+}
+
+static FString GetCurrentOrDefaultCVarValue(const FString& Name)
+{
+    const FString Normalized = NormalizeCVarName(Name);
+    if (const FString* Value = CVarStorage.Find(Normalized))
+    {
+        return *Value;
+    }
+
+    return GetDefaultCVarValue(Name);
+}
+
 static int L_SetCVar(lua_State* L)
 {
     const char* name = luaL_checkstring(L, 1);
     const char* value = luaL_checkstring(L, 2);
-    CVarStorage.Add(UTF8_TO_TCHAR(name), UTF8_TO_TCHAR(value));
+    CVarStorage.Add(NormalizeCVarName(UTF8_TO_TCHAR(name)), UTF8_TO_TCHAR(value));
     return 0;
 }
 
 static int L_GetCVar(lua_State* L)
 {
     const char* name = luaL_checkstring(L, 1);
-    FString Key = UTF8_TO_TCHAR(name);
-    if (FString* Value = CVarStorage.Find(Key))
-    {
-        FTCHARToUTF8 Conv(**Value);
-        lua_pushstring(L, Conv.Get());
-    }
-    else
-    {
-        lua_pushnil(L);
-    }
+    const FString Value = GetCurrentOrDefaultCVarValue(UTF8_TO_TCHAR(name));
+    FTCHARToUTF8 Conv(*Value);
+    lua_pushstring(L, Conv.Get());
     return 1;
 }
 
 static int L_GetCVarBool(lua_State* L)
 {
     const char* name = luaL_checkstring(L, 1);
-    FString Key = UTF8_TO_TCHAR(name);
-    if (FString* Value = CVarStorage.Find(Key))
-    {
-        lua_pushboolean(L, (*Value).Equals(TEXT("1")) || Value->ToBool() ? 1 : 0);
-    }
-    else
-    {
-        lua_pushboolean(L, 0);
-    }
+    const FString Value = GetCurrentOrDefaultCVarValue(UTF8_TO_TCHAR(name));
+    lua_pushboolean(L, Value.Equals(TEXT("1")) || Value.ToBool() ? 1 : 0);
+    return 1;
+}
+
+static int L_GetCVarDefault(lua_State* L)
+{
+    const char* name = luaL_checkstring(L, 1);
+    const FString Value = GetDefaultCVarValue(UTF8_TO_TCHAR(name));
+    FTCHARToUTF8 Conv(*Value);
+    lua_pushstring(L, Conv.Get());
     return 1;
 }
 
@@ -2462,15 +2572,37 @@ static int L_BreakUpLargeNumbers(lua_State* L)
     return 1;
 }
 static TArray<FWowTocData> LoadedAddons;
+static TArray<FString> LoadedAddonNamesByIndex;
+static TSet<FString> RuntimeLoadedAddons;
+static FMpqManager* AddonLoaderMpq = nullptr;
+static FWowLuaVM* AddonLoaderLuaVM = nullptr;
+static FWowFrameManager* AddonLoaderFrameManager = nullptr;
+static FWowEventSystem* AddonLoaderEventSystem = nullptr;
 
 // Helper function to update the loaded addons list
 namespace WowLuaApi
 {
+    void SetAddonLoaderContext(FMpqManager* Mpq, FWowLuaVM* LuaVM, FWowFrameManager* FrameManager, FWowEventSystem* EventSystem)
+    {
+        AddonLoaderMpq = Mpq;
+        AddonLoaderLuaVM = LuaVM;
+        AddonLoaderFrameManager = FrameManager;
+        AddonLoaderEventSystem = EventSystem;
+        RuntimeLoadedAddons.Empty();
+        UpdateLoadedAddons(Mpq);
+    }
+
+    void MarkAddonLoaded(const FString& AddonName)
+    {
+        RuntimeLoadedAddons.Add(AddonName.ToLower());
+    }
+
     void UpdateLoadedAddons(FMpqManager* Mpq)
     {
         if (!Mpq) return;
 
         LoadedAddons.Empty();
+        LoadedAddonNamesByIndex.Empty();
         TArray<FString> AddonNames = FWowAddonLoader::DiscoverAddons(Mpq);
 
         for (const FString& AddonName : AddonNames)
@@ -2483,6 +2615,7 @@ namespace WowLuaApi
                 if (TocInfo.Title.IsEmpty())
                     TocInfo.Title = AddonName;
                 LoadedAddons.Add(TocInfo);
+                LoadedAddonNamesByIndex.Add(AddonName);
             }
         }
     }
@@ -2501,21 +2634,10 @@ static int L_GetAddOnInfo(lua_State* L)
     // GetAddOnInfo(index) → name, title, notes, loadable, reason, security, newVersion
     int32 Index = static_cast<int32>(luaL_checknumber(L, 1)) - 1; // Convert 1-based to 0-based
 
-    if (Index >= 0 && Index < LoadedAddons.Num())
+    if (Index >= 0 && Index < LoadedAddons.Num() && Index < LoadedAddonNamesByIndex.Num())
     {
         const FWowTocData& Addon = LoadedAddons[Index];
-
-        // Extract addon name from first file path or use title
-        FString AddonName = Addon.Title;
-        if (!Addon.Files.IsEmpty())
-        {
-            FString FirstFile = Addon.Files[0];
-            int32 SlashIdx = INDEX_NONE;
-            if (FirstFile.FindLastChar('/', SlashIdx))
-            {
-                AddonName = FirstFile.Left(SlashIdx);
-            }
-        }
+        const FString& AddonName = LoadedAddonNamesByIndex[Index];
 
         lua_pushstring(L, TCHAR_TO_UTF8(*AddonName)); // name
         lua_pushstring(L, TCHAR_TO_UTF8(*Addon.Title)); // title
@@ -2542,22 +2664,66 @@ static int L_IsAddOnLoaded(lua_State* L)
     const char* AddonName = luaL_checkstring(L, 1);
     FString AddonNameStr = UTF8_TO_TCHAR(AddonName);
 
-    // Check if addon is in loaded list
-    for (const FWowTocData& Addon : LoadedAddons)
-    {
-        if (Addon.Title.Equals(AddonNameStr, ESearchCase::IgnoreCase))
-        {
-            lua_pushboolean(L, !Addon.bDisabled ? 1 : 0);
-            return 1;
-        }
-    }
-
-    lua_pushboolean(L, 0);
+    lua_pushboolean(L, RuntimeLoadedAddons.Contains(AddonNameStr.ToLower()) ? 1 : 0);
     return 1;
 }
 STUB_RETURN_NONE(EnableAddOn)
 STUB_RETURN_NONE(DisableAddOn)
-STUB_RETURN_NONE(LoadAddOn)
+static int L_LoadAddOn(lua_State* L)
+{
+    FString AddonName;
+    if (lua_isnumber(L, 1))
+    {
+        int32 Index = static_cast<int32>(lua_tonumber(L, 1)) - 1;
+        if (Index >= 0 && Index < LoadedAddonNamesByIndex.Num())
+        {
+            AddonName = LoadedAddonNamesByIndex[Index];
+        }
+    }
+    else
+    {
+        AddonName = UTF8_TO_TCHAR(luaL_checkstring(L, 1));
+    }
+
+    if (AddonName.IsEmpty())
+    {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "NOT_FOUND");
+        return 2;
+    }
+
+    if (RuntimeLoadedAddons.Contains(AddonName.ToLower()))
+    {
+        lua_pushboolean(L, 1);
+        lua_pushnil(L);
+        return 2;
+    }
+
+    if (!AddonLoaderMpq || !AddonLoaderLuaVM)
+    {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "MISSING_CONTEXT");
+        return 2;
+    }
+
+    const bool bLoaded = FWowAddonLoader::LoadAddon(
+        AddonName,
+        AddonLoaderMpq,
+        AddonLoaderLuaVM,
+        AddonLoaderFrameManager,
+        AddonLoaderEventSystem);
+
+    lua_pushboolean(L, bLoaded ? 1 : 0);
+    if (bLoaded)
+    {
+        lua_pushnil(L);
+    }
+    else
+    {
+        lua_pushstring(L, "FAILED");
+    }
+    return 2;
+}
 static int L_GetNumBindings(lua_State* L)
 {
     // Return basic number of hardcoded bindings
@@ -3491,7 +3657,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "IsLinuxClient", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
 
     // CVar extended
-    lua_register(L, "GetCVarDefault", [](lua_State* L2) -> int { lua_pushstring(L2, "0"); return 1; });
+    lua_register(L, "GetCVarDefault", L_GetCVarDefault);
 
     // Video/Audio options stubs
     lua_register(L, "GetCurrentMultisampleFormat", [](lua_State* L2) -> int { lua_pushnumber(L2, 1); return 1; });
@@ -5188,14 +5354,19 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         UE_LOG(LogWowLuaStub, Verbose, TEXT("ChatEdit_SetLastTellTarget: %s"), UTF8_TO_TCHAR(Name));
         return 0;
     });
-    lua_register(L, "FCF_GetCurrentChatFrame", [](lua_State* L2) -> int {
-        lua_getglobal(L2, "ChatFrame1");
-        return 1;
-    });
-    lua_register(L, "FCFDock_GetChatFrames", [](lua_State* L2) -> int {
-        lua_newtable(L2);
-        return 1;
-    });
+	    lua_register(L, "FCF_GetCurrentChatFrame", [](lua_State* L2) -> int {
+	        lua_getglobal(L2, "ChatFrame1");
+	        return 1;
+	    });
+	    lua_register(L, "SetChatWindowShown", [](lua_State* L2) -> int {
+	        luaL_optinteger(L2, 1, 1);
+	        lua_toboolean(L2, 2);
+	        return 0;
+	    });
+	    lua_register(L, "FCFDock_GetChatFrames", [](lua_State* L2) -> int {
+	        lua_newtable(L2);
+	        return 1;
+	    });
     lua_register(L, "GetVoiceChatMode", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
 
     // Critical functions needed by FrameXML Lua files during load

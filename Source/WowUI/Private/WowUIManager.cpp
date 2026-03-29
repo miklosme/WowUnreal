@@ -16,6 +16,54 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowUIManager, Log, All);
 
+namespace WowLuaApi
+{
+	void SetAddonLoaderContext(FMpqManager* Mpq, FWowLuaVM* LuaVM, FWowFrameManager* FrameManager, FWowEventSystem* EventSystem);
+}
+
+namespace
+{
+FString ResolveFrameXmlAssetPath(const FString& InPath)
+{
+	FString ResolvedPath = InPath;
+	ResolvedPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+	if (!ResolvedPath.StartsWith(TEXT("Interface\\"), ESearchCase::IgnoreCase))
+	{
+		ResolvedPath = TEXT("Interface\\FrameXML\\") + ResolvedPath;
+	}
+
+	return ResolvedPath;
+}
+
+bool TryReadUiAssetFile(FMpqManager* Mpq, const FString& InPath, TArray<uint8>& OutData)
+{
+	if (!Mpq)
+	{
+		return false;
+	}
+
+	FString NormalizedPath = InPath;
+	NormalizedPath.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+	TArray<FString> Candidates;
+	Candidates.AddUnique(NormalizedPath);
+	Candidates.AddUnique(NormalizedPath.ToLower());
+	Candidates.AddUnique(NormalizedPath.Replace(TEXT("\\"), TEXT("/")));
+	Candidates.AddUnique(NormalizedPath.ToLower().Replace(TEXT("\\"), TEXT("/")));
+
+	for (const FString& Candidate : Candidates)
+	{
+		if (Mpq->ReadFile(Candidate, OutData))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+}
+
 UWowUIManager::UWowUIManager()
 {
 }
@@ -109,9 +157,17 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	FrameManager->SetMpqManager(Mpq);
 	FrameManager->SetAssetCache(AssetCache);
 
+	if (FrameManager->FindFrame(TEXT("UIParent")) == -1)
+	{
+		UE_LOG(LogWowUIManager, Error, TEXT("Cannot load UI before SetRootCanvas initializes the FrameManager/UIParent"));
+		return;
+	}
+
+	WowLuaApi::SetAddonLoaderContext(Mpq, LuaVM.Get(), FrameManager.Get(), EventSystem.Get());
+
 	// 1. Load FrameXML (Interface/FrameXML/FrameXML.toc) — the core UI system
 	TArray<FWowXmlDirective> FrameXmlDirectives = FWowFrameXmlParser::LoadFrameXml(Mpq);
-	UE_LOG(LogWowUIManager, Warning, TEXT("LoadFrameXml returned %d directives"), FrameXmlDirectives.Num());
+	UE_LOG(LogWowUIManager, Log, TEXT("LoadFrameXml returned %d directives"), FrameXmlDirectives.Num());
 
 	int32 FrameCount = 0;
 	for (const FWowXmlDirective& Dir : FrameXmlDirectives)
@@ -122,11 +178,15 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 		{
 			if (!Dir.FilePath.IsEmpty())
 			{
-				FString ScriptPath = TEXT("Interface\\FrameXML\\") + Dir.FilePath;
+				const FString ScriptPath = ResolveFrameXmlAssetPath(Dir.FilePath);
 				TArray<uint8> ScriptData;
-				if (Mpq->ReadFile(ScriptPath, ScriptData))
+				if (TryReadUiAssetFile(Mpq, ScriptPath, ScriptData))
 				{
 					LuaVM->ExecuteBuffer(ScriptData, ScriptPath);
+				}
+				else
+				{
+					UE_LOG(LogWowUIManager, Warning, TEXT("Failed to load FrameXML script: %s"), *ScriptPath);
 				}
 			}
 			break;
@@ -141,35 +201,8 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 			break;
 		}
 		case FWowXmlDirective::EType::Include:
-		{
-			if (!Dir.FilePath.IsEmpty())
-			{
-				FString IncPath = TEXT("Interface\\FrameXML\\") + Dir.FilePath;
-				TArray<uint8> IncData;
-				if (Mpq->ReadFile(IncPath, IncData))
-				{
-					TArray<FWowXmlDirective> IncDirs = FWowFrameXmlParser::ParseXml(IncData, IncPath);
-					for (const FWowXmlDirective& IncDir : IncDirs)
-					{
-						if (IncDir.Type == FWowXmlDirective::EType::Script && !IncDir.FilePath.IsEmpty())
-						{
-							FString IncScriptPath = TEXT("Interface\\FrameXML\\") + IncDir.FilePath;
-							TArray<uint8> ScriptData;
-							if (Mpq->ReadFile(IncScriptPath, ScriptData))
-							{
-								LuaVM->ExecuteBuffer(ScriptData, IncScriptPath);
-							}
-						}
-						else if (IncDir.Type == FWowXmlDirective::EType::Frame && FrameManager)
-						{
-							FrameManager->CreateFrame(IncDir.FrameDef);
-							FrameCount++;
-						}
-					}
-				}
-			}
+			// LoadFrameXml now expands includes recursively; keep this as a no-op guard.
 			break;
-		}
 		case FWowXmlDirective::EType::Font:
 		{
 			if (FontManager && !Dir.FontName.IsEmpty())
@@ -185,14 +218,18 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	UE_LOG(LogWowUIManager, Log, TEXT("FrameXML: processed %d directives, created %d frames"),
 		FrameXmlDirectives.Num(), FrameCount);
 
-	// 2. Fire VARIABLES_LOADED before addons load (WoW 3.3.5 boot order)
-	EventSystem->FireEvent(TEXT("VARIABLES_LOADED"));
-
-	// 3. Load addons (Blizzard + user addons) in dependency order
+	// 2. Load startup addons (Blizzard + user addons) in dependency order.
+	// Each addon fires ADDON_LOADED(addonName) as it finishes loading.
 	// Each addon fires ADDON_LOADED(addonName) after loading
 	FWowAddonLoader::LoadAllAddons(Mpq, LuaVM.Get(), FrameManager.Get(), EventSystem.Get());
 
-	// 4. Fire login events in correct WoW order
+	if (FrameManager)
+	{
+		FrameManager->SyncChildVisibility();
+	}
+
+	// 3. Fire post-addon startup events in WoW order.
+	EventSystem->FireEvent(TEXT("VARIABLES_LOADED"));
 	EventSystem->FireEvent(TEXT("PLAYER_LOGIN"));
 	EventSystem->FireEvent(TEXT("PLAYER_ENTERING_WORLD"));
 
@@ -204,7 +241,6 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	// Post-load: sync visibility (hide children of parents that got hidden by OnLoad)
 	if (FrameManager)
 	{
-		FrameManager->SyncChildVisibility();
 		FrameManager->DebugDumpLayout();
 	}
 }

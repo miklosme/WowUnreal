@@ -55,7 +55,7 @@ bool SaveViewportPng(const FString& OutputPath)
     FString AbsPath = FPaths::ConvertRelativePathToFull(OutputPath);
 
     // Use UE's built-in screenshot API — no platform-specific tools needed
-    FScreenshotRequest::RequestScreenshot(AbsPath, false, false);
+    FScreenshotRequest::RequestScreenshot(AbsPath, true, false);
 
     UE_LOG(LogWowWorld, Log, TEXT("Screenshot requested via FScreenshotRequest: %s"), *AbsPath);
     return true; // Screenshot is async; file appears after next frame render

@@ -6,7 +6,11 @@ class UCanvasPanel;
 class UWidget;
 class UUserWidget;
 class UImage;
+class UButton;
+class UEditableTextBox;
 class UProgressBar;
+class USlider;
+class UTextBlock;
 class FWowEventSystem;
 class FWowFontManager;
 class FMpqManager;
@@ -91,6 +95,29 @@ public:
 	/** Load a BLP texture from MPQ and cache it */
 	UTexture2D* LoadUITexture(const FString& TexturePath);
 
+	/** Get the UButton child widget for a frame (nullptr if not found or invalid) */
+	UButton* GetButtonWidget(int64 Handle) const;
+
+	/** Get the UEditableTextBox child widget for a frame (nullptr if not found or invalid) */
+	UEditableTextBox* GetEditBoxWidget(int64 Handle) const;
+
+	/** Get the USlider child widget for a frame (nullptr if not found or invalid) */
+	USlider* GetSliderWidget(int64 Handle) const;
+
+	/** Get the primary text widget associated with a frame (button label, etc.) */
+	UTextBlock* GetPrimaryTextWidget(int64 Handle) const;
+
+	/** Get a named FontString's UTextBlock widget */
+	UTextBlock* GetNamedFontString(const FString& Name) const;
+
+	/** Runtime input flags used by the UI hit-test and controller bridge */
+	void SetFrameMouseEnabled(int64 Handle, bool bEnabled);
+	void SetFrameKeyboardEnabled(int64 Handle, bool bEnabled);
+	void SetFrameMouseWheelEnabled(int64 Handle, bool bEnabled);
+	bool IsFrameMouseEnabled(int64 Handle) const;
+	bool IsFrameKeyboardEnabled(int64 Handle) const;
+	bool IsFrameMouseWheelEnabled(int64 Handle) const;
+
 	/** Create a simple test frame for debugging */
 	int64 CreateDebugFrame(const FString& Name, float Width, float Height, float X = 0.f, float Y = 0.f);
 
@@ -123,6 +150,9 @@ private:
 		FWowFrameDef Def;
 		TWeakObjectPtr<UWidget> Widget;
 		int64 ParentHandle = -1;
+		bool bMouseEnabled = false;
+		bool bKeyboardEnabled = false;
+		bool bMouseWheelEnabled = false;
 	};
 
 	TMap<int64, FFrameEntry> Frames;
@@ -149,8 +179,17 @@ private:
 	/** Named texture regions (from XML Texture name="Foo") → UImage widget */
 	TMap<FString, TWeakObjectPtr<UImage>> NamedTextureWidgets;
 
+	/** Named fontstrings (from XML FontString name="Foo") → UTextBlock widget */
+	TMap<FString, TWeakObjectPtr<UTextBlock>> NamedFontStringWidgets;
+
 	/** StatusBar frames → UProgressBar child widgets */
 	TMap<int64, TWeakObjectPtr<UProgressBar>> StatusBarWidgets;
+
+	/** Interactive control widgets owned by frame containers */
+	TMap<int64, TWeakObjectPtr<UButton>> ButtonWidgets;
+	TMap<int64, TWeakObjectPtr<UEditableTextBox>> EditBoxWidgets;
+	TMap<int64, TWeakObjectPtr<USlider>> SliderWidgets;
+	TMap<int64, TWeakObjectPtr<UTextBlock>> PrimaryTextWidgets;
 
 public:
 	/** Get named texture region's UImage widget */
@@ -181,7 +220,7 @@ private:
 	UWidget* CreateWidgetForFrame(const FWowFrameDef& Def, int64 Handle, int64 ParentHandle = -1);
 
 	/** Create layer content (textures and fontstrings) inside a frame's canvas */
-	void CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def);
+	void CreateLayerContent(UCanvasPanel* Container, const FWowFrameDef& Def, int64 OwnerHandle);
 
 	/** Resolve template inheritance for a frame definition */
 	FWowFrameDef ResolveInherits(const FWowFrameDef& Def) const;

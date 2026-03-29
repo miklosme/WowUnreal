@@ -5,8 +5,202 @@
 #include "WowSavedVariables.h"
 #include "WowFrameManager.h"
 #include "WowEventSystem.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowAddon, Log, All);
+
+namespace WowLuaApi
+{
+	void MarkAddonLoaded(const FString& AddonName);
+}
+
+namespace
+{
+TSet<FString> LoadedAddonNames;
+
+FString NormalizeWowPath(const FString& InPath)
+{
+	FString Normalized = InPath;
+	Normalized.ReplaceInline(TEXT("/"), TEXT("\\"));
+
+	while (Normalized.Contains(TEXT("\\\\")))
+	{
+		Normalized.ReplaceInline(TEXT("\\\\"), TEXT("\\"));
+	}
+
+	TArray<FString> Segments;
+	Normalized.ParseIntoArray(Segments, TEXT("\\"), true);
+
+	TArray<FString> CleanSegments;
+	for (const FString& Segment : Segments)
+	{
+		if (Segment.IsEmpty() || Segment == TEXT("."))
+		{
+			continue;
+		}
+
+		if (Segment == TEXT(".."))
+		{
+			if (CleanSegments.Num() > 0)
+			{
+				CleanSegments.Pop();
+			}
+			continue;
+		}
+
+		CleanSegments.Add(Segment);
+	}
+
+	return FString::Join(CleanSegments, TEXT("\\"));
+}
+
+FString GetWowDirectory(const FString& InPath)
+{
+	const FString Normalized = NormalizeWowPath(InPath);
+	int32 SlashIndex = INDEX_NONE;
+	if (Normalized.FindLastChar(TEXT('\\'), SlashIndex))
+	{
+		return Normalized.Left(SlashIndex + 1);
+	}
+
+	return FString();
+}
+
+FString ResolveWowPath(const FString& BaseDirectory, const FString& RelativePath)
+{
+	const FString Candidate = NormalizeWowPath(RelativePath);
+	if (Candidate.StartsWith(TEXT("Interface\\"), ESearchCase::IgnoreCase))
+	{
+		return Candidate;
+	}
+
+	return NormalizeWowPath(BaseDirectory + Candidate);
+}
+
+bool TryReadWowFile(FMpqManager* Mpq, const FString& InPath, TArray<uint8>& OutData)
+{
+	if (!Mpq)
+	{
+		return false;
+	}
+
+	TArray<FString> Candidates;
+	const FString Normalized = NormalizeWowPath(InPath);
+	Candidates.AddUnique(Normalized);
+	Candidates.AddUnique(Normalized.ToLower());
+	Candidates.AddUnique(Normalized.Replace(TEXT("\\"), TEXT("/")));
+	Candidates.AddUnique(Normalized.ToLower().Replace(TEXT("\\"), TEXT("/")));
+
+	for (const FString& Candidate : Candidates)
+	{
+		if (Mpq->ReadFile(Candidate, OutData))
+		{
+			return true;
+		}
+	}
+
+	for (const FString& Candidate : Candidates)
+	{
+		const FString FileSystemPath = FPaths::Combine(Mpq->GetDataPath(), Candidate.Replace(TEXT("\\"), TEXT("/")));
+		if (FFileHelper::LoadFileToArray(OutData, *FileSystemPath))
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool IsAddonLoaded(const FString& AddonName)
+{
+	return LoadedAddonNames.Contains(AddonName.ToLower());
+}
+
+void MarkAddonLoadedInternal(const FString& AddonName)
+{
+	LoadedAddonNames.Add(AddonName.ToLower());
+	WowLuaApi::MarkAddonLoaded(AddonName);
+}
+
+bool ProcessXmlDirectivesRecursive(
+	const FString& XmlPath,
+	FMpqManager* Mpq,
+	FWowLuaVM* LuaVM,
+	FWowFrameManager* FrameManager,
+	TSet<FString>& VisitedXmlFiles)
+{
+	const FString NormalizedXmlPath = NormalizeWowPath(XmlPath);
+	const FString VisitKey = NormalizedXmlPath.ToLower();
+	if (VisitedXmlFiles.Contains(VisitKey))
+	{
+		UE_LOG(LogWowAddon, Verbose, TEXT("Skipping already processed addon XML include: %s"), *NormalizedXmlPath);
+		return true;
+	}
+
+	VisitedXmlFiles.Add(VisitKey);
+
+	TArray<uint8> FileData;
+	if (!TryReadWowFile(Mpq, NormalizedXmlPath, FileData))
+	{
+		UE_LOG(LogWowAddon, Warning, TEXT("  Could not load: %s"), *NormalizedXmlPath);
+		return false;
+	}
+
+	const FString BaseDirectory = GetWowDirectory(NormalizedXmlPath);
+	const TArray<FWowXmlDirective> Directives = FWowFrameXmlParser::ParseXml(FileData, NormalizedXmlPath);
+
+	for (const FWowXmlDirective& Dir : Directives)
+	{
+		switch (Dir.Type)
+		{
+		case FWowXmlDirective::EType::Script:
+			if (!Dir.FilePath.IsEmpty())
+			{
+				const FString ScriptPath = ResolveWowPath(BaseDirectory, Dir.FilePath);
+				TArray<uint8> ScriptData;
+				if (TryReadWowFile(Mpq, ScriptPath, ScriptData))
+				{
+					LuaVM->ExecuteBuffer(ScriptData, ScriptPath);
+				}
+				else
+				{
+					UE_LOG(LogWowAddon, Warning, TEXT("  Could not load script: %s"), *ScriptPath);
+				}
+			}
+			break;
+
+		case FWowXmlDirective::EType::Include:
+			if (!Dir.FilePath.IsEmpty())
+			{
+				ProcessXmlDirectivesRecursive(ResolveWowPath(BaseDirectory, Dir.FilePath), Mpq, LuaVM, FrameManager, VisitedXmlFiles);
+			}
+			break;
+
+		case FWowXmlDirective::EType::Frame:
+			if (FrameManager)
+			{
+				FrameManager->CreateFrame(Dir.FrameDef);
+			}
+			break;
+
+		case FWowXmlDirective::EType::Font:
+			UE_LOG(LogWowAddon, Verbose, TEXT("  Font directive discovered in addon XML: %s"), *Dir.FontName);
+			break;
+		}
+	}
+
+	return true;
+}
+
+bool LoadAddonInternal(
+	const FString& AddonName,
+	FMpqManager* Mpq,
+	FWowLuaVM* LuaVM,
+	FWowFrameManager* FrameManager,
+	FWowEventSystem* EventSystem,
+	TSet<FString>& LoadingStack);
+}
 
 // Well-known Blizzard addon names from WoW 3.3.5 (those shipped inside MPQ)
 static const char* BlizzardAddons[] =
@@ -174,7 +368,8 @@ TArray<FString> FWowAddonLoader::DiscoverAddons(FMpqManager* Mpq)
 		FString AddonName = FPaths::GetCleanFilename(Dir);
 		// Verify a .toc file exists
 		FString TocPath = FString::Printf(TEXT("Interface\\AddOns\\%s\\%s.toc"), *AddonName, *AddonName);
-		if (Mpq->FileExists(TocPath) || FM.FileExists(*FPaths::Combine(AddOnsPath, AddonName, AddonName + TEXT(".toc"))))
+		TArray<uint8> IgnoredData;
+		if (TryReadWowFile(Mpq, TocPath, IgnoredData) || FM.FileExists(*FPaths::Combine(AddOnsPath, AddonName, AddonName + TEXT(".toc"))))
 		{
 			AddonNames.AddUnique(AddonName);
 		}
@@ -187,7 +382,8 @@ TArray<FString> FWowAddonLoader::DiscoverAddons(FMpqManager* Mpq)
 		if (AddonNames.Contains(Name)) continue;
 
 		FString TocPath = FString::Printf(TEXT("Interface\\AddOns\\%s\\%s.toc"), *Name, *Name);
-		if (Mpq->FileExists(TocPath))
+		TArray<uint8> IgnoredData;
+		if (TryReadWowFile(Mpq, TocPath, IgnoredData))
 		{
 			AddonNames.AddUnique(Name);
 		}
@@ -208,14 +404,7 @@ TArray<FString> FWowAddonLoader::ResolveLoadOrder(FMpqManager* Mpq, const TArray
 		FString TocPath = FString::Printf(TEXT("Interface\\AddOns\\%s\\%s.toc"), *Name, *Name);
 		TArray<uint8> TocData;
 
-		bool bLoaded = Mpq->ReadFile(TocPath, TocData);
-		if (!bLoaded)
-		{
-			FString FsTocPath = FPaths::Combine(Mpq->GetDataPath(), TocPath.Replace(TEXT("\\"), TEXT("/")));
-			bLoaded = FFileHelper::LoadFileToArray(TocData, *FsTocPath);
-		}
-
-		if (bLoaded)
+		if (TryReadWowFile(Mpq, TocPath, TocData))
 		{
 			TocMap.Add(Name, ParseToc(TocData));
 		}
@@ -317,33 +506,83 @@ TArray<FString> FWowAddonLoader::ResolveLoadOrder(FMpqManager* Mpq, const TArray
 bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWowLuaVM* LuaVM,
 	FWowFrameManager* FrameManager, FWowEventSystem* EventSystem)
 {
+	TSet<FString> LoadingStack;
+	return LoadAddonInternal(AddonName, Mpq, LuaVM, FrameManager, EventSystem, LoadingStack);
+}
+
+namespace
+{
+bool LoadAddonInternal(
+	const FString& AddonName,
+	FMpqManager* Mpq,
+	FWowLuaVM* LuaVM,
+	FWowFrameManager* FrameManager,
+	FWowEventSystem* EventSystem,
+	TSet<FString>& LoadingStack)
+{
 	if (!Mpq || !LuaVM)
 	{
 		UE_LOG(LogWowAddon, Error, TEXT("LoadAddon %s: null MPQ or Lua VM"), *AddonName);
 		return false;
 	}
 
+	const FString LoadingKey = AddonName.ToLower();
+	if (IsAddonLoaded(AddonName))
+	{
+		return true;
+	}
+
+	if (LoadingStack.Contains(LoadingKey))
+	{
+		UE_LOG(LogWowAddon, Warning, TEXT("Circular addon dependency detected while loading %s"), *AddonName);
+		return false;
+	}
+
+	LoadingStack.Add(LoadingKey);
+
 	// Read the TOC file
 	FString TocPath = FString::Printf(TEXT("Interface\\AddOns\\%s\\%s.toc"), *AddonName, *AddonName);
 	TArray<uint8> TocData;
 
-	// Try MPQ first, then filesystem
-	if (!Mpq->ReadFile(TocPath, TocData))
+	if (!TryReadWowFile(Mpq, TocPath, TocData))
 	{
-		FString FsTocPath = FPaths::Combine(Mpq->GetDataPath(), TocPath.Replace(TEXT("\\"), TEXT("/")));
-		if (!FFileHelper::LoadFileToArray(TocData, *FsTocPath))
-		{
-			UE_LOG(LogWowAddon, Warning, TEXT("Could not find TOC for addon: %s"), *AddonName);
-			return false;
-		}
+		UE_LOG(LogWowAddon, Warning, TEXT("Could not find TOC for addon: %s"), *AddonName);
+		LoadingStack.Remove(LoadingKey);
+		return false;
 	}
 
-	FWowTocData Toc = ParseToc(TocData);
+	FWowTocData Toc = FWowAddonLoader::ParseToc(TocData);
 
 	if (Toc.bDisabled)
 	{
 		UE_LOG(LogWowAddon, Log, TEXT("Addon %s is disabled, skipping"), *AddonName);
+		LoadingStack.Remove(LoadingKey);
 		return false;
+	}
+
+	for (const FString& Dep : Toc.RequiredDeps)
+	{
+		if (Dep.IsEmpty())
+		{
+			continue;
+		}
+
+		if (!LoadAddonInternal(Dep, Mpq, LuaVM, FrameManager, EventSystem, LoadingStack))
+		{
+			UE_LOG(LogWowAddon, Warning, TEXT("Required dependency %s for addon %s failed to load"), *Dep, *AddonName);
+			LoadingStack.Remove(LoadingKey);
+			return false;
+		}
+	}
+
+	for (const FString& Dep : Toc.OptionalDeps)
+	{
+		if (Dep.IsEmpty() || IsAddonLoaded(Dep))
+		{
+			continue;
+		}
+
+		LoadAddonInternal(Dep, Mpq, LuaVM, FrameManager, EventSystem, LoadingStack);
 	}
 
 	UE_LOG(LogWowAddon, Log, TEXT("Loading addon: %s (%s) - %d files"), *AddonName, *Toc.Title, Toc.Files.Num());
@@ -353,19 +592,13 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 	FWowSavedVariables::RegisterAddon(AddonName, Toc);
 
 	FString BasePath = FString::Printf(TEXT("Interface\\AddOns\\%s\\"), *AddonName);
+	TSet<FString> VisitedXmlFiles;
 
 	for (const FString& File : Toc.Files)
 	{
-		FString FullPath = BasePath + File;
+		const FString FullPath = ResolveWowPath(BasePath, File);
 		TArray<uint8> FileData;
-
-		// Try MPQ first, then filesystem
-		bool bLoaded = Mpq->ReadFile(FullPath, FileData);
-		if (!bLoaded)
-		{
-			FString FsPath = FPaths::Combine(Mpq->GetDataPath(), FullPath.Replace(TEXT("\\"), TEXT("/")));
-			bLoaded = FFileHelper::LoadFileToArray(FileData, *FsPath);
-		}
+		const bool bLoaded = TryReadWowFile(Mpq, FullPath, FileData);
 
 		if (!bLoaded)
 		{
@@ -379,83 +612,21 @@ bool FWowAddonLoader::LoadAddon(const FString& AddonName, FMpqManager* Mpq, FWow
 		}
 		else if (File.EndsWith(TEXT(".xml"), ESearchCase::IgnoreCase))
 		{
-			TArray<FWowXmlDirective> Directives = FWowFrameXmlParser::ParseXml(FileData, FullPath);
-
-			for (const FWowXmlDirective& Dir : Directives)
-			{
-				switch (Dir.Type)
-				{
-				case FWowXmlDirective::EType::Script:
-				{
-					if (!Dir.FilePath.IsEmpty())
-					{
-						FString ScriptPath = BasePath + Dir.FilePath;
-						TArray<uint8> ScriptData;
-						if (Mpq->ReadFile(ScriptPath, ScriptData) ||
-						    FFileHelper::LoadFileToArray(ScriptData, *FPaths::Combine(Mpq->GetDataPath(), ScriptPath.Replace(TEXT("\\"), TEXT("/")))))
-						{
-							LuaVM->ExecuteBuffer(ScriptData, ScriptPath);
-						}
-					}
-					break;
-				}
-				case FWowXmlDirective::EType::Include:
-				{
-					if (!Dir.FilePath.IsEmpty())
-					{
-						FString IncPath = BasePath + Dir.FilePath;
-						TArray<uint8> IncData;
-						if (Mpq->ReadFile(IncPath, IncData) ||
-						    FFileHelper::LoadFileToArray(IncData, *FPaths::Combine(Mpq->GetDataPath(), IncPath.Replace(TEXT("\\"), TEXT("/")))))
-						{
-							// Recursively process included XML directives
-							TArray<FWowXmlDirective> IncDirs = FWowFrameXmlParser::ParseXml(IncData, IncPath);
-							for (const FWowXmlDirective& IncDir : IncDirs)
-							{
-								if (IncDir.Type == FWowXmlDirective::EType::Script && !IncDir.FilePath.IsEmpty())
-								{
-									FString IncScriptPath = BasePath + IncDir.FilePath;
-									TArray<uint8> SD;
-									if (Mpq->ReadFile(IncScriptPath, SD) ||
-									    FFileHelper::LoadFileToArray(SD, *FPaths::Combine(Mpq->GetDataPath(), IncScriptPath.Replace(TEXT("\\"), TEXT("/")))))
-									{
-										LuaVM->ExecuteBuffer(SD, IncScriptPath);
-									}
-								}
-								else if (IncDir.Type == FWowXmlDirective::EType::Frame && FrameManager)
-								{
-									FrameManager->CreateFrame(IncDir.FrameDef);
-								}
-							}
-						}
-					}
-					break;
-				}
-				case FWowXmlDirective::EType::Frame:
-				{
-					if (FrameManager)
-					{
-						FrameManager->CreateFrame(Dir.FrameDef);
-					}
-					else
-					{
-						UE_LOG(LogWowAddon, Verbose, TEXT("  Frame: %s (no FrameManager)"), *Dir.FrameDef.Name);
-					}
-					break;
-				}
-				case FWowXmlDirective::EType::Font:
-				{
-					UE_LOG(LogWowAddon, Verbose, TEXT("  Font: %s"), *Dir.FontName);
-					break;
-				}
-				}
-			}
+			ProcessXmlDirectivesRecursive(FullPath, Mpq, LuaVM, FrameManager, VisitedXmlFiles);
 		}
 	}
 
+	MarkAddonLoadedInternal(AddonName);
+	if (EventSystem)
+	{
+		EventSystem->FireEvent(TEXT("ADDON_LOADED"), { AddonName });
+	}
+
+	LoadingStack.Remove(LoadingKey);
 	UE_LOG(LogWowAddon, Log, TEXT("Addon %s loaded successfully"), *AddonName);
 	return true;
 }
+} // namespace
 
 void FWowAddonLoader::LoadAllAddons(FMpqManager* Mpq, FWowLuaVM* LuaVM,
 	FWowFrameManager* FrameManager, FWowEventSystem* EventSystem)
@@ -468,6 +639,7 @@ void FWowAddonLoader::LoadAllAddons(FMpqManager* Mpq, FWowLuaVM* LuaVM,
 
 	TArray<FString> Discovered = DiscoverAddons(Mpq);
 	TArray<FString> Ordered = ResolveLoadOrder(Mpq, Discovered);
+	LoadedAddonNames.Reset();
 
 	int32 Loaded = 0;
 	for (const FString& AddonName : Ordered)
@@ -475,12 +647,6 @@ void FWowAddonLoader::LoadAllAddons(FMpqManager* Mpq, FWowLuaVM* LuaVM,
 		if (LoadAddon(AddonName, Mpq, LuaVM, FrameManager, EventSystem))
 		{
 			Loaded++;
-
-			// Fire ADDON_LOADED event with addon name argument (WoW 3.3.5 behavior)
-			if (EventSystem)
-			{
-				EventSystem->FireEvent(TEXT("ADDON_LOADED"), { AddonName });
-			}
 		}
 	}
 
