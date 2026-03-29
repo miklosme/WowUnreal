@@ -230,7 +230,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Unit relationship API parity for Blizzard unit popup bootstrap (`UnitCanCooperate` and shared friend/hostile resolution for party/target dropdown setup)
 - [x] UnitPopup utility API coverage for RAF/loot/difficulty gates (`IsReferAFriendLinked`, `GetOptOutOfLoot`, `HasLFGRestrictions`, `GetInstanceInfo`, `CanChangePlayerDifficulty`)
 - [x] RAF summon helper API coverage for UnitPopup/FriendsFrame (`GetSummonFriendCooldown`, `CanSummonFriend`, `CanGrantLevel`, `SummonFriend`, `GrantLevel`)
-- [?] Video options dropdown API shape parity (`GetMultisampleFormats`, `GetRefreshRates`, and no-op setters return the types Blizzard expects)
+- [x] Video options dropdown API shape parity (`GetMultisampleFormats`, `GetRefreshRates`, and no-op setters return the types Blizzard expects)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
