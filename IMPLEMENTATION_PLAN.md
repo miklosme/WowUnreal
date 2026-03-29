@@ -171,7 +171,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 
 ### P2: Action Bar & Spell Book UI
 - [x] Action bar widget (12 slots × main bar + bonus bars)
-- [?] Drag spells from spell book to action bar
+- [x] Drag spells from spell book to action bar
 - [x] Click action bar slot to cast spell
 - [x] Cooldown sweep animation on action bar icons
 - [x] Spell book UI (tabs per spell school)
