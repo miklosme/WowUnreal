@@ -94,6 +94,12 @@ public:
     /** Set the amount of gold offered in the current trade */
     UFUNCTION(BlueprintCallable) void SendSetTradeGold(int32 CopperAmount);
 
+    /** Accept the currently pending duel request */
+    void SendAcceptDuel(int64 ArbiterGuid);
+
+    /** Decline a pending duel request or forfeit an active duel */
+    void SendCancelDuel(int64 ArbiterGuid);
+
     /** Request the current raid target icon assignments */
     void SendRequestRaidTargetIcons();
 

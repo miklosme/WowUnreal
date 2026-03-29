@@ -264,6 +264,158 @@ namespace WowTradeStatus
     inline constexpr uint32 NOT_ELIGIBLE   = 23;
 }
 
+namespace WowDuelResultReason
+{
+    inline constexpr uint8 WON  = 0;
+    inline constexpr uint8 FLED = 1;
+}
+
+enum class EWowDuelPhase : uint8
+{
+    None,
+    Requested,
+    Countdown,
+    InProgress,
+    Completed
+};
+
+struct FWowDuelState
+{
+    EWowDuelPhase Phase = EWowDuelPhase::None;
+    uint64 ArbiterGuid = 0;
+    uint64 InitiatorGuid = 0;
+    bool bInBounds = true;
+    bool bInterrupted = false;
+    bool bHasWinner = false;
+    uint8 ResultReason = WowDuelResultReason::WON;
+    FString WinnerName;
+    FString LoserName;
+    double CountdownEndTimeSeconds = 0.0;
+    double StatusEndTimeSeconds = 0.0;
+
+    void Clear()
+    {
+        Phase = EWowDuelPhase::None;
+        ArbiterGuid = 0;
+        InitiatorGuid = 0;
+        bInBounds = true;
+        bInterrupted = false;
+        bHasWinner = false;
+        ResultReason = WowDuelResultReason::WON;
+        WinnerName.Reset();
+        LoserName.Reset();
+        CountdownEndTimeSeconds = 0.0;
+        StatusEndTimeSeconds = 0.0;
+    }
+
+    void BeginRequest(uint64 InArbiterGuid, uint64 InInitiatorGuid)
+    {
+        Clear();
+        Phase = EWowDuelPhase::Requested;
+        ArbiterGuid = InArbiterGuid;
+        InitiatorGuid = InInitiatorGuid;
+    }
+
+    void BeginCountdown(double DurationSeconds)
+    {
+        Phase = EWowDuelPhase::Countdown;
+        bInterrupted = false;
+        bHasWinner = false;
+        bInBounds = true;
+        WinnerName.Reset();
+        LoserName.Reset();
+        CountdownEndTimeSeconds = FPlatformTime::Seconds() + FMath::Max(0.0, DurationSeconds);
+        StatusEndTimeSeconds = 0.0;
+    }
+
+    void MarkActive()
+    {
+        Phase = EWowDuelPhase::InProgress;
+        CountdownEndTimeSeconds = 0.0;
+    }
+
+    void SetInBounds(bool bIsInBounds)
+    {
+        bInBounds = bIsInBounds;
+        if (Phase == EWowDuelPhase::Requested)
+        {
+            return;
+        }
+
+        if (Phase == EWowDuelPhase::Completed && !bInterrupted && !bHasWinner)
+        {
+            return;
+        }
+
+        if (GetCountdownRemainingSeconds() <= KINDA_SMALL_NUMBER)
+        {
+            MarkActive();
+        }
+    }
+
+    void MarkCompleted()
+    {
+        Phase = EWowDuelPhase::Completed;
+        CountdownEndTimeSeconds = 0.0;
+        StatusEndTimeSeconds = FPlatformTime::Seconds() + 6.0;
+    }
+
+    void MarkInterrupted()
+    {
+        MarkCompleted();
+        bInterrupted = true;
+        bHasWinner = false;
+        WinnerName.Reset();
+        LoserName.Reset();
+    }
+
+    void SetWinner(uint8 InResultReason, const FString& InWinnerName, const FString& InLoserName)
+    {
+        MarkCompleted();
+        bInterrupted = false;
+        bHasWinner = true;
+        ResultReason = InResultReason;
+        WinnerName = InWinnerName;
+        LoserName = InLoserName;
+    }
+
+    float GetCountdownRemainingSeconds() const
+    {
+        if (Phase != EWowDuelPhase::Countdown)
+        {
+            return 0.0f;
+        }
+
+        return static_cast<float>(FMath::Max(0.0, CountdownEndTimeSeconds - FPlatformTime::Seconds()));
+    }
+
+    bool IsRequestPending() const
+    {
+        return Phase == EWowDuelPhase::Requested;
+    }
+
+    bool IsCountdownActive() const
+    {
+        return Phase == EWowDuelPhase::Countdown && GetCountdownRemainingSeconds() > KINDA_SMALL_NUMBER;
+    }
+
+    bool IsInProgress() const
+    {
+        return Phase == EWowDuelPhase::InProgress
+            || (Phase == EWowDuelPhase::Countdown && GetCountdownRemainingSeconds() <= KINDA_SMALL_NUMBER);
+    }
+
+    bool IsComplete() const
+    {
+        return Phase == EWowDuelPhase::Completed;
+    }
+
+    bool ShouldShowCompletionText() const
+    {
+        return IsComplete() && FPlatformTime::Seconds() < StatusEndTimeSeconds;
+    }
+};
+
 // WoW 3.3.5a unit stand states (UNIT_FIELD_BYTES_1 byte 0)
 namespace WowStandState
 {

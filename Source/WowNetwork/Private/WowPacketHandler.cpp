@@ -121,6 +121,14 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_SHOW_MAILBOX,            &FWowPacketHandler::HandleShowMailbox);
     Handlers.Add(WowOpcode::SMSG_MAIL_LIST_RESULT,        &FWowPacketHandler::HandleMailListResult);
 
+    // ── Duel system handlers ────────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_DUEL_REQUESTED,          &FWowPacketHandler::HandleDuelRequested);
+    Handlers.Add(WowOpcode::SMSG_DUEL_OUTOFBOUNDS,        &FWowPacketHandler::HandleDuelOutOfBounds);
+    Handlers.Add(WowOpcode::SMSG_DUEL_INBOUNDS,           &FWowPacketHandler::HandleDuelInBounds);
+    Handlers.Add(WowOpcode::SMSG_DUEL_COMPLETE,           &FWowPacketHandler::HandleDuelComplete);
+    Handlers.Add(WowOpcode::SMSG_DUEL_WINNER,             &FWowPacketHandler::HandleDuelWinner);
+    Handlers.Add(WowOpcode::SMSG_DUEL_COUNTDOWN,          &FWowPacketHandler::HandleDuelCountdown);
+
     // ── Trade system handlers ───────────────────────────────────────────────
     Handlers.Add(WowOpcode::SMSG_TRADE_STATUS,            &FWowPacketHandler::HandleTradeStatus);
     Handlers.Add(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,   &FWowPacketHandler::HandleTradeStatusExtended);
@@ -2990,6 +2998,92 @@ void FWowPacketHandler::HandleMailListResult(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("MAIL_LIST_RESULT: received %d displayed mails (%u total)"), MailInbox.Num(), MailInboxTotalCount);
     OnMailListReceived.Broadcast(MailInbox);
+}
+
+void FWowPacketHandler::HandleDuelRequested(FPacketReader& R)
+{
+    if (!R.CanRead(16))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("DUEL_REQUESTED: packet too short"));
+        return;
+    }
+
+    const uint64 ArbiterGuid = R.ReadU64();
+    const uint64 InitiatorGuid = R.ReadU64();
+
+    CurrentDuel.BeginRequest(ArbiterGuid, InitiatorGuid);
+    UE_LOG(LogWowPacket, Log, TEXT("DUEL_REQUESTED: arbiter=%llu initiator=%llu"), ArbiterGuid, InitiatorGuid);
+    OnDuelUpdated.Broadcast(CurrentDuel);
+}
+
+void FWowPacketHandler::HandleDuelOutOfBounds(FPacketReader& R)
+{
+    static_cast<void>(R);
+    CurrentDuel.SetInBounds(false);
+    UE_LOG(LogWowPacket, Log, TEXT("DUEL_OUTOFBOUNDS"));
+    OnDuelUpdated.Broadcast(CurrentDuel);
+}
+
+void FWowPacketHandler::HandleDuelInBounds(FPacketReader& R)
+{
+    static_cast<void>(R);
+    CurrentDuel.SetInBounds(true);
+    UE_LOG(LogWowPacket, Log, TEXT("DUEL_INBOUNDS"));
+    OnDuelUpdated.Broadcast(CurrentDuel);
+}
+
+void FWowPacketHandler::HandleDuelComplete(FPacketReader& R)
+{
+    if (!R.CanRead(1))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("DUEL_COMPLETE: packet too short"));
+        return;
+    }
+
+    const bool bFinishedNormally = (R.ReadU8() != 0);
+    if (bFinishedNormally)
+    {
+        CurrentDuel.MarkCompleted();
+    }
+    else
+    {
+        CurrentDuel.MarkInterrupted();
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("DUEL_COMPLETE: normal=%d"), bFinishedNormally ? 1 : 0);
+    OnDuelUpdated.Broadcast(CurrentDuel);
+}
+
+void FWowPacketHandler::HandleDuelWinner(FPacketReader& R)
+{
+    if (!R.CanRead(1))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("DUEL_WINNER: packet too short"));
+        return;
+    }
+
+    const uint8 ResultReason = R.ReadU8();
+    const FString WinnerName = R.ReadCString();
+    const FString LoserName = R.ReadCString();
+
+    CurrentDuel.SetWinner(ResultReason, WinnerName, LoserName);
+    UE_LOG(LogWowPacket, Log, TEXT("DUEL_WINNER: reason=%u winner='%s' loser='%s'"),
+        ResultReason, *WinnerName, *LoserName);
+    OnDuelUpdated.Broadcast(CurrentDuel);
+}
+
+void FWowPacketHandler::HandleDuelCountdown(FPacketReader& R)
+{
+    if (!R.CanRead(4))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("DUEL_COUNTDOWN: packet too short"));
+        return;
+    }
+
+    const uint32 CountdownMilliseconds = R.ReadU32();
+    CurrentDuel.BeginCountdown(static_cast<double>(CountdownMilliseconds) / 1000.0);
+    UE_LOG(LogWowPacket, Log, TEXT("DUEL_COUNTDOWN: duration_ms=%u"), CountdownMilliseconds);
+    OnDuelUpdated.Broadcast(CurrentDuel);
 }
 
 void FWowPacketHandler::HandleTradeStatus(FPacketReader& R)

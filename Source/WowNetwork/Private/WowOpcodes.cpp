@@ -20,6 +20,12 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case SMSG_SHOW_BANK:                return TEXT("SMSG_SHOW_BANK");
     case SMSG_TRADE_STATUS:             return TEXT("SMSG_TRADE_STATUS");
     case SMSG_TRADE_STATUS_EXTENDED:    return TEXT("SMSG_TRADE_STATUS_EXTENDED");
+    case SMSG_DUEL_REQUESTED:           return TEXT("SMSG_DUEL_REQUESTED");
+    case SMSG_DUEL_OUTOFBOUNDS:         return TEXT("SMSG_DUEL_OUTOFBOUNDS");
+    case SMSG_DUEL_INBOUNDS:            return TEXT("SMSG_DUEL_INBOUNDS");
+    case SMSG_DUEL_COMPLETE:            return TEXT("SMSG_DUEL_COMPLETE");
+    case SMSG_DUEL_WINNER:              return TEXT("SMSG_DUEL_WINNER");
+    case SMSG_DUEL_COUNTDOWN:           return TEXT("SMSG_DUEL_COUNTDOWN");
     case SMSG_TIME_SYNC_REQ:            return TEXT("SMSG_TIME_SYNC_REQ");
     case SMSG_TUTORIAL_FLAGS:           return TEXT("SMSG_TUTORIAL_FLAGS");
     case SMSG_ACCOUNT_DATA_TIMES:       return TEXT("SMSG_ACCOUNT_DATA_TIMES");
@@ -44,6 +50,8 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case CMSG_UNACCEPT_TRADE:           return TEXT("CMSG_UNACCEPT_TRADE");
     case CMSG_CANCEL_TRADE:             return TEXT("CMSG_CANCEL_TRADE");
     case CMSG_SET_TRADE_GOLD:           return TEXT("CMSG_SET_TRADE_GOLD");
+    case CMSG_DUEL_ACCEPTED:            return TEXT("CMSG_DUEL_ACCEPTED");
+    case CMSG_DUEL_CANCELLED:           return TEXT("CMSG_DUEL_CANCELLED");
     case CMSG_SET_ACTION_BUTTON:        return TEXT("CMSG_SET_ACTION_BUTTON");
 
     // Social / Guild / Friends

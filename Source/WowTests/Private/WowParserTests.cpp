@@ -1034,6 +1034,101 @@ bool FRaidReadyCheckPacketsTrackLifecycle::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDuelRequestPacketsTrackLifecycle, "WowUnreal.Network.Duel.RequestPacketsTrackLifecycle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FDuelRequestPacketsTrackLifecycle::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU32 = [](TArray<uint8>& Buffer, uint32 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint32));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint32));
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+
+    const uint64 ArbiterGuid = 0x8877665544332211ULL;
+    const uint64 InitiatorGuid = 0x1122334455667788ULL;
+
+    TArray<uint8> RequestPacket;
+    AppendU64(RequestPacket, ArbiterGuid);
+    AppendU64(RequestPacket, InitiatorGuid);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_DUEL_REQUESTED, RequestPacket);
+
+    TestTrue(TEXT("Duel request enters the requested phase"), PacketHandler.CurrentDuel.IsRequestPending());
+    TestEqual(TEXT("Duel request stores arbiter guid"), PacketHandler.CurrentDuel.ArbiterGuid, ArbiterGuid);
+    TestEqual(TEXT("Duel request stores initiator guid"), PacketHandler.CurrentDuel.InitiatorGuid, InitiatorGuid);
+
+    TArray<uint8> CountdownPacket;
+    AppendU32(CountdownPacket, 3000u);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_DUEL_COUNTDOWN, CountdownPacket);
+
+    TestTrue(TEXT("Duel countdown starts after accept"), PacketHandler.CurrentDuel.IsCountdownActive());
+    TestTrue(TEXT("Duel countdown has time remaining"), PacketHandler.CurrentDuel.GetCountdownRemainingSeconds() > 0.0f);
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_DUEL_OUTOFBOUNDS, {});
+    TestFalse(TEXT("Out-of-bounds packet flips the in-bounds flag"), PacketHandler.CurrentDuel.bInBounds);
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_DUEL_INBOUNDS, {});
+    TestTrue(TEXT("In-bounds packet restores the in-bounds flag"), PacketHandler.CurrentDuel.bInBounds);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDuelCompletionPacketsParseResults, "WowUnreal.Network.Duel.CompletionPacketsParseResults",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FDuelCompletionPacketsParseResults::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendCString = [](TArray<uint8>& Buffer, const ANSICHAR* Value)
+    {
+        const int32 Length = FCStringAnsi::Strlen(Value) + 1;
+        const int32 Offset = Buffer.AddUninitialized(Length);
+        FMemory::Memcpy(Buffer.GetData() + Offset, Value, Length);
+    };
+
+    TArray<uint8> InterruptedPacket;
+    AppendU8(InterruptedPacket, 0u);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_DUEL_COMPLETE, InterruptedPacket);
+
+    TestTrue(TEXT("Interrupted duel enters the completed phase"), PacketHandler.CurrentDuel.IsComplete());
+    TestTrue(TEXT("Interrupted duel sets interrupted state"), PacketHandler.CurrentDuel.bInterrupted);
+    TestFalse(TEXT("Interrupted duel does not mark a winner"), PacketHandler.CurrentDuel.bHasWinner);
+
+    PacketHandler.CurrentDuel.Clear();
+
+    TArray<uint8> CompletePacket;
+    AppendU8(CompletePacket, 1u);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_DUEL_COMPLETE, CompletePacket);
+
+    TArray<uint8> WinnerPacket;
+    AppendU8(WinnerPacket, WowDuelResultReason::FLED);
+    AppendCString(WinnerPacket, "Winner");
+    AppendCString(WinnerPacket, "Loser");
+    PacketHandler.HandlePacket(WowOpcode::SMSG_DUEL_WINNER, WinnerPacket);
+
+    TestTrue(TEXT("Winner packet keeps the duel completed"), PacketHandler.CurrentDuel.IsComplete());
+    TestTrue(TEXT("Winner packet marks a duel winner"), PacketHandler.CurrentDuel.bHasWinner);
+    TestEqual(TEXT("Winner packet stores the result reason"), PacketHandler.CurrentDuel.ResultReason, static_cast<uint8>(WowDuelResultReason::FLED));
+    TestEqual(TEXT("Winner packet stores the winner name"), PacketHandler.CurrentDuel.WinnerName, FString(TEXT("Winner")));
+    TestEqual(TEXT("Winner packet stores the loser name"), PacketHandler.CurrentDuel.LoserName, FString(TEXT("Loser")));
+
+    return true;
+}
+
 // ====================================================================
 // DBC Parser Tests (require MPQ data)
 // ====================================================================

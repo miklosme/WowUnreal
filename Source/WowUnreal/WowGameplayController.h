@@ -23,11 +23,14 @@ class SWowCastBar;
 class SWowMinimap;
 class SWowPartyFrame;
 class SWowPartyInvite;
+class SWowDuelInvite;
 class SWowTaxiMap;
 class SWowQuestLog;
 class SWowGuildRoster;
 class SWowMailbox;
 class SProgressBar;
+class STextBlock;
+class SBorder;
 struct FWowFloatingTextInfo;
 
 UCLASS()
@@ -101,6 +104,14 @@ public:
 
     /** Party invite dialog widget */
     TSharedPtr<SWowPartyInvite> PartyInviteWidget;
+    TSharedPtr<SWowDuelInvite> DuelInviteWidget;
+    TSharedPtr<SWidget> DuelInviteViewportWidget;
+    TSharedPtr<SBorder> DuelStatusBorder;
+    TSharedPtr<STextBlock> DuelStatusText;
+    TSharedPtr<SWidget> DuelStatusViewportWidget;
+    FString DebugDuelPreviewMode;
+    bool bDebugDuelPreviewApplied = false;
+    TSet<uint64> PendingDuelNameQueries;
 
     /** Taxi map widget */
     TSharedPtr<SWowTaxiMap> TaxiMapWidget;
@@ -318,6 +329,7 @@ private:
     void OnGroupUpdated();
     void OnRaidTargetsUpdated(const FWowRaidTargetState& RaidTargets);
     void OnReadyCheckUpdated(const FWowReadyCheckState& ReadyCheck);
+    void OnDuelUpdated(const FWowDuelState& DuelState);
     void OnGroupInviteReceived(const FString& InviterName);
     void OnPartyCommandResult(uint8 Command, const FString& PlayerName, uint8 Result);
 
@@ -327,6 +339,12 @@ private:
 
     /** Create and show party frame */
     void CreatePartyFrame();
+    void CreateDuelStatusOverlay();
+    void HideDuelInvite();
+    void RefreshDuelUi();
+    FString GetPlayerDisplayName(uint64 Guid) const;
+    void MaybeRequestDuelPlayerName(const FWowDuelState& DuelState);
+    void MaybeApplyDebugDuelPreview();
 
     /** Create experience bar */
     void CreateXPBar();

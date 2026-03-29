@@ -736,6 +736,39 @@ void UWowConnectionManager::SendSetTradeGold(int32 CopperAmount)
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_SET_TRADE_GOLD amount=%u"), Gold);
 }
 
+void UWowConnectionManager::SendAcceptDuel(int64 ArbiterGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame || ArbiterGuid == 0) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(sizeof(uint64));
+    const uint64 Guid = static_cast<uint64>(ArbiterGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, sizeof(Guid));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_DUEL_ACCEPTED, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_DUEL_ACCEPTED arbiter=%llu"), Guid);
+}
+
+void UWowConnectionManager::SendCancelDuel(int64 ArbiterGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame || ArbiterGuid == 0) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(sizeof(uint64));
+    const uint64 Guid = static_cast<uint64>(ArbiterGuid);
+    FMemory::Memcpy(Data.GetData(), &Guid, sizeof(Guid));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_DUEL_CANCELLED, Data);
+
+    if (PacketHandler.CurrentDuel.IsRequestPending())
+    {
+        PacketHandler.CurrentDuel.MarkInterrupted();
+        PacketHandler.OnDuelUpdated.Broadcast(PacketHandler.CurrentDuel);
+    }
+
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_DUEL_CANCELLED arbiter=%llu"), Guid);
+}
+
 void UWowConnectionManager::SendRequestRaidTargetIcons()
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;

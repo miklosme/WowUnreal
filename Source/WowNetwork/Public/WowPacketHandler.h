@@ -17,6 +17,7 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, con
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailListReceived, const TArray<FWowMailMessage>& /*Mail*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailboxShown, uint64 /*MailboxGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnTradeUpdated, const FWowTradeState& /*TradeState*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnDuelUpdated, const FWowDuelState& /*DuelState*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnBankOpened, uint64 /*BankerGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestDialog, const FWowQuestDetails& /*QuestDetails*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestRewardDialog, const FWowQuestDetails& /*QuestDetails*/);
@@ -199,6 +200,9 @@ public:
     /** Current trade window state */
     FWowTradeState CurrentTrade;
 
+    /** Current duel state */
+    FWowDuelState CurrentDuel;
+
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
@@ -213,6 +217,7 @@ public:
     FOnMailListReceived OnMailListReceived;
     FOnMailboxShown OnMailboxShown;
     FOnTradeUpdated OnTradeUpdated;
+    FOnDuelUpdated OnDuelUpdated;
     FOnBankOpened OnBankOpened;
     FOnQuestDialog OnQuestDialog;
     FOnQuestRewardDialog OnQuestRewardDialog;
@@ -368,6 +373,14 @@ private:
     // ── Mail system handlers ────────────────────────────────────────────────
     void HandleShowMailbox(FPacketReader& R);
     void HandleMailListResult(FPacketReader& R);
+
+    // ── Duel system handlers ────────────────────────────────────────────────
+    void HandleDuelRequested(FPacketReader& R);
+    void HandleDuelOutOfBounds(FPacketReader& R);
+    void HandleDuelInBounds(FPacketReader& R);
+    void HandleDuelComplete(FPacketReader& R);
+    void HandleDuelWinner(FPacketReader& R);
+    void HandleDuelCountdown(FPacketReader& R);
 
     // ── Trade system handlers ───────────────────────────────────────────────
     void HandleTradeStatus(FPacketReader& R);

@@ -14,6 +14,7 @@
 #include "WowNameplateWidget.h"
 #include "SWowCombatLog.h"
 #include "SWowChatWindow.h"
+#include "SWowDuelInvite.h"
 #include "SWowPartyFrame.h"
 #include "SWowPartyInvite.h"
 #include "SWowTaxiMap.h"
@@ -48,6 +49,7 @@
 #include "Formats/Dbc/DbcStore.h"
 #include "Engine/GameViewportClient.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Styling/AppStyle.h"
 #include "Widgets/SWeakWidget.h"
 #include "Widgets/SCanvas.h"
 #include "Widgets/SOverlay.h"
@@ -192,6 +194,9 @@ void AWowGameplayController::BeginPlay()
 	{
 		GEngine->GameViewport->AddViewportWidgetForPlayer(GetLocalPlayer(), CastBarContainer, 1000);
 	}
+
+	CreateDuelStatusOverlay();
+	FParse::Value(FCommandLine::Get(), TEXT("-testduel="), DebugDuelPreviewMode);
 }
 
 void AWowGameplayController::SetupInputComponent()
@@ -301,6 +306,8 @@ void AWowGameplayController::BindEntityEvents()
 		this, &AWowGameplayController::OnRaidTargetsUpdated);
 	ConnectionManager->PacketHandler.OnReadyCheckUpdated.AddUObject(
 		this, &AWowGameplayController::OnReadyCheckUpdated);
+	ConnectionManager->PacketHandler.OnDuelUpdated.AddUObject(
+		this, &AWowGameplayController::OnDuelUpdated);
 	ConnectionManager->PacketHandler.OnGroupInviteReceived.AddUObject(
 		this, &AWowGameplayController::OnGroupInviteReceived);
 	ConnectionManager->PacketHandler.OnPartyCommandResult.AddUObject(
@@ -750,6 +757,9 @@ void AWowGameplayController::Tick(float DeltaTime)
 		FVector2D MousePosition = FSlateApplication::Get().GetCursorPos();
 		TooltipManager->Update(MousePosition);
 	}
+
+	MaybeApplyDebugDuelPreview();
+	RefreshDuelUi();
 
 	if (!ConnectionManager) return;
 
@@ -2891,6 +2901,335 @@ void AWowGameplayController::OnReadyCheckUpdated(const FWowReadyCheckState& Read
 	UE_LOG(LogWowGameplay, Verbose, TEXT("Ready check state updated"));
 }
 
+void AWowGameplayController::CreateDuelStatusOverlay()
+{
+	if (DuelStatusViewportWidget.IsValid() || !GEngine || !GEngine->GameViewport)
+	{
+		return;
+	}
+
+	DuelStatusViewportWidget =
+		SNew(SOverlay)
+		.Visibility(EVisibility::SelfHitTestInvisible)
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Center)
+		.VAlign(VAlign_Top)
+		.Padding(0.0f, 90.0f, 0.0f, 0.0f)
+		[
+			SAssignNew(DuelStatusBorder, SBorder)
+			.Visibility(EVisibility::Collapsed)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.BorderBackgroundColor(FLinearColor(0.08f, 0.04f, 0.04f, 0.92f))
+			.Padding(FMargin(12.0f, 8.0f))
+			[
+				SAssignNew(DuelStatusText, STextBlock)
+				.ColorAndOpacity(FLinearColor::White)
+				.Font(FAppStyle::GetFontStyle("NormalFont"))
+				.Justification(ETextJustify::Center)
+			]
+		];
+
+	GEngine->GameViewport->AddViewportWidgetContent(DuelStatusViewportWidget.ToSharedRef(), 190);
+}
+
+void AWowGameplayController::HideDuelInvite()
+{
+	if (DuelInviteViewportWidget.IsValid() && GEngine && GEngine->GameViewport)
+	{
+		GEngine->GameViewport->RemoveViewportWidgetContent(DuelInviteViewportWidget.ToSharedRef());
+	}
+
+	DuelInviteViewportWidget.Reset();
+	DuelInviteWidget.Reset();
+}
+
+FString AWowGameplayController::GetPlayerDisplayName(uint64 Guid) const
+{
+	if (!ConnectionManager || Guid == 0)
+	{
+		return TEXT("");
+	}
+
+	const uint64 LocalPlayerGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+	if (Guid == LocalPlayerGuid)
+	{
+		const FString LocalPlayerName = ConnectionManager->GetCharacterName();
+		if (!LocalPlayerName.IsEmpty())
+		{
+			return LocalPlayerName;
+		}
+	}
+
+	if (const FString* CachedName = ConnectionManager->PacketHandler.PlayerNameCache.Find(Guid))
+	{
+		return *CachedName;
+	}
+
+	return FString::Printf(TEXT("Player %llu"), Guid);
+}
+
+void AWowGameplayController::MaybeRequestDuelPlayerName(const FWowDuelState& DuelState)
+{
+	if (!ConnectionManager || DuelState.InitiatorGuid == 0)
+	{
+		return;
+	}
+
+	const uint64 LocalPlayerGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+	if (DuelState.InitiatorGuid != LocalPlayerGuid
+		&& !ConnectionManager->PacketHandler.PlayerNameCache.Contains(DuelState.InitiatorGuid)
+		&& !PendingDuelNameQueries.Contains(DuelState.InitiatorGuid))
+	{
+		ConnectionManager->SendNameQuery(static_cast<int64>(DuelState.InitiatorGuid));
+		PendingDuelNameQueries.Add(DuelState.InitiatorGuid);
+	}
+}
+
+void AWowGameplayController::RefreshDuelUi()
+{
+	CreateDuelStatusOverlay();
+
+	if (!ConnectionManager)
+	{
+		HideDuelInvite();
+		if (DuelStatusBorder.IsValid())
+		{
+			DuelStatusBorder->SetVisibility(EVisibility::Collapsed);
+		}
+		return;
+	}
+
+	const FWowDuelState& DuelState = ConnectionManager->PacketHandler.CurrentDuel;
+	MaybeRequestDuelPlayerName(DuelState);
+
+	const uint64 LocalPlayerGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+	const bool bIncomingRequest = DuelState.IsRequestPending()
+		&& DuelState.InitiatorGuid != 0
+		&& DuelState.InitiatorGuid != LocalPlayerGuid;
+
+	FString OpponentName;
+	if (DuelState.bHasWinner)
+	{
+		const FString LocalPlayerName = ConnectionManager->GetCharacterName();
+		if (!LocalPlayerName.IsEmpty())
+		{
+			if (DuelState.WinnerName == LocalPlayerName)
+			{
+				OpponentName = DuelState.LoserName;
+			}
+			else if (DuelState.LoserName == LocalPlayerName)
+			{
+				OpponentName = DuelState.WinnerName;
+			}
+		}
+	}
+
+	if (OpponentName.IsEmpty())
+	{
+		if (DuelState.InitiatorGuid != 0 && DuelState.InitiatorGuid != LocalPlayerGuid)
+		{
+			OpponentName = GetPlayerDisplayName(DuelState.InitiatorGuid);
+		}
+		else if (TargetGuid != 0 && TargetGuid != LocalPlayerGuid)
+		{
+			OpponentName = GetPlayerDisplayName(TargetGuid);
+		}
+	}
+
+	if (bIncomingRequest)
+	{
+		if (!DuelInviteWidget.IsValid() && GEngine && GEngine->GameViewport)
+		{
+			DuelInviteWidget = SNew(SWowDuelInvite)
+				.ConnectionManager(ConnectionManager)
+				.ChallengerName(OpponentName.IsEmpty() ? TEXT("Unknown player") : OpponentName)
+				.ArbiterGuid(static_cast<int64>(DuelState.ArbiterGuid))
+				.OnClosed(FSimpleDelegate::CreateUObject(this, &AWowGameplayController::HideDuelInvite));
+
+			DuelInviteViewportWidget =
+				SNew(SOverlay)
+				+ SOverlay::Slot()
+				[
+					SNew(SBorder)
+					.BorderImage(FAppStyle::GetBrush("WhiteBrush"))
+					.BorderBackgroundColor(FLinearColor(0.0f, 0.0f, 0.0f, 0.001f))
+				]
+				+ SOverlay::Slot()
+				.HAlign(HAlign_Center)
+				.VAlign(VAlign_Center)
+				[
+					DuelInviteWidget.ToSharedRef()
+				];
+
+			GEngine->GameViewport->AddViewportWidgetContent(DuelInviteViewportWidget.ToSharedRef(), 210);
+		}
+	}
+	else
+	{
+		HideDuelInvite();
+	}
+
+	if (!DuelStatusBorder.IsValid() || !DuelStatusText.IsValid())
+	{
+		return;
+	}
+
+	FString StatusMessage;
+	if (DuelState.IsRequestPending() && DuelState.InitiatorGuid == LocalPlayerGuid)
+	{
+		StatusMessage = OpponentName.IsEmpty()
+			? TEXT("Duel request sent.")
+			: FString::Printf(TEXT("Duel request sent to %s."), *OpponentName);
+	}
+	else if (DuelState.IsCountdownActive())
+	{
+		const int32 SecondsRemaining = FMath::Max(1, FMath::CeilToInt(DuelState.GetCountdownRemainingSeconds()));
+		StatusMessage = OpponentName.IsEmpty()
+			? FString::Printf(TEXT("Duel begins in %d."), SecondsRemaining)
+			: FString::Printf(TEXT("Duel with %s begins in %d."), *OpponentName, SecondsRemaining);
+	}
+	else if (DuelState.IsInProgress())
+	{
+		StatusMessage = DuelState.bInBounds
+			? (OpponentName.IsEmpty() ? TEXT("Duel in progress.") : FString::Printf(TEXT("Dueling %s."), *OpponentName))
+			: TEXT("Return to the duel area.");
+	}
+	else if (DuelState.ShouldShowCompletionText())
+	{
+		if (DuelState.bHasWinner)
+		{
+			const FString LocalPlayerName = ConnectionManager->GetCharacterName();
+			if (!LocalPlayerName.IsEmpty() && DuelState.WinnerName == LocalPlayerName)
+			{
+				StatusMessage = DuelState.ResultReason == WowDuelResultReason::FLED
+					? FString::Printf(TEXT("You win. %s fled the duel."), *DuelState.LoserName)
+					: FString::Printf(TEXT("You defeat %s in a duel."), *DuelState.LoserName);
+			}
+			else if (!LocalPlayerName.IsEmpty() && DuelState.LoserName == LocalPlayerName)
+			{
+				StatusMessage = DuelState.ResultReason == WowDuelResultReason::FLED
+					? FString::Printf(TEXT("You fled the duel with %s."), *DuelState.WinnerName)
+					: FString::Printf(TEXT("%s defeats you in a duel."), *DuelState.WinnerName);
+			}
+			else
+			{
+				StatusMessage = DuelState.ResultReason == WowDuelResultReason::FLED
+					? FString::Printf(TEXT("%s wins the duel. %s fled."), *DuelState.WinnerName, *DuelState.LoserName)
+					: FString::Printf(TEXT("%s defeats %s in a duel."), *DuelState.WinnerName, *DuelState.LoserName);
+			}
+		}
+		else if (DuelState.bInterrupted)
+		{
+			StatusMessage = TEXT("Duel canceled.");
+		}
+		else
+		{
+			StatusMessage = TEXT("Duel complete.");
+		}
+	}
+
+	const bool bShowStatus = !StatusMessage.IsEmpty();
+	DuelStatusText->SetText(FText::FromString(StatusMessage));
+	DuelStatusBorder->SetVisibility(bShowStatus ? EVisibility::HitTestInvisible : EVisibility::Collapsed);
+}
+
+void AWowGameplayController::MaybeApplyDebugDuelPreview()
+{
+	if (bDebugDuelPreviewApplied || DebugDuelPreviewMode.IsEmpty() || !ConnectionManager || !GetWorld())
+	{
+		return;
+	}
+
+	if (GetWorld()->GetTimeSeconds() < 5.0f)
+	{
+		return;
+	}
+
+	if (ConnectionManager->PacketHandler.CurrentDuel.Phase != EWowDuelPhase::None)
+	{
+		return;
+	}
+
+	const uint64 PreviewInitiatorGuid = 0x1122334455667788ULL;
+	ConnectionManager->PacketHandler.PlayerNameCache.FindOrAdd(PreviewInitiatorGuid) = TEXT("DuelPreview");
+
+	FWowDuelState& DuelState = ConnectionManager->PacketHandler.CurrentDuel;
+	DuelState.BeginRequest(0x8877665544332211ULL, PreviewInitiatorGuid);
+
+	if (DebugDuelPreviewMode.Equals(TEXT("countdown"), ESearchCase::IgnoreCase))
+	{
+		DuelState.BeginCountdown(5.0);
+	}
+	else if (DebugDuelPreviewMode.Equals(TEXT("winner"), ESearchCase::IgnoreCase))
+	{
+		DuelState.SetWinner(WowDuelResultReason::WON,
+			ConnectionManager->GetCharacterName().IsEmpty() ? TEXT("Player") : ConnectionManager->GetCharacterName(),
+			TEXT("DuelPreview"));
+	}
+	else if (DebugDuelPreviewMode.Equals(TEXT("forfeit"), ESearchCase::IgnoreCase))
+	{
+		DuelState.SetWinner(WowDuelResultReason::FLED, TEXT("DuelPreview"),
+			ConnectionManager->GetCharacterName().IsEmpty() ? TEXT("Player") : ConnectionManager->GetCharacterName());
+	}
+
+	ConnectionManager->PacketHandler.OnDuelUpdated.Broadcast(DuelState);
+	bDebugDuelPreviewApplied = true;
+
+	UE_LOG(LogWowGameplay, Log, TEXT("Applied debug duel preview mode '%s'"), *DebugDuelPreviewMode);
+}
+
+void AWowGameplayController::OnDuelUpdated(const FWowDuelState& DuelState)
+{
+	RefreshDuelUi();
+
+	if (!ChatWindow.IsValid())
+	{
+		return;
+	}
+
+	const uint64 LocalPlayerGuid = ConnectionManager
+		? ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid
+		: 0;
+	const FString ChallengerName = GetPlayerDisplayName(DuelState.InitiatorGuid);
+
+	if (DuelState.IsRequestPending())
+	{
+		if (DuelState.InitiatorGuid == LocalPlayerGuid)
+		{
+			ChatWindow->AddCombatMessage(TEXT("Duel request sent."), FLinearColor::Yellow);
+		}
+		else
+		{
+			ChatWindow->AddCombatMessage(
+				FString::Printf(TEXT("%s has challenged you to a duel."), *ChallengerName),
+				FLinearColor(1.0f, 0.75f, 0.2f));
+		}
+	}
+	else if (DuelState.IsCountdownActive())
+	{
+		ChatWindow->AddCombatMessage(TEXT("Duel countdown started."), FLinearColor(1.0f, 0.75f, 0.2f));
+	}
+	else if (DuelState.IsInProgress() && !DuelState.bInBounds)
+	{
+		ChatWindow->AddCombatMessage(TEXT("You have left the duel area."), FLinearColor::Red);
+	}
+	else if (DuelState.IsInProgress() && DuelState.bInBounds)
+	{
+		ChatWindow->AddCombatMessage(TEXT("Duel in progress."), FLinearColor::Yellow);
+	}
+	else if (DuelState.bHasWinner)
+	{
+		const FString ResultMessage = DuelState.ResultReason == WowDuelResultReason::FLED
+			? FString::Printf(TEXT("%s wins the duel after %s fled."), *DuelState.WinnerName, *DuelState.LoserName)
+			: FString::Printf(TEXT("%s defeats %s in a duel."), *DuelState.WinnerName, *DuelState.LoserName);
+		ChatWindow->AddCombatMessage(ResultMessage, FLinearColor::Yellow);
+	}
+	else if (DuelState.IsComplete() && DuelState.bInterrupted)
+	{
+		ChatWindow->AddCombatMessage(TEXT("Duel canceled."), FLinearColor::Yellow);
+	}
+}
+
 void AWowGameplayController::OnGroupInviteReceived(const FString& InviterName)
 {
 	UE_LOG(LogWowGameplay, Log, TEXT("Group invite received from %s"), *InviterName);
@@ -3089,6 +3428,12 @@ void AWowGameplayController::OnPlayerNameReceived(uint64 Guid, const FString& Na
 {
 	// TODO: Update nameplate for matching entity
 	UE_LOG(LogWowGameplay, Log, TEXT("Received player name: GUID=%llu Name=%s"), Guid, *Name);
+	PendingDuelNameQueries.Remove(Guid);
+	if (DuelInviteWidget.IsValid())
+	{
+		HideDuelInvite();
+	}
+	RefreshDuelUi();
 }
 
 void AWowGameplayController::OnCreatureNameReceived(uint32 Entry, const FString& Name, const FString& Title)

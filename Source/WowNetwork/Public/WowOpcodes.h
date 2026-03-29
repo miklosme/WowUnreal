@@ -136,6 +136,16 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_TRADE_STATUS            = 0x0120;
     inline constexpr uint16 SMSG_TRADE_STATUS_EXTENDED   = 0x0121;
 
+    // Duel opcodes
+    inline constexpr uint16 SMSG_DUEL_REQUESTED          = 0x0167;
+    inline constexpr uint16 SMSG_DUEL_OUTOFBOUNDS        = 0x0168;
+    inline constexpr uint16 SMSG_DUEL_INBOUNDS           = 0x0169;
+    inline constexpr uint16 SMSG_DUEL_COMPLETE           = 0x016A;
+    inline constexpr uint16 SMSG_DUEL_WINNER             = 0x016B;
+    inline constexpr uint16 CMSG_DUEL_ACCEPTED           = 0x016C;
+    inline constexpr uint16 CMSG_DUEL_CANCELLED          = 0x016D;
+    inline constexpr uint16 SMSG_DUEL_COUNTDOWN          = 0x02B7;
+
     // Vendor opcodes
     inline constexpr uint16 SMSG_LIST_INVENTORY          = 0x019F;
     inline constexpr uint16 CMSG_SELL_ITEM               = 0x01A0;
