@@ -124,6 +124,46 @@ struct FWowMailMessage
     TArray<FWowMailAttachment> Attachments;
 };
 
+// Trade slot summary from SMSG_TRADE_STATUS_EXTENDED
+struct FWowTradeItem
+{
+    uint8 Slot = 0;
+    uint32 ItemId = 0;
+    uint32 DisplayId = 0;
+    uint32 Count = 0;
+    bool bWrapped = false;
+    uint64 GiftCreatorGuid = 0;
+    uint32 PermanentEnchantId = 0;
+    uint32 GemEnchantId1 = 0;
+    uint32 GemEnchantId2 = 0;
+    uint32 GemEnchantId3 = 0;
+    uint64 CreatorGuid = 0;
+    uint32 Charges = 0;
+    uint32 SuffixFactor = 0;
+    int32 RandomPropertyId = 0;
+    uint32 LockId = 0;
+    uint32 MaxDurability = 0;
+    uint32 Durability = 0;
+
+    bool HasItem() const { return ItemId != 0; }
+};
+
+// Trade window state
+struct FWowTradeState
+{
+    uint64 TraderGuid = 0;
+    uint32 Status = 0;
+    bool bTradeOpen = false;
+    bool bLocalAccepted = false;
+    bool bTargetAccepted = false;
+    uint32 PlayerMoney = 0;
+    uint32 TargetMoney = 0;
+    uint32 PlayerSpell = 0;
+    uint32 TargetSpell = 0;
+    TArray<FWowTradeItem> PlayerItems;
+    TArray<FWowTradeItem> TargetItems;
+};
+
 // Quest reward item
 struct FWowQuestRewardItem
 {
@@ -196,6 +236,32 @@ namespace WowMailCheckMask
     inline constexpr uint32 COPIED      = 0x04;
     inline constexpr uint32 COD_PAYMENT = 0x08;
     inline constexpr uint32 HAS_BODY    = 0x10;
+}
+
+namespace WowTradeStatus
+{
+    inline constexpr uint32 BUSY           = 0;
+    inline constexpr uint32 BEGIN_TRADE    = 1;
+    inline constexpr uint32 OPEN_WINDOW    = 2;
+    inline constexpr uint32 TRADE_CANCELED = 3;
+    inline constexpr uint32 TRADE_ACCEPT   = 4;
+    inline constexpr uint32 BUSY_2         = 5;
+    inline constexpr uint32 NO_TARGET      = 6;
+    inline constexpr uint32 BACK_TO_TRADE  = 7;
+    inline constexpr uint32 TRADE_COMPLETE = 8;
+    inline constexpr uint32 TARGET_TO_FAR  = 10;
+    inline constexpr uint32 WRONG_FACTION  = 11;
+    inline constexpr uint32 CLOSE_WINDOW   = 12;
+    inline constexpr uint32 IGNORE_YOU     = 14;
+    inline constexpr uint32 YOU_STUNNED    = 15;
+    inline constexpr uint32 TARGET_STUNNED = 16;
+    inline constexpr uint32 YOU_DEAD       = 17;
+    inline constexpr uint32 TARGET_DEAD    = 18;
+    inline constexpr uint32 YOU_LOGOUT     = 19;
+    inline constexpr uint32 TARGET_LOGOUT  = 20;
+    inline constexpr uint32 TRIAL_ACCOUNT  = 21;
+    inline constexpr uint32 ONLY_CONJURED  = 22;
+    inline constexpr uint32 NOT_ELIGIBLE   = 23;
 }
 
 // WoW 3.3.5a unit stand states (UNIT_FIELD_BYTES_1 byte 0)

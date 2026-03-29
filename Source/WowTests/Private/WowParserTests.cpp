@@ -538,6 +538,316 @@ bool FMailListPacketParsesInbox::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradeStatusPacketParsesState, "WowUnreal.Network.TradeStatusPacketParsesState",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTradeStatusPacketParsesState::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    bool bCalled = false;
+    FWowTradeState TradeState;
+    PacketHandler.OnTradeUpdated.AddLambda([&bCalled, &TradeState](const FWowTradeState& State)
+    {
+        bCalled = true;
+        TradeState = State;
+    });
+
+    TArray<uint8> BeginPacket;
+    const uint32 BeginStatus = WowTradeStatus::BEGIN_TRADE;
+    const uint64 TraderGuid = 0x8877665544332211ULL;
+    BeginPacket.AddUninitialized(sizeof(uint32) + sizeof(uint64));
+    FMemory::Memcpy(BeginPacket.GetData(), &BeginStatus, sizeof(uint32));
+    FMemory::Memcpy(BeginPacket.GetData() + sizeof(uint32), &TraderGuid, sizeof(uint64));
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS, BeginPacket);
+
+    TestTrue(TEXT("Begin trade packet fires delegate"), bCalled);
+    TestEqual(TEXT("Trade status parsed"), TradeState.Status, BeginStatus);
+    TestEqual(TEXT("Trader guid parsed"), TradeState.TraderGuid, TraderGuid);
+    TestFalse(TEXT("Begin trade does not mark window open yet"), TradeState.bTradeOpen);
+
+    bCalled = false;
+    TArray<uint8> OpenPacket;
+    const uint32 OpenStatus = WowTradeStatus::OPEN_WINDOW;
+    const uint32 OpenCookie = 0;
+    OpenPacket.AddUninitialized(sizeof(uint32) + sizeof(uint32));
+    FMemory::Memcpy(OpenPacket.GetData(), &OpenStatus, sizeof(uint32));
+    FMemory::Memcpy(OpenPacket.GetData() + sizeof(uint32), &OpenCookie, sizeof(uint32));
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS, OpenPacket);
+
+    TestTrue(TEXT("Open trade packet fires delegate"), bCalled);
+    TestEqual(TEXT("Open trade status parsed"), TradeState.Status, OpenStatus);
+    TestTrue(TEXT("Open trade marks window open"), TradeState.bTradeOpen);
+    TestEqual(TEXT("Trader guid persists across status updates"), TradeState.TraderGuid, TraderGuid);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradeStatusExtendedParsesOffers, "WowUnreal.Network.TradeStatusExtendedParsesOffers",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTradeStatusExtendedParsesOffers::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU32 = [](TArray<uint8>& Buffer, uint32 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint32));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint32));
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+
+    auto AppendTradeSlot = [&AppendU8, &AppendU32, &AppendU64](TArray<uint8>& Buffer, uint8 SlotIndex, uint32 ItemId, uint32 DisplayId, uint32 Count)
+    {
+        AppendU8(Buffer, SlotIndex);
+        AppendU32(Buffer, ItemId);
+        AppendU32(Buffer, DisplayId);
+        AppendU32(Buffer, Count);
+        AppendU32(Buffer, 0u); // wrapped
+        AppendU64(Buffer, 0u); // gift creator
+        AppendU32(Buffer, 0u); // permanent enchant
+        AppendU32(Buffer, 0u); // gem 1
+        AppendU32(Buffer, 0u); // gem 2
+        AppendU32(Buffer, 0u); // gem 3
+        AppendU64(Buffer, 0u); // creator
+        AppendU32(Buffer, 0u); // charges
+        AppendU32(Buffer, 0u); // suffix factor
+        AppendU32(Buffer, 0u); // random property
+        AppendU32(Buffer, 0u); // lock id
+        AppendU32(Buffer, 100u); // max durability
+        AppendU32(Buffer, 80u);  // durability
+    };
+
+    TArray<uint8> TargetPacket;
+    AppendU8(TargetPacket, 1u);  // trader data
+    AppendU32(TargetPacket, 0u); // window cookie
+    AppendU32(TargetPacket, 7u);
+    AppendU32(TargetPacket, 7u);
+    AppendU32(TargetPacket, 50000u);
+    AppendU32(TargetPacket, 0u);
+    for (uint8 Slot = 0; Slot < 7; ++Slot)
+    {
+        AppendTradeSlot(TargetPacket, Slot, Slot == 0 ? 6948u : 0u, Slot == 0 ? 123u : 0u, Slot == 0 ? 2u : 0u);
+    }
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED, TargetPacket);
+
+    TestTrue(TEXT("Trade extended packet opens trade state"), PacketHandler.CurrentTrade.bTradeOpen);
+    TestEqual(TEXT("Target money parsed"), PacketHandler.CurrentTrade.TargetMoney, 50000u);
+    TestEqual(TEXT("Target trade slots parsed"), PacketHandler.CurrentTrade.TargetItems.Num(), 7);
+    if (PacketHandler.CurrentTrade.TargetItems.Num() != 7)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Target trade item entry parsed"), PacketHandler.CurrentTrade.TargetItems[0].ItemId, 6948u);
+    TestEqual(TEXT("Target trade item count parsed"), PacketHandler.CurrentTrade.TargetItems[0].Count, 2u);
+
+    TArray<uint8> PlayerPacket;
+    AppendU8(PlayerPacket, 0u);  // player data
+    AppendU32(PlayerPacket, 0u); // window cookie
+    AppendU32(PlayerPacket, 7u);
+    AppendU32(PlayerPacket, 7u);
+    AppendU32(PlayerPacket, 12345u);
+    AppendU32(PlayerPacket, 0u);
+    for (uint8 Slot = 0; Slot < 7; ++Slot)
+    {
+        AppendTradeSlot(PlayerPacket, Slot, Slot == 1 ? 17031u : 0u, Slot == 1 ? 321u : 0u, Slot == 1 ? 5u : 0u);
+    }
+
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS_EXTENDED, PlayerPacket);
+
+    TestEqual(TEXT("Player money parsed"), PacketHandler.CurrentTrade.PlayerMoney, 12345u);
+    TestEqual(TEXT("Player trade slots parsed"), PacketHandler.CurrentTrade.PlayerItems.Num(), 7);
+    if (PacketHandler.CurrentTrade.PlayerItems.Num() != 7)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Player trade item entry parsed"), PacketHandler.CurrentTrade.PlayerItems[1].ItemId, 17031u);
+    TestEqual(TEXT("Player trade item count parsed"), PacketHandler.CurrentTrade.PlayerItems[1].Count, 5u);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradeStatusPacketTracksLifecycle, "WowUnreal.Network.TradeStatusPacketTracksLifecycle",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTradeStatusPacketTracksLifecycle::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    int32 UpdateCount = 0;
+    PacketHandler.OnTradeUpdated.AddLambda([&UpdateCount](const FWowTradeState&)
+    {
+        ++UpdateCount;
+    });
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU32 = [](TArray<uint8>& Buffer, uint32 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint32));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint32));
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+
+    const uint64 TraderGuid = 0x1020304050607080ULL;
+
+    TArray<uint8> BeginPacket;
+    AppendU32(BeginPacket, WowTradeStatus::BEGIN_TRADE);
+    AppendU64(BeginPacket, TraderGuid);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS, BeginPacket);
+
+    TestEqual(TEXT("BEGIN_TRADE stores the trader guid"), PacketHandler.CurrentTrade.TraderGuid, TraderGuid);
+    TestEqual(TEXT("BEGIN_TRADE updates trade status"), PacketHandler.CurrentTrade.Status, static_cast<uint32>(WowTradeStatus::BEGIN_TRADE));
+    TestFalse(TEXT("Trade is not open at request time"), PacketHandler.CurrentTrade.bTradeOpen);
+    TestFalse(TEXT("Local accepted starts cleared"), PacketHandler.CurrentTrade.bLocalAccepted);
+    TestFalse(TEXT("Target accepted starts cleared"), PacketHandler.CurrentTrade.bTargetAccepted);
+
+    TArray<uint8> OpenPacket;
+    AppendU32(OpenPacket, WowTradeStatus::OPEN_WINDOW);
+    AppendU32(OpenPacket, 0u);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS, OpenPacket);
+
+    TestTrue(TEXT("OPEN_WINDOW marks the trade as open"), PacketHandler.CurrentTrade.bTradeOpen);
+
+    TArray<uint8> AcceptPacket;
+    AppendU32(AcceptPacket, WowTradeStatus::TRADE_ACCEPT);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS, AcceptPacket);
+
+    TestTrue(TEXT("TRADE_ACCEPT marks the remote player as accepted"), PacketHandler.CurrentTrade.bTargetAccepted);
+
+    PacketHandler.CurrentTrade.bLocalAccepted = true;
+    TArray<uint8> BackPacket;
+    AppendU32(BackPacket, WowTradeStatus::BACK_TO_TRADE);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS, BackPacket);
+
+    TestFalse(TEXT("BACK_TO_TRADE clears local acceptance"), PacketHandler.CurrentTrade.bLocalAccepted);
+    TestFalse(TEXT("BACK_TO_TRADE clears remote acceptance"), PacketHandler.CurrentTrade.bTargetAccepted);
+    TestTrue(TEXT("BACK_TO_TRADE keeps the trade window open"), PacketHandler.CurrentTrade.bTradeOpen);
+
+    PacketHandler.CurrentTrade.PlayerMoney = 100u;
+    PacketHandler.CurrentTrade.TargetMoney = 200u;
+    PacketHandler.CurrentTrade.PlayerItems.SetNum(1);
+    PacketHandler.CurrentTrade.PlayerItems[0].ItemId = 6948;
+
+    TArray<uint8> ClosePacket;
+    AppendU32(ClosePacket, WowTradeStatus::CLOSE_WINDOW);
+    AppendU32(ClosePacket, 0u);
+    AppendU8(ClosePacket, 0u);
+    AppendU32(ClosePacket, 0u);
+    PacketHandler.HandlePacket(WowOpcode::SMSG_TRADE_STATUS, ClosePacket);
+
+    TestFalse(TEXT("CLOSE_WINDOW hides the trade window"), PacketHandler.CurrentTrade.bTradeOpen);
+    TestEqual(TEXT("CLOSE_WINDOW clears local money"), PacketHandler.CurrentTrade.PlayerMoney, 0u);
+    TestEqual(TEXT("CLOSE_WINDOW clears target money"), PacketHandler.CurrentTrade.TargetMoney, 0u);
+    TestEqual(TEXT("CLOSE_WINDOW clears offered items"), PacketHandler.CurrentTrade.PlayerItems.Num(), 0);
+    TestTrue(TEXT("Trade update delegate fired for each lifecycle packet"), UpdateCount >= 4);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FTradeStatusExtendedParsesBothSides, "WowUnreal.Network.TradeStatusExtendedParsesBothSides",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FTradeStatusExtendedParsesBothSides::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler PacketHandler;
+
+    auto AppendU8 = [](TArray<uint8>& Buffer, uint8 Value)
+    {
+        Buffer.Add(Value);
+    };
+    auto AppendU32 = [](TArray<uint8>& Buffer, uint32 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint32));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint32));
+    };
+    auto AppendU64 = [](TArray<uint8>& Buffer, uint64 Value)
+    {
+        const int32 Offset = Buffer.AddUninitialized(sizeof(uint64));
+        FMemory::Memcpy(Buffer.GetData() + Offset, &Value, sizeof(uint64));
+    };
+    auto AppendTradeSlot = [&AppendU8, &AppendU32, &AppendU64](TArray<uint8>& Buffer, uint8 Slot, uint32 ItemId, uint32 DisplayId, uint32 Count)
+    {
+        AppendU8(Buffer, Slot);
+        AppendU32(Buffer, ItemId);
+        AppendU32(Buffer, DisplayId);
+        AppendU32(Buffer, Count);
+        AppendU32(Buffer, 0u);
+        AppendU64(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU64(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+        AppendU32(Buffer, 0u);
+    };
+
+    auto BuildExtendedPacket = [&AppendU8, &AppendU32, &AppendTradeSlot](bool bTraderData, uint32 Money, uint32 SpellId, uint8 OccupiedSlot, uint32 ItemId, uint32 DisplayId, uint32 Count)
+    {
+        TArray<uint8> Packet;
+        AppendU8(Packet, bTraderData ? 1u : 0u);
+        AppendU32(Packet, 0u);
+        AppendU32(Packet, 7u);
+        AppendU32(Packet, 7u);
+        AppendU32(Packet, Money);
+        AppendU32(Packet, SpellId);
+        for (uint8 Slot = 0; Slot < 7; ++Slot)
+        {
+            const bool bOccupied = (Slot == OccupiedSlot);
+            AppendTradeSlot(Packet, Slot, bOccupied ? ItemId : 0u, bOccupied ? DisplayId : 0u, bOccupied ? Count : 0u);
+        }
+        return Packet;
+    };
+
+    PacketHandler.HandlePacket(
+        WowOpcode::SMSG_TRADE_STATUS_EXTENDED,
+        BuildExtendedPacket(false, 12345u, 133u, 0u, 6948u, 111u, 2u));
+    PacketHandler.HandlePacket(
+        WowOpcode::SMSG_TRADE_STATUS_EXTENDED,
+        BuildExtendedPacket(true, 54321u, 686u, 1u, 17031u, 222u, 1u));
+
+    TestTrue(TEXT("Trade window is open after extended payloads"), PacketHandler.CurrentTrade.bTradeOpen);
+    TestEqual(TEXT("Extended payload sets the trade status to OPEN_WINDOW"), PacketHandler.CurrentTrade.Status, static_cast<uint32>(WowTradeStatus::OPEN_WINDOW));
+    TestEqual(TEXT("Player money parsed from own trade payload"), PacketHandler.CurrentTrade.PlayerMoney, 12345u);
+    TestEqual(TEXT("Target money parsed from trader trade payload"), PacketHandler.CurrentTrade.TargetMoney, 54321u);
+    TestEqual(TEXT("Player spell id parsed"), PacketHandler.CurrentTrade.PlayerSpell, 133u);
+    TestEqual(TEXT("Target spell id parsed"), PacketHandler.CurrentTrade.TargetSpell, 686u);
+    TestTrue(TEXT("Player trade items array has all trade slots"), PacketHandler.CurrentTrade.PlayerItems.IsValidIndex(0));
+    TestTrue(TEXT("Target trade items array has all trade slots"), PacketHandler.CurrentTrade.TargetItems.IsValidIndex(1));
+
+    if (!PacketHandler.CurrentTrade.PlayerItems.IsValidIndex(0) || !PacketHandler.CurrentTrade.TargetItems.IsValidIndex(1))
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Own side item entry parsed"), PacketHandler.CurrentTrade.PlayerItems[0].ItemId, 6948u);
+    TestEqual(TEXT("Own side item count parsed"), PacketHandler.CurrentTrade.PlayerItems[0].Count, 2u);
+    TestEqual(TEXT("Trader side item entry parsed"), PacketHandler.CurrentTrade.TargetItems[1].ItemId, 17031u);
+    TestEqual(TEXT("Trader side item count parsed"), PacketHandler.CurrentTrade.TargetItems[1].Count, 1u);
+
+    return true;
+}
+
 // ====================================================================
 // DBC Parser Tests (require MPQ data)
 // ====================================================================

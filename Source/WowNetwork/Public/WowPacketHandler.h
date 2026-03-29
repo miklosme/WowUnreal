@@ -16,6 +16,7 @@ DECLARE_MULTICAST_DELEGATE(FOnLootClosed);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnVendorOpened, uint64 /*VendorGuid*/, const TArray<FWowVendorItem>& /*Items*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailListReceived, const TArray<FWowMailMessage>& /*Mail*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnMailboxShown, uint64 /*MailboxGuid*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnTradeUpdated, const FWowTradeState& /*TradeState*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnBankOpened, uint64 /*BankerGuid*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestDialog, const FWowQuestDetails& /*QuestDetails*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnQuestRewardDialog, const FWowQuestDetails& /*QuestDetails*/);
@@ -187,6 +188,9 @@ public:
     uint32 MailInboxTotalCount = 0;
     TArray<FWowMailMessage> MailInbox;
 
+    /** Current trade window state */
+    FWowTradeState CurrentTrade;
+
     // Events
     FOnLoginVerifyWorld OnLoginVerifyWorld;
     FOnChatMessage OnChatMessage;
@@ -200,6 +204,7 @@ public:
     FOnVendorOpened OnVendorOpened;
     FOnMailListReceived OnMailListReceived;
     FOnMailboxShown OnMailboxShown;
+    FOnTradeUpdated OnTradeUpdated;
     FOnBankOpened OnBankOpened;
     FOnQuestDialog OnQuestDialog;
     FOnQuestRewardDialog OnQuestRewardDialog;
@@ -349,6 +354,10 @@ private:
     // ── Mail system handlers ────────────────────────────────────────────────
     void HandleShowMailbox(FPacketReader& R);
     void HandleMailListResult(FPacketReader& R);
+
+    // ── Trade system handlers ───────────────────────────────────────────────
+    void HandleTradeStatus(FPacketReader& R);
+    void HandleTradeStatusExtended(FPacketReader& R);
 
     // ── Bank system handlers ────────────────────────────────────────────────
     void HandleShowBank(FPacketReader& R);

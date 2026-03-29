@@ -7,6 +7,7 @@
 class SWowLootWindow;
 class SWowVendorWindow;
 class SWowQuestDialog;
+class SWowTradeWindow;
 class UWowConnectionManager;
 
 /**
@@ -51,6 +52,12 @@ public:
     /** Hide quest dialog */
     void HideQuestDialog();
 
+    /** Show or refresh the trade window */
+    void ShowTradeWindow(const FWowTradeState& TradeState);
+
+    /** Hide the trade window */
+    void HideTradeWindow();
+
 protected:
     UPROPERTY()
     TObjectPtr<UWowConnectionManager> ConnectionManager;
@@ -60,6 +67,7 @@ private:
     TSharedPtr<SWowLootWindow> LootWindow;
     TSharedPtr<SWowVendorWindow> VendorWindow;
     TSharedPtr<SWowQuestDialog> QuestDialog;
+    TSharedPtr<SWowTradeWindow> TradeWindow;
 
     // Widget callbacks
     void OnLootItem(int32 LootSlot);
@@ -71,6 +79,8 @@ private:
     void OnQuestAccept(uint64 QuestGiverGuid, uint32 QuestId);
     void OnQuestComplete(uint64 QuestGiverGuid, uint32 QuestId, int32 RewardChoice);
     void OnQuestDecline();
+    void OnAcceptTrade(bool bBeginTrade);
+    void OnCancelTrade();
 
     // UI integration
     void CreateWidgets();

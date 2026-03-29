@@ -1,5 +1,6 @@
 #include "WowGameUI.h"
 #include "Widgets/SWowLootWindow.h"
+#include "Widgets/SWowTradeWindow.h"
 #include "Widgets/SWowVendorWindow.h"
 #include "Widgets/SWowQuestDialog.h"
 #include "WowConnectionManager.h"
@@ -101,6 +102,25 @@ void UWowGameUI::HideQuestDialog()
     }
 }
 
+void UWowGameUI::ShowTradeWindow(const FWowTradeState& TradeState)
+{
+    CreateWidgets();
+    if (TradeWindow.IsValid())
+    {
+        TradeWindow->UpdateTrade(TradeState);
+        UE_LOG(LogWowGameUI, Log, TEXT("Showing trade window"));
+    }
+}
+
+void UWowGameUI::HideTradeWindow()
+{
+    if (TradeWindow.IsValid())
+    {
+        TradeWindow->CloseTrade();
+        UE_LOG(LogWowGameUI, Log, TEXT("Hiding trade window"));
+    }
+}
+
 void UWowGameUI::CreateWidgets()
 {
     if (bWidgetsCreated) return;
@@ -122,6 +142,10 @@ void UWowGameUI::CreateWidgets()
         .OnQuestAccept_UObject(this, &UWowGameUI::OnQuestAccept)
         .OnQuestComplete_UObject(this, &UWowGameUI::OnQuestComplete)
         .OnQuestDecline_UObject(this, &UWowGameUI::OnQuestDecline);
+
+    TradeWindow = SNew(SWowTradeWindow)
+        .OnTradeAccept_UObject(this, &UWowGameUI::OnAcceptTrade)
+        .OnTradeCancel_UObject(this, &UWowGameUI::OnCancelTrade);
 
     AddWidgetsToViewport();
     bWidgetsCreated = true;
@@ -163,6 +187,16 @@ void UWowGameUI::AddWidgetsToViewport()
             QuestDialog.ToSharedRef()
         ]
     );
+
+    GEngine->GameViewport->AddViewportWidgetContent(
+        SNew(SConstraintCanvas)
+        + SConstraintCanvas::Slot()
+        .Anchors(FAnchors(0.5f, 0.45f, 0.5f, 0.45f))
+        .Offset(FMargin(-240.0f, -170.0f, 480.0f, 340.0f))
+        [
+            TradeWindow.ToSharedRef()
+        ]
+    );
 }
 
 void UWowGameUI::RemoveWidgetsFromViewport()
@@ -180,6 +214,10 @@ void UWowGameUI::RemoveWidgetsFromViewport()
         if (QuestDialog.IsValid())
         {
             GEngine->GameViewport->RemoveViewportWidgetContent(QuestDialog.ToSharedRef());
+        }
+        if (TradeWindow.IsValid())
+        {
+            GEngine->GameViewport->RemoveViewportWidgetContent(TradeWindow.ToSharedRef());
         }
     }
 }
@@ -216,6 +254,34 @@ void UWowGameUI::OnBuyItem(uint64 VendorGuid, uint32 ItemId, int32 Count)
     {
         ConnectionManager->SendBuyItem(VendorGuid, ItemId, Count);
         UE_LOG(LogWowGameUI, Log, TEXT("Buying item %u (count=%d) from vendor %llu"), ItemId, Count, VendorGuid);
+    }
+}
+
+void UWowGameUI::OnAcceptTrade(bool bBeginTrade)
+{
+    if (!ConnectionManager)
+    {
+        return;
+    }
+
+    if (bBeginTrade)
+    {
+        ConnectionManager->SendBeginTrade();
+        UE_LOG(LogWowGameUI, Log, TEXT("Accepting incoming trade request"));
+    }
+    else
+    {
+        ConnectionManager->SendAcceptTrade();
+        UE_LOG(LogWowGameUI, Log, TEXT("Accepting current trade contents"));
+    }
+}
+
+void UWowGameUI::OnCancelTrade()
+{
+    if (ConnectionManager)
+    {
+        ConnectionManager->SendCancelTrade();
+        UE_LOG(LogWowGameUI, Log, TEXT("Canceling trade"));
     }
 }
 

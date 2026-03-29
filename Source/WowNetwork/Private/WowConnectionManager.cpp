@@ -657,6 +657,85 @@ void UWowConnectionManager::SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8
     UE_LOG(LogWowNet, Log, TEXT("Sell item %lld (count=%d) to vendor %lld"), ItemGuid, Count, VendorGuid);
 }
 
+void UWowConnectionManager::SendInitiateTrade(int64 TargetGuidToTrade)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(8);
+    const uint64 Guid = static_cast<uint64>(TargetGuidToTrade);
+    FMemory::Memcpy(Data.GetData(), &Guid, 8);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_INITIATE_TRADE, Data);
+    PacketHandler.CurrentTrade = FWowTradeState{};
+    PacketHandler.CurrentTrade.TraderGuid = Guid;
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_INITIATE_TRADE for player %llu"), Guid);
+}
+
+void UWowConnectionManager::SendBeginTrade()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_BEGIN_TRADE, {});
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_BEGIN_TRADE"));
+}
+
+void UWowConnectionManager::SendAcceptTrade()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_ACCEPT_TRADE, {});
+    PacketHandler.CurrentTrade.bLocalAccepted = true;
+    PacketHandler.OnTradeUpdated.Broadcast(PacketHandler.CurrentTrade);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_ACCEPT_TRADE"));
+}
+
+void UWowConnectionManager::SendUnacceptTrade()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_UNACCEPT_TRADE, {});
+    PacketHandler.CurrentTrade.bLocalAccepted = false;
+    PacketHandler.OnTradeUpdated.Broadcast(PacketHandler.CurrentTrade);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_UNACCEPT_TRADE"));
+}
+
+void UWowConnectionManager::SendCancelTrade()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_CANCEL_TRADE, {});
+    PacketHandler.CurrentTrade.Status = WowTradeStatus::TRADE_CANCELED;
+    PacketHandler.CurrentTrade.bTradeOpen = false;
+    PacketHandler.CurrentTrade.bLocalAccepted = false;
+    PacketHandler.CurrentTrade.bTargetAccepted = false;
+    PacketHandler.CurrentTrade.PlayerMoney = 0;
+    PacketHandler.CurrentTrade.TargetMoney = 0;
+    PacketHandler.CurrentTrade.PlayerSpell = 0;
+    PacketHandler.CurrentTrade.TargetSpell = 0;
+    PacketHandler.CurrentTrade.PlayerItems.Reset();
+    PacketHandler.CurrentTrade.TargetItems.Reset();
+    PacketHandler.OnTradeUpdated.Broadcast(PacketHandler.CurrentTrade);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_CANCEL_TRADE"));
+}
+
+void UWowConnectionManager::SendSetTradeGold(int32 CopperAmount)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    TArray<uint8> Data;
+    Data.SetNumUninitialized(4);
+    const uint32 Gold = static_cast<uint32>(FMath::Max(0, CopperAmount));
+    FMemory::Memcpy(Data.GetData(), &Gold, 4);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_SET_TRADE_GOLD, Data);
+    PacketHandler.CurrentTrade.PlayerMoney = Gold;
+    PacketHandler.CurrentTrade.bLocalAccepted = false;
+    PacketHandler.CurrentTrade.bTargetAccepted = false;
+    PacketHandler.OnTradeUpdated.Broadcast(PacketHandler.CurrentTrade);
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_SET_TRADE_GOLD amount=%u"), Gold);
+}
+
 void UWowConnectionManager::SendGossipHello(int64 NpcGuid)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;

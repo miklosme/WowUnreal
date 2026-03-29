@@ -360,6 +360,37 @@ void AWowGameplayController::BindEntityEvents()
 			}
 		});
 
+	ConnectionManager->PacketHandler.OnTradeUpdated.AddLambda(
+		[this](const FWowTradeState& TradeState)
+		{
+			if (!GameUI)
+			{
+				return;
+			}
+
+			const bool bShowTrade = TradeState.bTradeOpen
+				|| TradeState.Status == WowTradeStatus::BEGIN_TRADE
+				|| TradeState.Status == WowTradeStatus::BACK_TO_TRADE
+				|| TradeState.Status == WowTradeStatus::TRADE_ACCEPT;
+
+			if (bShowTrade)
+			{
+				GameUI->ShowTradeWindow(TradeState);
+				if (UIManager && UIManager->GetEventSystem())
+				{
+					UIManager->GetEventSystem()->FireEvent(TEXT("TRADE_SHOW"));
+				}
+			}
+			else
+			{
+				GameUI->HideTradeWindow();
+				if (UIManager && UIManager->GetEventSystem())
+				{
+					UIManager->GetEventSystem()->FireEvent(TEXT("TRADE_CLOSED"));
+				}
+			}
+		});
+
 	ConnectionManager->PacketHandler.OnMailboxShown.AddLambda(
 		[this](uint64 MailboxGuid)
 		{
@@ -1682,8 +1713,19 @@ void AWowGameplayController::OnRightClick()
 
 	if (!TargetEntity->IsUnit()) return;
 
-	// Players: do nothing (no PvP interaction yet)
-	if (TargetEntity->IsPlayer()) return;
+	// Players: initiate a trade directly from right-click for now.
+	if (TargetEntity->IsPlayer())
+	{
+		const uint64 LocalPlayerGuid = ConnectionManager
+			? ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid
+			: 0;
+		if (TargetGuid != LocalPlayerGuid && ConnectionManager)
+		{
+			UE_LOG(LogWowGameplay, Log, TEXT("Right-click player %llu: initiating trade"), TargetGuid);
+			ConnectionManager->SendInitiateTrade(static_cast<int64>(TargetGuid));
+		}
+		return;
+	}
 
 	// Check if entity is dead (health = 0) — loot instead of interact
 	int32 Health = TargetEntity->GetHealth();

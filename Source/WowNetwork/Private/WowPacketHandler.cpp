@@ -117,6 +117,10 @@ FWowPacketHandler::FWowPacketHandler()
     Handlers.Add(WowOpcode::SMSG_SHOW_MAILBOX,            &FWowPacketHandler::HandleShowMailbox);
     Handlers.Add(WowOpcode::SMSG_MAIL_LIST_RESULT,        &FWowPacketHandler::HandleMailListResult);
 
+    // ── Trade system handlers ───────────────────────────────────────────────
+    Handlers.Add(WowOpcode::SMSG_TRADE_STATUS,            &FWowPacketHandler::HandleTradeStatus);
+    Handlers.Add(WowOpcode::SMSG_TRADE_STATUS_EXTENDED,   &FWowPacketHandler::HandleTradeStatusExtended);
+
     // ── Bank system handlers ────────────────────────────────────────────────
     Handlers.Add(WowOpcode::SMSG_SHOW_BANK,               &FWowPacketHandler::HandleShowBank);
 
@@ -2844,6 +2848,176 @@ void FWowPacketHandler::HandleMailListResult(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("MAIL_LIST_RESULT: received %d displayed mails (%u total)"), MailInbox.Num(), MailInboxTotalCount);
     OnMailListReceived.Broadcast(MailInbox);
+}
+
+void FWowPacketHandler::HandleTradeStatus(FPacketReader& R)
+{
+    if (!R.CanRead(4))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("TRADE_STATUS: packet too short"));
+        return;
+    }
+
+    const uint32 Status = R.ReadU32();
+    CurrentTrade.Status = Status;
+    auto ResetTradeOffers = [this]()
+    {
+        CurrentTrade.bTradeOpen = false;
+        CurrentTrade.bLocalAccepted = false;
+        CurrentTrade.bTargetAccepted = false;
+        CurrentTrade.PlayerMoney = 0;
+        CurrentTrade.TargetMoney = 0;
+        CurrentTrade.PlayerSpell = 0;
+        CurrentTrade.TargetSpell = 0;
+        CurrentTrade.PlayerItems.Reset();
+        CurrentTrade.TargetItems.Reset();
+    };
+
+    switch (Status)
+    {
+    case WowTradeStatus::BEGIN_TRADE:
+        CurrentTrade = FWowTradeState{};
+        CurrentTrade.Status = Status;
+        CurrentTrade.TraderGuid = R.CanRead(8) ? R.ReadU64() : 0;
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: begin trade with %llu"), CurrentTrade.TraderGuid);
+        break;
+
+    case WowTradeStatus::OPEN_WINDOW:
+        if (R.CanRead(4))
+        {
+            R.ReadU32(); // unknown 2.4.0+ value
+        }
+        CurrentTrade.bTradeOpen = true;
+        CurrentTrade.bLocalAccepted = false;
+        CurrentTrade.bTargetAccepted = false;
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: open window"));
+        break;
+
+    case WowTradeStatus::TRADE_ACCEPT:
+        CurrentTrade.bTradeOpen = true;
+        CurrentTrade.bTargetAccepted = true;
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: remote player accepted"));
+        break;
+
+    case WowTradeStatus::BACK_TO_TRADE:
+        CurrentTrade.bTradeOpen = true;
+        CurrentTrade.bLocalAccepted = false;
+        CurrentTrade.bTargetAccepted = false;
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: acceptance reset"));
+        break;
+
+    case WowTradeStatus::CLOSE_WINDOW:
+        if (R.CanRead(4))
+        {
+            R.ReadU32();
+        }
+        if (R.CanRead(1))
+        {
+            R.ReadU8();
+        }
+        if (R.CanRead(4))
+        {
+            R.ReadU32();
+        }
+        ResetTradeOffers();
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: close window"));
+        break;
+
+    case WowTradeStatus::TRADE_CANCELED:
+    case WowTradeStatus::TRADE_COMPLETE:
+        ResetTradeOffers();
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: terminal status %u"), Status);
+        break;
+
+    case WowTradeStatus::ONLY_CONJURED:
+    case WowTradeStatus::NOT_ELIGIBLE:
+        if (R.CanRead(1))
+        {
+            R.ReadU8();
+        }
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: restricted status %u"), Status);
+        break;
+
+    default:
+        UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS: status %u"), Status);
+        break;
+    }
+
+    OnTradeUpdated.Broadcast(CurrentTrade);
+}
+
+void FWowPacketHandler::HandleTradeStatusExtended(FPacketReader& R)
+{
+    if (!R.CanRead(1 + 4 + 4 + 4 + 4 + 4))
+    {
+        UE_LOG(LogWowPacket, Warning, TEXT("TRADE_STATUS_EXTENDED: packet too short"));
+        return;
+    }
+
+    const bool bTraderData = (R.ReadU8() != 0);
+    R.ReadU32(); // unknown window/session id
+    const uint32 SlotCount = R.ReadU32();
+    R.ReadU32(); // duplicated slot count
+    const uint32 Money = R.ReadU32();
+    const uint32 SpellId = R.ReadU32();
+
+    TArray<FWowTradeItem> ParsedItems;
+    ParsedItems.SetNum(static_cast<int32>(SlotCount));
+
+    for (uint32 SlotIndex = 0; SlotIndex < SlotCount && R.Remaining() > 0; ++SlotIndex)
+    {
+        if (!R.CanRead(1))
+        {
+            break;
+        }
+
+        const uint8 TradeSlot = R.ReadU8();
+        FWowTradeItem Item;
+        Item.Slot = TradeSlot;
+        Item.ItemId = R.ReadU32();
+        Item.DisplayId = R.ReadU32();
+        Item.Count = R.ReadU32();
+        Item.bWrapped = (R.ReadU32() != 0);
+        Item.GiftCreatorGuid = R.ReadU64();
+        Item.PermanentEnchantId = R.ReadU32();
+        Item.GemEnchantId1 = R.ReadU32();
+        Item.GemEnchantId2 = R.ReadU32();
+        Item.GemEnchantId3 = R.ReadU32();
+        Item.CreatorGuid = R.ReadU64();
+        Item.Charges = R.ReadU32();
+        Item.SuffixFactor = R.ReadU32();
+        Item.RandomPropertyId = static_cast<int32>(R.ReadU32());
+        Item.LockId = R.ReadU32();
+        Item.MaxDurability = R.ReadU32();
+        Item.Durability = R.ReadU32();
+
+        if (ParsedItems.IsValidIndex(TradeSlot))
+        {
+            ParsedItems[TradeSlot] = Item;
+        }
+    }
+
+    CurrentTrade.bTradeOpen = true;
+    CurrentTrade.Status = WowTradeStatus::OPEN_WINDOW;
+    if (bTraderData)
+    {
+        CurrentTrade.TargetMoney = Money;
+        CurrentTrade.TargetSpell = SpellId;
+        CurrentTrade.TargetItems = MoveTemp(ParsedItems);
+    }
+    else
+    {
+        CurrentTrade.PlayerMoney = Money;
+        CurrentTrade.PlayerSpell = SpellId;
+        CurrentTrade.PlayerItems = MoveTemp(ParsedItems);
+    }
+
+    UE_LOG(LogWowPacket, Log, TEXT("TRADE_STATUS_EXTENDED: %s side updated (%u slots, money=%u)"),
+        bTraderData ? TEXT("target") : TEXT("player"),
+        SlotCount,
+        Money);
+
+    OnTradeUpdated.Broadcast(CurrentTrade);
 }
 
 // ── Bank system handlers ────────────────────────────────────────────

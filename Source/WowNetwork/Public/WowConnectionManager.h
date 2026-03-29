@@ -76,6 +76,24 @@ public:
     /** Send sell item to vendor command */
     UFUNCTION(BlueprintCallable) void SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8 Count = 1);
 
+    /** Start a player trade with the target player */
+    UFUNCTION(BlueprintCallable) void SendInitiateTrade(int64 TargetGuid);
+
+    /** Accept an incoming trade request and open the trade window */
+    UFUNCTION(BlueprintCallable) void SendBeginTrade();
+
+    /** Accept the current trade contents */
+    UFUNCTION(BlueprintCallable) void SendAcceptTrade();
+
+    /** Revoke local trade acceptance */
+    UFUNCTION(BlueprintCallable) void SendUnacceptTrade();
+
+    /** Cancel the current trade */
+    UFUNCTION(BlueprintCallable) void SendCancelTrade();
+
+    /** Set the amount of gold offered in the current trade */
+    UFUNCTION(BlueprintCallable) void SendSetTradeGold(int32 CopperAmount);
+
     /** Send gossip/questgiver hello to initiate NPC interaction */
     UFUNCTION(BlueprintCallable) void SendGossipHello(int64 NpcGuid);
 

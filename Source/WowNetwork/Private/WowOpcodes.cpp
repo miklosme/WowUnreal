@@ -18,6 +18,8 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case SMSG_MAIL_LIST_RESULT:         return TEXT("SMSG_MAIL_LIST_RESULT");
     case SMSG_SHOW_MAILBOX:             return TEXT("SMSG_SHOW_MAILBOX");
     case SMSG_SHOW_BANK:                return TEXT("SMSG_SHOW_BANK");
+    case SMSG_TRADE_STATUS:             return TEXT("SMSG_TRADE_STATUS");
+    case SMSG_TRADE_STATUS_EXTENDED:    return TEXT("SMSG_TRADE_STATUS_EXTENDED");
     case SMSG_TIME_SYNC_REQ:            return TEXT("SMSG_TIME_SYNC_REQ");
     case SMSG_TUTORIAL_FLAGS:           return TEXT("SMSG_TUTORIAL_FLAGS");
     case SMSG_ACCOUNT_DATA_TIMES:       return TEXT("SMSG_ACCOUNT_DATA_TIMES");
@@ -36,6 +38,12 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case CMSG_GAMEOBJ_USE:              return TEXT("CMSG_GAMEOBJ_USE");
     case CMSG_GET_MAIL_LIST:            return TEXT("CMSG_GET_MAIL_LIST");
     case CMSG_BANKER_ACTIVATE:          return TEXT("CMSG_BANKER_ACTIVATE");
+    case CMSG_INITIATE_TRADE:           return TEXT("CMSG_INITIATE_TRADE");
+    case CMSG_BEGIN_TRADE:              return TEXT("CMSG_BEGIN_TRADE");
+    case CMSG_ACCEPT_TRADE:             return TEXT("CMSG_ACCEPT_TRADE");
+    case CMSG_UNACCEPT_TRADE:           return TEXT("CMSG_UNACCEPT_TRADE");
+    case CMSG_CANCEL_TRADE:             return TEXT("CMSG_CANCEL_TRADE");
+    case CMSG_SET_TRADE_GOLD:           return TEXT("CMSG_SET_TRADE_GOLD");
     case CMSG_SET_ACTION_BUTTON:        return TEXT("CMSG_SET_ACTION_BUTTON");
 
     // Social / Guild / Friends

@@ -122,6 +122,20 @@ namespace WowOpcode
     inline constexpr uint16 SMSG_LOOT_RELEASE_RESPONSE   = 0x0161;
     inline constexpr uint16 SMSG_ITEM_PUSH_RESULT        = 0x0166;
 
+    // Trade opcodes
+    inline constexpr uint16 CMSG_INITIATE_TRADE          = 0x0116;
+    inline constexpr uint16 CMSG_BEGIN_TRADE             = 0x0117;
+    inline constexpr uint16 CMSG_BUSY_TRADE              = 0x0118;
+    inline constexpr uint16 CMSG_IGNORE_TRADE            = 0x0119;
+    inline constexpr uint16 CMSG_ACCEPT_TRADE            = 0x011A;
+    inline constexpr uint16 CMSG_UNACCEPT_TRADE          = 0x011B;
+    inline constexpr uint16 CMSG_CANCEL_TRADE            = 0x011C;
+    inline constexpr uint16 CMSG_SET_TRADE_ITEM          = 0x011D;
+    inline constexpr uint16 CMSG_CLEAR_TRADE_ITEM        = 0x011E;
+    inline constexpr uint16 CMSG_SET_TRADE_GOLD          = 0x011F;
+    inline constexpr uint16 SMSG_TRADE_STATUS            = 0x0120;
+    inline constexpr uint16 SMSG_TRADE_STATUS_EXTENDED   = 0x0121;
+
     // Vendor opcodes
     inline constexpr uint16 SMSG_LIST_INVENTORY          = 0x019F;
     inline constexpr uint16 CMSG_SELL_ITEM               = 0x01A0;
