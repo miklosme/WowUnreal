@@ -610,7 +610,8 @@ static bool ShouldCompileOnLoadFunctionHandler(const FString& FunctionName)
 {
 	// Keep this intentionally narrow. A broad function="..." implementation
 	// wakes up Blizzard bootstrap paths that currently explode our Lua heap.
-	return FunctionName == TEXT("RuneFrame_OnLoad");
+	return FunctionName == TEXT("RuneFrame_OnLoad") ||
+		FunctionName == TEXT("LFRBrowseFrame_OnLoad");
 }
 
 #if HAS_LUA
