@@ -3886,6 +3886,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
     // Video/Audio options stubs
     lua_register(L, "GetCurrentMultisampleFormat", [](lua_State* L2) -> int { lua_pushnumber(L2, 1); return 1; });
+    lua_register(L, "SetMultisampleFormat", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "IsStereoVideoAvailable", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
     lua_register(L, "Sound_GameSystem_GetOutputDriverNameByIndex", [](lua_State* L2) -> int { lua_pushstring(L2, "Default"); return 1; });
     lua_register(L, "Sound_GameSystem_GetNumOutputDrivers", [](lua_State* L2) -> int { lua_pushnumber(L2, 1); return 1; });
@@ -3893,6 +3894,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "Sound_ChatSystem_GetOutputDriverNameByIndex", [](lua_State* L2) -> int { lua_pushstring(L2, "Default"); return 1; });
     lua_register(L, "GetScreenResolutions", [](lua_State* L2) -> int { lua_pushstring(L2, "1920x1080"); return 1; });
     lua_register(L, "GetCurrentResolution", [](lua_State* L2) -> int { lua_pushnumber(L2, 1); return 1; });
+    lua_register(L, "SetScreenResolution", [](lua_State* L2) -> int { return 0; });
     lua_register(L, "GetVideoCaps", [](lua_State* L2) -> int { lua_pushstring(L2, ""); return 1; });
 
     // FrameXML utility functions (called from OnLoad scripts)
@@ -5459,8 +5461,17 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "UnitInBattleground", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "Sound_ChatSystem_GetNumInputDrivers", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "Sound_ChatSystem_GetInputDriverNameByIndex", [](lua_State* L2) -> int { lua_pushstring(L2, "Default"); return 1; });
-    lua_register(L, "GetRefreshRates", [](lua_State* L2) -> int { lua_pushstring(L2, "60Hz"); return 1; });
-    lua_register(L, "GetMultisampleFormats", [](lua_State* L2) -> int { lua_pushstring(L2, "1x"); return 1; });
+    lua_register(L, "GetRefreshRates", [](lua_State* L2) -> int {
+        lua_pushnumber(L2, 60);
+        return 1;
+    });
+    lua_register(L, "GetMultisampleFormats", [](lua_State* L2) -> int {
+        // Blizzard expects colorBits, depthBits, sampleCount triples.
+        lua_pushnumber(L2, 24);
+        lua_pushnumber(L2, 24);
+        lua_pushnumber(L2, 1);
+        return 3;
+    });
     lua_register(L, "GetLFGProposal", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
     lua_register(L, "GetVoiceCurrentSessionID", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
     lua_register(L, "GetVoiceSessionMemberInfoBySessionID", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
