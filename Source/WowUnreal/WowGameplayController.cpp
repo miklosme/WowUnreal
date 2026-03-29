@@ -588,10 +588,13 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		if (HealthChanged)
 		{
 			FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("player")});
 		}
 		if (ManaChanged)
 		{
 			FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
 		}
 
 		// Check for combat state changes on local player
@@ -630,10 +633,12 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		if (HealthChanged)
 		{
 			FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("target")});
+			FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("target")});
 		}
 		if (ManaChanged)
 		{
 			FireUIEvent(TEXT("UNIT_MANA"), {TEXT("target")});
+			FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("target")});
 		}
 	}
 
