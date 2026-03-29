@@ -234,7 +234,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] FrameXML animation-object global exposure for tutorial callouts (named `<Animations>` descendants resolve `$parent`, register in Lua, and support `Play`/`Stop`)
 - [x] Frame hover hit-testing parity for `IsMouseOver` (Lua method routes through cached frame rects and cursor position with WoW-style top/bottom/left/right offsets)
 - [x] UIParent arena layout stub parity (`GetNumArenaOpponents` returns a safe non-arena default for watch-frame placement)
-- [?] Scoped XML `OnLoad function="..."` parity for LFR browse bootstrap (`LFRBrowseFrame_OnLoad` is allowed without reopening broad handler compilation)
+- [x] Scoped XML `OnLoad function="..."` parity for LFR browse bootstrap (`LFRBrowseFrame_OnLoad` is allowed without reopening broad handler compilation)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
