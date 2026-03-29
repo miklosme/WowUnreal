@@ -80,7 +80,7 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 - [x] 3D character preview in character select (SceneCapture2D)
 - [x] Deferred terrain loading (no world behind login screen)
 - [x] Loading screen with tile progress
-- [?] Long-lived loading screen Slate texture/brush lifetime stability (retain background resources while visible, release them before rebuilding the loading screen)
+- [x] Long-lived loading screen Slate texture/brush lifetime stability (retain background resources while visible, release them before rebuilding the loading screen)
 - [x] Ground snap after terrain loads (line trace to terrain surface)
 - [x] `-autologin` flag (prefills and auto-submits through UI)
 - [x] `-createchar` flag (auto-creates Human Mage, enters world)
