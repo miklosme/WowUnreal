@@ -152,6 +152,7 @@ struct WOWUI_API FWowFrameDef
 	TArray<FWowAnchor> Anchors;
 	TArray<FWowLayer> Layers;
 	TArray<FWowScriptHandler> Scripts;
+	TArray<FString> NamedObjectGlobals;
 	TArray<FWowFrameDef> Children;
 
 	TOptional<FWowBackdrop> Backdrop;

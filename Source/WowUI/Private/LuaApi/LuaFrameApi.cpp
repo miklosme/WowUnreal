@@ -147,6 +147,32 @@ static bool TableRepresentsRegion(lua_State* L, int Idx = 1)
 	return bHasTextWidget;
 }
 
+static int LF_PlayObject(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushboolean(L, 1);
+	lua_setfield(L, 1, "__playing");
+	return 0;
+}
+
+static int LF_StopObject(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_pushboolean(L, 0);
+	lua_setfield(L, 1, "__playing");
+	return 0;
+}
+
+static int LF_IsObjectPlaying(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	lua_getfield(L, 1, "__playing");
+	const bool bPlaying = lua_toboolean(L, -1) != 0;
+	lua_pop(L, 1);
+	lua_pushboolean(L, bPlaying ? 1 : 0);
+	return 1;
+}
+
 // ── Global: CreateFrame(type, name, parent, template) ────────────────────────────
 
 static EWowFrameType ParseFrameType(const char* TypeStr)
@@ -2963,6 +2989,9 @@ static const luaL_Reg FrameMethods[] =
 	{"Hide", LF_Hide},
 	{"IsShown", LF_IsShown},
 	{"IsVisible", LF_IsVisible},
+	{"Play", LF_PlayObject},
+	{"Stop", LF_StopObject},
+	{"IsPlaying", LF_IsObjectPlaying},
 
 	// Positioning
 	{"SetPoint", LF_SetPoint},

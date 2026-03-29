@@ -606,6 +606,44 @@ static TArray<FWowScriptHandler> ParseScripts(const FXmlNode* ScriptsNode)
 	return Result;
 }
 
+static void CollectNamedObjectGlobals(const FXmlNode* Node, TArray<FString>& OutNames)
+{
+	if (!Node)
+	{
+		return;
+	}
+
+	for (const FXmlNode* Child = Node->GetFirstChildNode(); Child; Child = Child->GetNextNode())
+	{
+		const FString Name = Child->GetAttribute(TEXT("name"));
+		if (!Name.IsEmpty())
+		{
+			OutNames.AddUnique(Name);
+		}
+
+		CollectNamedObjectGlobals(Child, OutNames);
+	}
+}
+
+static void CollectNamedObjectGlobals_Pugi(const pugi::xml_node& Node, TArray<FString>& OutNames)
+{
+	for (pugi::xml_node Child = Node.first_child(); Child; Child = Child.next_sibling())
+	{
+		if (Child.type() != pugi::node_element)
+		{
+			continue;
+		}
+
+		const FString Name = UTF8_TO_TCHAR(Child.attribute("name").as_string());
+		if (!Name.IsEmpty())
+		{
+			OutNames.AddUnique(Name);
+		}
+
+		CollectNamedObjectGlobals_Pugi(Child, OutNames);
+	}
+}
+
 // ─── Helper: parse Backdrop ────────────────────────────────────────────────────
 
 static FWowBackdrop ParseBackdropNode(const FXmlNode* Node)
@@ -941,6 +979,10 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 				}
 			}
 		}
+		else if (Tag == TEXT("Animations"))
+		{
+			CollectNamedObjectGlobals_Pugi(Child, Def.NamedObjectGlobals);
+		}
 		else if (Tag == TEXT("Frames"))
 		{
 			for (pugi::xml_node ChildFrame = Child.first_child(); ChildFrame; ChildFrame = ChildFrame.next_sibling())
@@ -1123,6 +1165,10 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 		else if (Tag.Equals(TEXT("Scripts"), ESearchCase::IgnoreCase))
 		{
 			Def.Scripts = ParseScripts(Child);
+		}
+		else if (Tag.Equals(TEXT("Animations"), ESearchCase::IgnoreCase))
+		{
+			CollectNamedObjectGlobals(Child, Def.NamedObjectGlobals);
 		}
 		else if (Tag.Equals(TEXT("Backdrop"), ESearchCase::IgnoreCase))
 		{

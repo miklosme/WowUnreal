@@ -462,6 +462,11 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	MergedScripts.Append(Target.Scripts);
 	Target.Scripts = MoveTemp(MergedScripts);
 
+	for (const FString& NamedObject : Template.NamedObjectGlobals)
+	{
+		Target.NamedObjectGlobals.AddUnique(NamedObject);
+	}
+
 	// Children — template children are prepended
 	TArray<FWowFrameDef> MergedChildren = Template.Children;
 	MergedChildren.Append(Target.Children);
@@ -1579,6 +1584,14 @@ void FWowFrameManager::ResolveParentReferences(FWowFrameDef& Def, const FString&
 			Def.DisabledTextureName.ReplaceInline(TEXT("$parent"), *FrameName);
 	}
 
+	for (FString& NamedObject : Def.NamedObjectGlobals)
+	{
+		if (NamedObject.Contains(TEXT("$parent")) && !FrameName.IsEmpty())
+		{
+			NamedObject.ReplaceInline(TEXT("$parent"), *FrameName);
+		}
+	}
+
 	// Recursively resolve $parent in child frames.
 	// For anonymous frames (empty name), pass the effective name (ParentName)
 	// so grandchildren can still resolve $parent.
@@ -1669,6 +1682,14 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 			EventSystem->CreateTextureRegionGlobal(Resolved.HighlightTextureName, Handle, TEXT("Texture"));
 		if (!Resolved.DisabledTextureName.IsEmpty())
 			EventSystem->CreateTextureRegionGlobal(Resolved.DisabledTextureName, Handle, TEXT("Texture"));
+
+		for (const FString& NamedObject : Resolved.NamedObjectGlobals)
+		{
+			if (!NamedObject.IsEmpty())
+			{
+				EventSystem->CreateTextureRegionGlobal(NamedObject, Handle, TEXT("Animation"));
+			}
+		}
 	}
 
 	// Create child frames BEFORE firing OnLoad (WoW creates children first,
