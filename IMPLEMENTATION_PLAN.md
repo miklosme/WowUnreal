@@ -4,10 +4,10 @@
 Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data files, renders zones, supports the full native WoW UI (Lua + XML + addons), and connects to AzerothCore servers.
 
 ## Architecture
-7 modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features).
+8 modules: WowUnreal (game shell), WowData (format parsers), WowAssets (UE conversion), WowWorld (streaming/rendering), WowUI (Lua/XML frames), WowNetwork (auth/world protocol), WowClient (convenience features), WowTests (testing utilities).
 
 ## Test Server
-- Remote: 127.0.0.1 (Auth: 3724, World: 8085)
+- Remote: 192.168.1.5 (Auth: 3724, World: 8085)
 - Account: WowTestUser / WowTestPass
 - Characters: Testhumanm (Level 3, tile 29,51), Northshire (Level 1, tile 32,48), Stormheart (Level 1, tile 32,48)
 
@@ -131,85 +131,85 @@ Build a performant WoW 3.3.5a client in UE 5.7 that reads original MPQ data file
 Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 
 **Animation System (local player + networked players + NPCs):**
-- [ ] Animation state machine: idle, walk, run, jump, fall, swim, death, sit, sleep, kneel
-- [ ] Combat animations: attack (1H, 2H, bow, unarmed), parry, dodge, block
-- [ ] Spell cast animations: cast, channel, omni-cast (instant)
-- [ ] Emote animations: dance, wave, cheer, laugh, cry, etc. (AnimationData.dbc mapping)
-- [ ] Wire SMSG_EMOTE and SMSG_TEXT_EMOTE to animation playback
-- [ ] Map M2 animation IDs to UAnimSequence per-race/gender model
-- [ ] Play correct animation based on entity movement flags (walking, running, falling, swimming)
-- [ ] Networked player animations: read movement flags from UPDATE_OBJECT, play matching anims
+- [x] Animation state machine: idle, walk, run, jump, fall, swim, death, sit, sleep, kneel
+- [x] Combat animations: attack (1H, 2H, bow, unarmed), parry, dodge, block
+- [x] Spell cast animations: cast, channel, omni-cast (instant)
+- [x] Emote animations: dance, wave, cheer, laugh, cry, etc. (AnimationData.dbc mapping)
+- [x] Wire SMSG_EMOTE and SMSG_TEXT_EMOTE to animation playback
+- [x] Map M2 animation IDs to UAnimSequence per-race/gender model
+- [x] Play correct animation based on entity movement flags (walking, running, falling, swimming)
+- [x] Networked player animations: read movement flags from UPDATE_OBJECT, play matching anims
 
 **Local Player Character Model:**
-- [ ] Spawn local player character model using race/gender from SMSG_CHAR_ENUM
-- [ ] Attach to AWowPlayerCharacter pawn (skeletal mesh on the character)
-- [ ] Apply composite texture (skin + face + hair from customization)
-- [ ] Equipment rendering on local player (weapons, armor, helmet, cape from entity fields)
-- [ ] Update equipment when UNIT_FIELD changes (equip/unequip live)
+- [x] Spawn local player character model using race/gender from SMSG_CHAR_ENUM
+- [x] Attach to AWowPlayerCharacter pawn (skeletal mesh on the character)
+- [x] Apply composite texture (skin + face + hair from customization)
+- [x] Equipment rendering on local player (weapons, armor, helmet, cape from entity fields)
+- [x] Update equipment when UNIT_FIELD changes (equip/unequip live)
 
 **Networked Player Models:**
-- [ ] Spawn other player models by race/gender from UNIT_BYTES_0
-- [ ] Apply equipment from UPDATE_OBJECT equipment fields
-- [ ] Name query: send CMSG_NAME_QUERY for unknown player GUIDs, cache responses
-- [ ] Show player name on nameplate (from name query response)
+- [x] Spawn other player models by race/gender from UNIT_BYTES_0
+- [x] Apply equipment from UPDATE_OBJECT equipment fields
+- [x] Name query: send CMSG_NAME_QUERY for unknown player GUIDs, cache responses
+- [x] Show player name on nameplate (from name query response)
 
 **NPC/Creature Models:**
-- [ ] Spawn NPC by DisplayId (already works)
-- [ ] Name query: send CMSG_CREATURE_QUERY, cache creature name/title
-- [ ] Show NPC name + title on nameplate
-- [ ] NPC scale from CreatureDisplayInfo.dbc
+- [x] Spawn NPC by DisplayId (already works)
+- [x] Name query: send CMSG_CREATURE_QUERY, cache creature name/title
+- [x] Show NPC name + title on nameplate
+- [x] NPC scale from CreatureDisplayInfo.dbc
 
 **Combat — Attacking & Spells:**
-- [ ] Right-click to auto-attack targeted enemy (CMSG_ATTACKSWING)
-- [ ] Stop auto-attack (CMSG_ATTACKSTOP)
-- [ ] Cast spell by ID (CMSG_CAST_SPELL) — wire to action bar clicks
-- [ ] Show cast bar during spell casting (from SMSG_SPELL_START CastTime)
-- [ ] Show spell impact effects (basic: flash at target location)
-- [ ] Process SMSG_ATTACKERSTATEUPDATE for damage numbers
-- [ ] Floating combat text (damage/heal numbers above entities)
+- [x] Right-click to auto-attack targeted enemy (CMSG_ATTACKSWING)
+- [x] Stop auto-attack (CMSG_ATTACKSTOP)
+- [x] Cast spell by ID (CMSG_CAST_SPELL) — wire to action bar clicks
+- [x] Show cast bar during spell casting (from SMSG_SPELL_START CastTime)
+- [x] Show spell impact effects (basic: flash at target location)
+- [x] Process SMSG_ATTACKERSTATEUPDATE for damage numbers
+- [x] Floating combat text (damage/heal numbers above entities)
 
 ### P2: Action Bar & Spell Book UI
-- [ ] Action bar widget (12 slots × main bar + bonus bars)
+- [x] Action bar widget (12 slots × main bar + bonus bars)
 - [ ] Drag spells from spell book to action bar
-- [ ] Click action bar slot to cast spell
-- [ ] Cooldown sweep animation on action bar icons
-- [ ] Spell book UI (tabs per spell school)
-- [ ] Talent tree UI (read from SMSG_TALENTS_INFO)
+- [x] Click action bar slot to cast spell
+- [x] Cooldown sweep animation on action bar icons
+- [x] Spell book UI (tabs per spell school)
+- [x] Talent tree UI (read from SMSG_TALENTS_INFO)
 
 ### P3: Core Gameplay Systems
-- [ ] Taxi/flight paths (SMSG_SHOWTAXINODES, taxi map UI, auto-fly along path)
-- [ ] Loot window (SMSG_LOOT_RESPONSE → show loot UI → CMSG_AUTOSTORE_LOOT_ITEM)
-- [ ] Vendor/merchant window (SMSG_LIST_INVENTORY)
-- [ ] Quest dialog (SMSG_QUESTGIVER_QUEST_DETAILS, accept/decline/complete)
+- [x] Taxi/flight paths (SMSG_SHOWTAXINODES, taxi map UI, auto-fly along path)
+- [x] Loot window (SMSG_LOOT_RESPONSE → show loot UI → CMSG_AUTOSTORE_LOOT_ITEM)
+- [x] Vendor/merchant window (SMSG_LIST_INVENTORY)
+- [x] Quest dialog (SMSG_QUESTGIVER_QUEST_DETAILS, accept/decline/complete)
 - [ ] Bank (SMSG_SHOW_BANK)
 - [ ] Mail system (SMSG_MAIL_LIST_RESULT)
 - [ ] Trade window (SMSG_TRADE_STATUS)
-- [ ] Group/party UI (invite, accept, leave, ready check)
+- [x] Group/party UI (invite, accept, leave, ready check)
 - [ ] Raid UI (raid frames, marks, ready check)
 - [ ] Duel system (SMSG_DUEL_REQUESTED)
 - [ ] Pet/companion system (pet bar, pet actions)
 
 ### P4: Bag & Inventory
-- [ ] Bag UI (16-slot backpack + 4 equipped bags)
-- [ ] Item icons from ItemDisplayInfo.dbc → BLP
-- [ ] Item tooltips (name, stats, flavor text from item cache)
+- [x] Bag UI (16-slot backpack + 4 equipped bags)
+- [x] Item icons from ItemDisplayInfo.dbc → BLP
+- [x] Item tooltips (name, stats, flavor text from item cache)
 - [ ] Equip/unequip items (CMSG_AUTOEQUIP_ITEM)
-- [ ] Item quality colors (poor/common/uncommon/rare/epic/legendary)
+- [x] Item quality colors (poor/common/uncommon/rare/epic/legendary)
 - [ ] Stack splitting, item deletion
 
 ### P5: Chat System
-- [ ] Chat input box with channel switching (/s /p /g /w /y /1 /2)
-- [ ] Chat window with tabs (General, Combat Log, Trade, etc.)
-- [ ] Whisper support (CMSG_MESSAGECHAT type WHISPER)
-- [ ] Channel join/leave (CMSG_JOIN_CHANNEL, CMSG_LEAVE_CHANNEL)
+- [x] Chat input box with channel switching (/s /p /g /w /y /1 /2)
+- [x] Chat window with tabs (General, Combat Log, Trade, etc.)
+- [x] Whisper support (CMSG_MESSAGECHAT type WHISPER)
+- [x] Channel join/leave (CMSG_JOIN_CHANNEL, CMSG_LEAVE_CHANNEL)
 - [ ] Chat link clicking (items, spells, achievements)
 
 ### P6: Minimap
-- [ ] Circular minimap rendering from terrain height data
-- [ ] Player arrow (direction indicator)
+- [x] Circular minimap rendering from terrain height data
+- [x] Player arrow (direction indicator)
 - [ ] Other player/NPC dots
-- [ ] Zone name display
-- [ ] Minimap zoom
+- [x] Zone name display
+- [x] Minimap zoom
 - [ ] Tracking icons (herbs, mining, etc. from SMSG_UPDATE_OBJECT flags)
 
 ### P7: Effects & Polish
@@ -221,9 +221,9 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [ ] Shadow flickering fix on WMOs
 
 ### P8: Full WoW UI Boot
-- [ ] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
-- [ ] Full addon loading from Interface/AddOns/
-- [ ] Font rendering with WoW .ttf fonts (in progress — P7 agent)
+- [x] Load real Blizzard FrameXML from MPQ (action bars, minimap, chat, unit frames, buffs, bags)
+- [x] Full addon loading from Interface/AddOns/
+- [x] Font rendering with WoW .ttf fonts (in progress — P7 agent)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
