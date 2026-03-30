@@ -699,6 +699,66 @@ bool FWowEventSystem::RunFrameScript(int64 Handle, const FString& ScriptName, co
 #endif
 }
 
+bool FWowEventSystem::RunFrameClickScript(int64 Handle, const FString& ScriptName, const FString& Button, bool bMouseDown)
+{
+#if HAS_LUA
+	if (!LuaVM) return false;
+	lua_State* L = LuaVM->GetState();
+	if (!L) return false;
+
+	TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
+	if (!FrameScripts) return false;
+
+	int32* ScriptRef = FrameScripts->Find(ScriptName);
+	if (!ScriptRef) return false;
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, *ScriptRef);
+	if (!lua_isfunction(L, -1))
+	{
+		lua_pop(L, 1);
+		return false;
+	}
+
+	int32* FrameRef = FrameObjectRefs.Find(Handle);
+	if (FrameRef)
+	{
+		lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
+	}
+	else
+	{
+		lua_newtable(L);
+	}
+
+	FTCHARToUTF8 UTF8Button(*Button);
+	lua_pushstring(L, UTF8Button.Get());
+	lua_pushboolean(L, bMouseDown ? 1 : 0);
+
+	const int32 NumArgs = 3;
+	const int32 FunctionIndex = lua_gettop(L) - NumArgs;
+	const int32 SelfIndex = FunctionIndex + 1;
+	TArray<int32> LegacyArgIndices;
+	LegacyArgIndices.Add(FunctionIndex + 2);
+	LegacyArgIndices.Add(FunctionIndex + 3);
+
+	TArray<FLuaSavedGlobal> SavedGlobals;
+	SetWowHandlerGlobals(L, SelfIndex, 0, LegacyArgIndices, SavedGlobals);
+	if (lua_pcall(L, NumArgs, 0, 0) != 0)
+	{
+		RestoreLuaGlobals(L, SavedGlobals);
+		const char* Err = lua_tostring(L, -1);
+		UE_LOG(LogWowEvent, Error, TEXT("RunFrameClickScript error [%lld] %s: %s"),
+			Handle, *ScriptName, Err ? UTF8_TO_TCHAR(Err) : TEXT("unknown"));
+		lua_pop(L, 1);
+		return false;
+	}
+
+	RestoreLuaGlobals(L, SavedGlobals);
+	return true;
+#else
+	return false;
+#endif
+}
+
 // Helper: given "PlayerFrameHealthBar" and parent "PlayerFrame", return "healthBar"
 static FString GetChildFieldKey(const FString& ChildName, const FString& ParentName)
 {

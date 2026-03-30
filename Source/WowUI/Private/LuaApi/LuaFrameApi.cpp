@@ -3048,11 +3048,23 @@ static int LF_GetRect(lua_State* L)
 	return 0;
 }
 
-// button:RegisterForClicks(...) — accept click types but don't need to store them
+// button:RegisterForClicks(...) — store explicit click edge registrations
 static int LF_RegisterForClicks(lua_State* L)
 {
-	// Accept any number of string arguments: "LeftButtonUp", "RightButtonUp", etc.
-	// We don't need to do anything with them yet — click routing is handled elsewhere
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	const int64 Handle = GetFrameHandle(L);
+	if (Ctx && Ctx->FrameManager && Handle >= 0)
+	{
+		TArray<FString> ClickTypes;
+		const int32 NumArgs = lua_gettop(L);
+		for (int32 ArgIdx = 2; ArgIdx <= NumArgs; ++ArgIdx)
+		{
+			ClickTypes.Add(UTF8_TO_TCHAR(luaL_checkstring(L, ArgIdx)));
+		}
+
+		Ctx->FrameManager->SetFrameRegisteredClicks(Handle, ClickTypes);
+	}
+
 	return 0;
 }
 

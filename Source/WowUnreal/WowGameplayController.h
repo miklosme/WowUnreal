@@ -242,7 +242,11 @@ private:
 
     // Targeting
     void OnLeftClick();
+    void OnLeftClickReleased();
     void TryTargetUnderCursor();
+    int64 GetUiFrameUnderCursor() const;
+    bool HandleUiMousePress(const FString& Button, int64& PressedFrameHandle, bool bAllowDragDrop);
+    bool HandleUiMouseRelease(const FString& Button, int64& PressedFrameHandle);
 
     // Entity model spawning
     void OnEntityCreated(const FWowEntity& Entity);
@@ -421,6 +425,7 @@ private:
 
 
     void OnRightClick();
+    void OnRightClickReleased();
     void OnTabTarget();
 
     // Minimap input
@@ -433,6 +438,9 @@ private:
     // Active spell cast effects (destroyed when cast completes)
     UPROPERTY()
     TArray<TObjectPtr<UPointLightComponent>> ActiveCastEffects;
+
+    int64 PressedLeftMouseFrameHandle = -1;
+    int64 PressedRightMouseFrameHandle = -1;
 
     void SpawnCastGlowEffects(uint64 CasterGuid, uint32 SpellId);
     void RemoveCastGlowEffects();

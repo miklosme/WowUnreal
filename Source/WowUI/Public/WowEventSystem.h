@@ -61,6 +61,9 @@ public:
 	 *  Returns true if the script existed and ran. */
 	bool RunFrameScript(int64 Handle, const FString& ScriptName, const TArray<FString>& StringArgs = {});
 
+	/** Run a click-style handler with a string button arg and a real Lua boolean for `down`. */
+	bool RunFrameClickScript(int64 Handle, const FString& ScriptName, const FString& Button, bool bMouseDown);
+
 	/** Map a server opcode to a WoW event name */
 	static FString OpcodeToEvent(uint16 Opcode);
 

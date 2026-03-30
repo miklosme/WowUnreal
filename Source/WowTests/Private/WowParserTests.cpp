@@ -18,8 +18,10 @@
 
 #include "WowLuaVM.h"
 #include "WowEventSystem.h"
+#include "WowFrameManager.h"
 #include "WowFrameTypes.h"
 #include "WowOpcodes.h"
+#include "Components/CanvasPanel.h"
 
 #if __has_include("lua.h")
 extern "C" {
@@ -87,6 +89,43 @@ namespace WowTestUtils
         }
 
         return true;
+    }
+
+    static void SetLuaContext(FWowLuaVM& LuaVM, FWowLuaContext& Context)
+    {
+        lua_pushlightuserdata(LuaVM.GetState(), &Context);
+        lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    }
+
+    static void ClearLuaContext(FWowLuaVM& LuaVM)
+    {
+        lua_pushnil(LuaVM.GetState());
+        lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    }
+
+    static int32 GetLuaIntegerGlobal(lua_State* L, const char* Name)
+    {
+        lua_getglobal(L, Name);
+        const int32 Value = lua_isnumber(L, -1) ? static_cast<int32>(lua_tointeger(L, -1)) : 0;
+        lua_pop(L, 1);
+        return Value;
+    }
+
+    static FString GetLuaStringGlobal(lua_State* L, const char* Name)
+    {
+        lua_getglobal(L, Name);
+        const FString Value = lua_isstring(L, -1) ? UTF8_TO_TCHAR(lua_tostring(L, -1)) : FString();
+        lua_pop(L, 1);
+        return Value;
+    }
+
+    static bool GetLuaBooleanGlobal(lua_State* L, const char* Name, bool& bOutIsBoolean)
+    {
+        lua_getglobal(L, Name);
+        bOutIsBoolean = lua_isboolean(L, -1) != 0;
+        const bool bValue = lua_toboolean(L, -1) != 0;
+        lua_pop(L, 1);
+        return bValue;
     }
 }
 
@@ -632,6 +671,172 @@ bool FLuaTargetUnitResolvesPlayerName::RunTest(const FString& Parameters)
 
     lua_pushnil(LuaVM.GetState());
     lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaRegisterForClicksAnyDownDispatchesBooleanDown, "WowUnreal.UI.LuaRegisterForClicksAnyDownDispatchesBooleanDown",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaRegisterForClicksAnyDownDispatchesBooleanDown::RunTest(const FString& Parameters)
+{
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowEventSystem EventSystem;
+    EventSystem.SetLuaVM(&LuaVM);
+
+    UCanvasPanel* RootCanvas = NewObject<UCanvasPanel>();
+    FWowFrameManager FrameManager;
+    FrameManager.Initialize(RootCanvas);
+    FrameManager.SetEventSystem(&EventSystem);
+    EventSystem.SetFrameManager(&FrameManager);
+
+    FWowLuaContext Context;
+    Context.EventSystem = &EventSystem;
+    Context.FrameManager = &FrameManager;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    FWowFrameDef ButtonDef;
+    ButtonDef.Name = TEXT("ClickDownButton");
+    ButtonDef.Type = EWowFrameType::Button;
+    ButtonDef.Width = 32.0f;
+    ButtonDef.Height = 32.0f;
+    const int64 ButtonHandle = FrameManager.CreateFrame(ButtonDef);
+    TestTrue(TEXT("Button frame created"), ButtonHandle > 0);
+    if (ButtonHandle <= 0)
+    {
+        WowTestUtils::ClearLuaContext(LuaVM);
+        LuaVM.Shutdown();
+        return false;
+    }
+
+    const bool bConfigured = LuaVM.ExecuteString(
+        TEXT("ClickDownButton:RegisterForClicks(\"AnyDown\")\n")
+        TEXT("ClickDownButton:SetScript(\"OnClick\", function(self, button, down)\n")
+        TEXT("  CLICK_COUNT = (CLICK_COUNT or 0) + 1\n")
+        TEXT("  CLICK_BUTTON = button\n")
+        TEXT("  CLICK_DOWN = down\n")
+        TEXT("  CLICK_DOWN_TYPE = type(down)\n")
+        TEXT("end)"),
+        TEXT("LuaRegisterForClicksAnyDownDispatchesBooleanDown"));
+    TestTrue(TEXT("Lua button click script configured"), bConfigured);
+
+    FrameManager.DispatchMouseDown(ButtonHandle, TEXT("LeftButton"));
+    if (FrameManager.IsFrameClickRegistered(ButtonHandle, TEXT("LeftButton"), true))
+    {
+        FrameManager.DispatchClick(ButtonHandle, TEXT("LeftButton"), true);
+    }
+    FrameManager.DispatchMouseUp(ButtonHandle, TEXT("LeftButton"));
+    if (FrameManager.IsFrameClickRegistered(ButtonHandle, TEXT("LeftButton"), false))
+    {
+        FrameManager.DispatchClick(ButtonHandle, TEXT("LeftButton"), false);
+    }
+
+    lua_State* L = LuaVM.GetState();
+    const int32 ClickCount = WowTestUtils::GetLuaIntegerGlobal(L, "CLICK_COUNT");
+    const FString ClickButton = WowTestUtils::GetLuaStringGlobal(L, "CLICK_BUTTON");
+    const FString ClickDownType = WowTestUtils::GetLuaStringGlobal(L, "CLICK_DOWN_TYPE");
+    bool bIsBoolean = false;
+    const bool bClickDown = WowTestUtils::GetLuaBooleanGlobal(L, "CLICK_DOWN", bIsBoolean);
+
+    TestEqual(TEXT("AnyDown registration fires one click"), ClickCount, 1);
+    TestEqual(TEXT("AnyDown registration preserves the clicked button"), ClickButton, FString(TEXT("LeftButton")));
+    TestEqual(TEXT("OnClick down argument is a Lua boolean"), ClickDownType, FString(TEXT("boolean")));
+    TestTrue(TEXT("OnClick down value is true for down-edge clicks"), bClickDown);
+    TestTrue(TEXT("OnClick down value is stored as a boolean"), bIsBoolean);
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FButtonDefaultClickDispatchesOnMouseUp, "WowUnreal.UI.ButtonDefaultClickDispatchesOnMouseUp",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FButtonDefaultClickDispatchesOnMouseUp::RunTest(const FString& Parameters)
+{
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowEventSystem EventSystem;
+    EventSystem.SetLuaVM(&LuaVM);
+
+    UCanvasPanel* RootCanvas = NewObject<UCanvasPanel>();
+    FWowFrameManager FrameManager;
+    FrameManager.Initialize(RootCanvas);
+    FrameManager.SetEventSystem(&EventSystem);
+    EventSystem.SetFrameManager(&FrameManager);
+
+    FWowLuaContext Context;
+    Context.EventSystem = &EventSystem;
+    Context.FrameManager = &FrameManager;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    FWowFrameDef ButtonDef;
+    ButtonDef.Name = TEXT("DefaultClickButton");
+    ButtonDef.Type = EWowFrameType::Button;
+    ButtonDef.Width = 32.0f;
+    ButtonDef.Height = 32.0f;
+    const int64 ButtonHandle = FrameManager.CreateFrame(ButtonDef);
+    TestTrue(TEXT("Default button frame created"), ButtonHandle > 0);
+    if (ButtonHandle <= 0)
+    {
+        WowTestUtils::ClearLuaContext(LuaVM);
+        LuaVM.Shutdown();
+        return false;
+    }
+
+    const bool bConfigured = LuaVM.ExecuteString(
+        TEXT("DefaultClickButton:SetScript(\"OnClick\", function(self, button, down)\n")
+        TEXT("  CLICK_COUNT = (CLICK_COUNT or 0) + 1\n")
+        TEXT("  if down then\n")
+        TEXT("    DOWN_CLICK_COUNT = (DOWN_CLICK_COUNT or 0) + 1\n")
+        TEXT("  else\n")
+        TEXT("    UP_CLICK_COUNT = (UP_CLICK_COUNT or 0) + 1\n")
+        TEXT("  end\n")
+        TEXT("  LAST_CLICK_DOWN = down\n")
+        TEXT("  LAST_CLICK_DOWN_TYPE = type(down)\n")
+        TEXT("end)"),
+        TEXT("ButtonDefaultClickDispatchesOnMouseUp"));
+    TestTrue(TEXT("Lua default button click script configured"), bConfigured);
+
+    FrameManager.DispatchMouseDown(ButtonHandle, TEXT("LeftButton"));
+    if (FrameManager.IsFrameClickRegistered(ButtonHandle, TEXT("LeftButton"), true))
+    {
+        FrameManager.DispatchClick(ButtonHandle, TEXT("LeftButton"), true);
+    }
+
+    lua_State* L = LuaVM.GetState();
+    TestEqual(TEXT("Default button does not click on mouse down"), WowTestUtils::GetLuaIntegerGlobal(L, "CLICK_COUNT"), 0);
+
+    FrameManager.DispatchMouseUp(ButtonHandle, TEXT("LeftButton"));
+    if (FrameManager.IsFrameClickRegistered(ButtonHandle, TEXT("LeftButton"), false))
+    {
+        FrameManager.DispatchClick(ButtonHandle, TEXT("LeftButton"), false);
+    }
+
+    const int32 ClickCount = WowTestUtils::GetLuaIntegerGlobal(L, "CLICK_COUNT");
+    const int32 DownClickCount = WowTestUtils::GetLuaIntegerGlobal(L, "DOWN_CLICK_COUNT");
+    const int32 UpClickCount = WowTestUtils::GetLuaIntegerGlobal(L, "UP_CLICK_COUNT");
+    const FString LastClickDownType = WowTestUtils::GetLuaStringGlobal(L, "LAST_CLICK_DOWN_TYPE");
+    bool bIsBoolean = false;
+    const bool bLastClickDown = WowTestUtils::GetLuaBooleanGlobal(L, "LAST_CLICK_DOWN", bIsBoolean);
+
+    TestEqual(TEXT("Default button clicks exactly once"), ClickCount, 1);
+    TestEqual(TEXT("Default button does not dispatch down-edge clicks"), DownClickCount, 0);
+    TestEqual(TEXT("Default button dispatches one up-edge click"), UpClickCount, 1);
+    TestEqual(TEXT("Default button stores a Lua boolean for down"), LastClickDownType, FString(TEXT("boolean")));
+    TestFalse(TEXT("Default button OnClick down value is false on mouse up"), bLastClickDown);
+    TestTrue(TEXT("Default button OnClick down arg remains a boolean"), bIsBoolean);
+
+    WowTestUtils::ClearLuaContext(LuaVM);
     LuaVM.Shutdown();
     return true;
 }

@@ -241,6 +241,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Blizzard combat log entry tuple parity for quick-button refiltering (combat log current-entry helpers now return the WotLK `timestamp, event, sourceGUID, sourceName, sourceFlags, destGUID, destName, destFlags` tuple Blizzard_CombatLog expects)
 - [x] Blizzard combat log object-flag helper parity for quick-button refiltering (`CombatLog_Object_IsA` now follows WotLK composite combat-log mask rules, the logged-in Blizzard_CombatLog quick-button path loads cleanly, and the delayed screenshot fired after world login)
 - [x] Lua `TargetUnit` parity for bindings and unit-frame clicks (implemented WotLK-style unit-token resolution for bindings and unit-frame click paths, including chained `...target` tokens and name fallback; verified with editor build, game build, automation, and a delayed post-login screenshot)
+- [x] WoW `RegisterForClicks` parity for Blizzard button down/up semantics (button click-edge registrations are now stored in the frame manager, `OnClick` receives a real Lua boolean `down` value, and gameplay controller UI clicks route through press/release semantics; verified with editor build, UI automation, game build, and a delayed post-login screenshot)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds

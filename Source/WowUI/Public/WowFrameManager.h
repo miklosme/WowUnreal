@@ -114,9 +114,11 @@ public:
 	void SetFrameMouseEnabled(int64 Handle, bool bEnabled);
 	void SetFrameKeyboardEnabled(int64 Handle, bool bEnabled);
 	void SetFrameMouseWheelEnabled(int64 Handle, bool bEnabled);
+	void SetFrameRegisteredClicks(int64 Handle, const TArray<FString>& ClickTypes);
 	bool IsFrameMouseEnabled(int64 Handle) const;
 	bool IsFrameKeyboardEnabled(int64 Handle) const;
 	bool IsFrameMouseWheelEnabled(int64 Handle) const;
+	bool IsFrameClickRegistered(int64 Handle, const FString& Button, bool bMouseDown) const;
 
 	/** Create a simple test frame for debugging */
 	int64 CreateDebugFrame(const FString& Name, float Width, float Height, float X = 0.f, float Y = 0.f);
@@ -140,7 +142,7 @@ public:
 	 *  Button: "LeftButton", "RightButton", "MiddleButton" */
 	void DispatchMouseDown(int64 Handle, const FString& Button);
 	void DispatchMouseUp(int64 Handle, const FString& Button);
-	void DispatchClick(int64 Handle, const FString& Button);
+	void DispatchClick(int64 Handle, const FString& Button, bool bMouseDown);
 	bool DispatchReceiveDrag(int64 Handle);
 
 	/** Update mouse hover state — call once per frame from Tick.
@@ -171,6 +173,8 @@ private:
 		bool bMouseEnabled = false;
 		bool bKeyboardEnabled = false;
 		bool bMouseWheelEnabled = false;
+		bool bHasExplicitClickRegistration = false;
+		TSet<FString> RegisteredClicks;
 	};
 
 	/** Handle of the frame currently under the mouse cursor (-1 if none) */

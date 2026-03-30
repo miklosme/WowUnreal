@@ -44,6 +44,33 @@ FString BuildParentFrameAliasName(const FString& ParentName, const FString& Chil
 
 	return ParentName + Suffix;
 }
+
+FString NormalizeClickRegistrationToken(FString Token)
+{
+	Token.TrimStartAndEndInline();
+	Token.ReplaceInline(TEXT(" "), TEXT(""));
+	Token = Token.ToUpper();
+	return Token;
+}
+
+FString BuildClickRegistrationKey(const FString& Button, bool bMouseDown)
+{
+	return NormalizeClickRegistrationToken(Button + (bMouseDown ? TEXT("Down") : TEXT("Up")));
+}
+
+bool HasRegisteredClickToken(const TSet<FString>& RegisteredClicks, const FString& Button, bool bMouseDown)
+{
+	const FString SpecificKey = BuildClickRegistrationKey(Button, bMouseDown);
+	const FString AnyKey = bMouseDown ? TEXT("ANYDOWN") : TEXT("ANYUP");
+	return RegisteredClicks.Contains(SpecificKey) || RegisteredClicks.Contains(AnyKey);
+}
+
+bool UsesDefaultButtonClickRegistration(const FWowFrameDef& Def, const FString& Button, bool bMouseDown)
+{
+	return !bMouseDown
+		&& Button.Equals(TEXT("LeftButton"), ESearchCase::IgnoreCase)
+		&& (Def.Type == EWowFrameType::Button || Def.Type == EWowFrameType::CheckButton);
+}
 }
 
 FWowFrameManager::FWowFrameManager()
@@ -432,6 +459,24 @@ void FWowFrameManager::SetFrameMouseWheelEnabled(int64 Handle, bool bEnabled)
 	}
 }
 
+void FWowFrameManager::SetFrameRegisteredClicks(int64 Handle, const TArray<FString>& ClickTypes)
+{
+	if (FFrameEntry* Entry = Frames.Find(Handle))
+	{
+		Entry->bHasExplicitClickRegistration = true;
+		Entry->RegisteredClicks.Reset();
+
+		for (const FString& ClickType : ClickTypes)
+		{
+			const FString Normalized = NormalizeClickRegistrationToken(ClickType);
+			if (!Normalized.IsEmpty())
+			{
+				Entry->RegisteredClicks.Add(Normalized);
+			}
+		}
+	}
+}
+
 bool FWowFrameManager::IsFrameMouseEnabled(int64 Handle) const
 {
 	const FFrameEntry* Entry = Frames.Find(Handle);
@@ -448,6 +493,22 @@ bool FWowFrameManager::IsFrameMouseWheelEnabled(int64 Handle) const
 {
 	const FFrameEntry* Entry = Frames.Find(Handle);
 	return Entry ? Entry->bMouseWheelEnabled : false;
+}
+
+bool FWowFrameManager::IsFrameClickRegistered(int64 Handle, const FString& Button, bool bMouseDown) const
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry)
+	{
+		return false;
+	}
+
+	if (Entry->bHasExplicitClickRegistration)
+	{
+		return HasRegisteredClickToken(Entry->RegisteredClicks, Button, bMouseDown);
+	}
+
+	return UsesDefaultButtonClickRegistration(Entry->Def, Button, bMouseDown);
 }
 
 // ── Template Inheritance ──────────────────────────────────────────────────────
@@ -2337,11 +2398,10 @@ void FWowFrameManager::DispatchMouseUp(int64 Handle, const FString& Button)
 	EventSystem->RunFrameScript(Handle, TEXT("OnMouseUp"), {Button});
 }
 
-void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button)
+void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool bMouseDown)
 {
 	if (!EventSystem || Handle < 0) return;
-	// WoW OnClick signature: function(self, button, down)
-	EventSystem->RunFrameScript(Handle, TEXT("OnClick"), {Button, TEXT("false")});
+	EventSystem->RunFrameClickScript(Handle, TEXT("OnClick"), Button, bMouseDown);
 }
 
 bool FWowFrameManager::DispatchReceiveDrag(int64 Handle)

@@ -5,6 +5,7 @@
 #include "WowOpcodes.h"
 #include "WowPlayerCharacter.h"
 #include "WowUIManager.h"
+#include "WowFrameManager.h"
 #include "WowGameUI.h"
 #include "WowEventSystem.h"
 #include "WowWorldManager.h"
@@ -208,9 +209,11 @@ void AWowGameplayController::SetupInputComponent()
 
 	// Left click for targeting and WoW UI hit testing
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &AWowGameplayController::OnLeftClick);
+	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &AWowGameplayController::OnLeftClickReleased);
 
 	// Right click for auto-attack - use IE_Pressed for immediate responsiveness
 	InputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &AWowGameplayController::OnRightClick);
+	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &AWowGameplayController::OnRightClickReleased);
 
 	// Action bar keybinds - use IE_Pressed for immediate responsiveness like WoW
 	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &AWowGameplayController::OnActionSlot1);
@@ -969,36 +972,96 @@ bool AWowGameplayController::InputKey(const FInputKeyEventArgs& Params)
 	return Super::InputKey(Params);
 }
 
+int64 AWowGameplayController::GetUiFrameUnderCursor() const
+{
+	if (!UIManager || !UIManager->GetFrameManager())
+	{
+		return -1;
+	}
+
+	float MouseX = 0.0f;
+	float MouseY = 0.0f;
+	if (!GetMousePosition(MouseX, MouseY))
+	{
+		return -1;
+	}
+
+	return UIManager->GetFrameManager()->HitTestFrames(MouseX, MouseY);
+}
+
+bool AWowGameplayController::HandleUiMousePress(const FString& Button, int64& PressedFrameHandle, bool bAllowDragDrop)
+{
+	PressedFrameHandle = -1;
+
+	if (!UIManager || !UIManager->GetFrameManager())
+	{
+		return false;
+	}
+
+	const int64 HitFrame = GetUiFrameUnderCursor();
+	if (HitFrame < 0)
+	{
+		return false;
+	}
+
+	FWowFrameManager* FrameManager = UIManager->GetFrameManager();
+	if (bAllowDragDrop && ConnectionManager && ConnectionManager->HasCursorPayload()
+		&& FrameManager->DispatchReceiveDrag(HitFrame))
+	{
+		return true;
+	}
+
+	PressedFrameHandle = HitFrame;
+	FrameManager->DispatchMouseDown(HitFrame, Button);
+	if (FrameManager->IsFrameClickRegistered(HitFrame, Button, true))
+	{
+		FrameManager->DispatchClick(HitFrame, Button, true);
+	}
+
+	return true;
+}
+
+bool AWowGameplayController::HandleUiMouseRelease(const FString& Button, int64& PressedFrameHandle)
+{
+	if (!UIManager || !UIManager->GetFrameManager())
+	{
+		PressedFrameHandle = -1;
+		return false;
+	}
+
+	if (PressedFrameHandle < 0)
+	{
+		return false;
+	}
+
+	FWowFrameManager* FrameManager = UIManager->GetFrameManager();
+	const int64 ReleasedFrameHandle = PressedFrameHandle;
+	PressedFrameHandle = -1;
+
+	FrameManager->DispatchMouseUp(ReleasedFrameHandle, Button);
+	if (FrameManager->IsFrameClickRegistered(ReleasedFrameHandle, Button, false)
+		&& GetUiFrameUnderCursor() == ReleasedFrameHandle)
+	{
+		FrameManager->DispatchClick(ReleasedFrameHandle, Button, false);
+	}
+
+	return true;
+}
+
 void AWowGameplayController::OnLeftClick()
 {
-	// Check if a WoW UI frame is under the cursor first
-	if (UIManager && UIManager->GetFrameManager())
+	if (HandleUiMousePress(TEXT("LeftButton"), PressedLeftMouseFrameHandle, true))
 	{
-		float MX, MY;
-		if (GetMousePosition(MX, MY))
-		{
-			int64 HitFrame = UIManager->GetFrameManager()->HitTestFrames(MX, MY);
-			if (HitFrame >= 0)
-			{
-				if (ConnectionManager && ConnectionManager->HasCursorPayload()
-					&& UIManager->GetFrameManager()->DispatchReceiveDrag(HitFrame))
-				{
-					return; // Consume drag-drop on WoW UI before regular click handling
-				}
-
-				// Always dispatch clicks manually — UMG buttons are transparent overlays
-				// that don't have OnClicked delegates bound; our custom hit-testing
-				// handles all click routing to Lua scripts.
-				UIManager->GetFrameManager()->DispatchMouseDown(HitFrame, TEXT("LeftButton"));
-				UIManager->GetFrameManager()->DispatchClick(HitFrame, TEXT("LeftButton"));
-				UIManager->GetFrameManager()->DispatchMouseUp(HitFrame, TEXT("LeftButton"));
-				return; // Don't target through UI
-			}
-		}
+		return; // Don't target through UI
 	}
 
 	UE_LOG(LogWowGameplay, Log, TEXT("OnLeftClick: no UI hit, trying world target"));
 	TryTargetUnderCursor();
+}
+
+void AWowGameplayController::OnLeftClickReleased()
+{
+	HandleUiMouseRelease(TEXT("LeftButton"), PressedLeftMouseFrameHandle);
 }
 
 void AWowGameplayController::TryTargetUnderCursor()
@@ -1743,21 +1806,9 @@ void AWowGameplayController::OnServerAttackStop(uint64 AttackerGuid, uint64 Vict
 
 void AWowGameplayController::OnRightClick()
 {
-	// Check if a WoW UI frame is under the cursor first
-	if (UIManager && UIManager->GetFrameManager())
+	if (HandleUiMousePress(TEXT("RightButton"), PressedRightMouseFrameHandle, false))
 	{
-		float MX, MY;
-		if (GetMousePosition(MX, MY))
-		{
-			int64 HitFrame = UIManager->GetFrameManager()->HitTestFrames(MX, MY);
-			if (HitFrame >= 0)
-			{
-				UIManager->GetFrameManager()->DispatchMouseDown(HitFrame, TEXT("RightButton"));
-				UIManager->GetFrameManager()->DispatchClick(HitFrame, TEXT("RightButton"));
-				UIManager->GetFrameManager()->DispatchMouseUp(HitFrame, TEXT("RightButton"));
-				return; // Don't interact through UI
-			}
-		}
+		return; // Don't interact through UI
 	}
 
 	UE_LOG(LogWowGameplay, Log, TEXT("OnRightClick: TargetGuid=%llu DeadEntities=%d"), TargetGuid, DeadEntityGuids.Num());
@@ -1863,6 +1914,11 @@ void AWowGameplayController::OnRightClick()
 		UE_LOG(LogWowGameplay, Log, TEXT("  -> Starting auto-attack (hostile NPC)"));
 		StartAutoAttack();
 	}
+}
+
+void AWowGameplayController::OnRightClickReleased()
+{
+	HandleUiMouseRelease(TEXT("RightButton"), PressedRightMouseFrameHandle);
 }
 
 void AWowGameplayController::OnTabTarget()
