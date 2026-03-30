@@ -2126,6 +2126,34 @@ static int L_GetContainerNumSlots(lua_State* L)
     return 1;
 }
 
+static int L_GetBagName(lua_State* L)
+{
+    int32 BagId = static_cast<int32>(luaL_checknumber(L, 1));
+    if (BagId == 0)
+    {
+        lua_pushstring(L, "Backpack");
+        return 1;
+    }
+
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->EntityManager)
+    {
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (Player && BagId >= 1 && BagId <= 4)
+        {
+            const uint64 BagGuid = Player->GetBagGuid(static_cast<uint8>(BagId));
+            if (BagGuid != 0)
+            {
+                lua_pushstring(L, "Bag");
+                return 1;
+            }
+        }
+    }
+
+    lua_pushnil(L);
+    return 1;
+}
+
 static int L_GetContainerItemLink(lua_State* L)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -3980,6 +4008,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetContainerItemInfo", L_GetContainerItemInfo);
     lua_register(L, "GetContainerItemLink", L_GetContainerItemLink);
     lua_register(L, "GetContainerNumSlots", L_GetContainerNumSlots);
+    lua_register(L, "GetBagName", L_GetBagName);
     lua_register(L, "GetContainerFreeSlots", L_GetContainerFreeSlots);
     lua_register(L, "GetInventoryItemLink", L_GetInventoryItemLink);
     lua_register(L, "GetInventoryItemTexture", L_GetInventoryItemTexture);
@@ -4793,6 +4822,32 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
         lua_pushboolean(L2, HasPet);
         lua_pushboolean(L2, IsHunterPet);
+        return 2;
+    });
+    lua_register(L, "HasPetSpells", [](lua_State* L2) -> int {
+        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
+        if (!Ctx || !Ctx->EntityManager)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+        if (!Player)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        const uint64 PetGuid = Player->GetField64(UnitField::SUMMON);
+        if (PetGuid == 0)
+        {
+            lua_pushnil(L2);
+            return 1;
+        }
+
+        lua_pushnumber(L2, 1);
+        lua_pushstring(L2, Player->GetClassId() == 9 ? "DEMON" : "PET");
         return 2;
     });
     lua_register(L, "PetHasActionBar", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });

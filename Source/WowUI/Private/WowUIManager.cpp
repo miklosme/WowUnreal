@@ -180,6 +180,11 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	UE_LOG(LogWowUIManager, Log, TEXT("LoadFrameXml returned %d directives"), FrameXmlDirectives.Num());
 
 	int32 FrameCount = 0;
+	if (EventSystem)
+	{
+		EventSystem->BeginOnLoadBatch();
+	}
+
 	for (const FWowXmlDirective& Dir : FrameXmlDirectives)
 	{
 		switch (Dir.Type)
@@ -223,6 +228,11 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 			break;
 		}
 		}
+	}
+
+	if (EventSystem)
+	{
+		EventSystem->EndOnLoadBatch();
 	}
 
 	UE_LOG(LogWowUIManager, Log, TEXT("FrameXML: processed %d directives, created %d frames"),

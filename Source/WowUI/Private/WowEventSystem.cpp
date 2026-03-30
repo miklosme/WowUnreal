@@ -87,6 +87,66 @@ namespace
 			SaveAndSetLuaGlobal(L, LegacyArgNames[ArgIndex], StackIndex, SavedGlobals);
 		}
 	}
+
+	static bool RunOnLoadHandler(
+		lua_State* L,
+		FWowFrameManager* FrameManager,
+		TMap<int64, TMap<FString, int32>>& ScriptRefs,
+		TMap<int64, int32>& FrameObjectRefs,
+		int64 Handle,
+		const FString& FrameName)
+	{
+		TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
+		if (!FrameScripts)
+		{
+			return false;
+		}
+
+		int32* OnLoadRef = FrameScripts->Find(TEXT("OnLoad"));
+		if (!OnLoadRef)
+		{
+			return false;
+		}
+
+		lua_rawgeti(L, LUA_REGISTRYINDEX, *OnLoadRef);
+		if (!lua_isfunction(L, -1))
+		{
+			lua_pop(L, 1);
+			return false;
+		}
+
+		int32* FrameRef = FrameObjectRefs.Find(Handle);
+		if (FrameRef)
+		{
+			lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
+		}
+		else
+		{
+			lua_newtable(L);
+		}
+
+		TArray<FLuaSavedGlobal> SavedGlobals;
+		SetWowHandlerGlobals(L, lua_gettop(L), 0, TArray<int32>(), SavedGlobals);
+
+		if (lua_pcall(L, 1, 0, 0) != 0)
+		{
+			RestoreLuaGlobals(L, SavedGlobals);
+			UE_LOG(LogWowEvent, Error, TEXT("OnLoad error [%lld] %s: %hs"),
+				Handle, *FrameName, lua_tostring(L, -1));
+			lua_pop(L, 1);
+
+			if (FrameManager)
+			{
+				FrameManager->SetFrameVisible(Handle, false);
+			}
+		}
+		else
+		{
+			RestoreLuaGlobals(L, SavedGlobals);
+		}
+
+		return true;
+	}
 }
 #endif
 
@@ -383,6 +443,30 @@ void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName, 
 			lua_setfield(L, AbsTableIndex, "__id");
 		}
 
+		if (FrameName == TEXT("UIParent"))
+		{
+			const struct
+			{
+				const TCHAR* Name;
+				lua_Number Value;
+			} DefaultUiParentAttributes[] = {
+				{ TEXT("DEFAULT_FRAME_WIDTH"), 384.0 },
+				{ TEXT("TOP_OFFSET"), -104.0 },
+				{ TEXT("LEFT_OFFSET"), 0.0 },
+				{ TEXT("CENTER_OFFSET"), 384.0 },
+				{ TEXT("RIGHT_OFFSET"), 768.0 },
+				{ TEXT("RIGHT_OFFSET_BUFFER"), 80.0 },
+			};
+
+			for (const auto& Attribute : DefaultUiParentAttributes)
+			{
+				const FString AttributeKey = FString::Printf(TEXT("__attr_%s"), Attribute.Name);
+				FTCHARToUTF8 UTF8AttributeKey(*AttributeKey);
+				lua_pushnumber(L, Attribute.Value);
+				lua_setfield(L, AbsTableIndex, UTF8AttributeKey.Get());
+			}
+		}
+
 		luaL_getmetatable(L, WowLuaApi::FRAME_METATABLE);
 		if (!lua_isnil(L, -1))
 		{
@@ -435,6 +519,41 @@ void FWowEventSystem::CreateFrameObject(int64 Handle, const FString& FrameName, 
 	}
 
 	UE_LOG(LogWowEvent, Verbose, TEXT("Created frame object [%lld] %s"), Handle, *FrameName);
+#endif
+}
+
+void FWowEventSystem::AliasGlobalObject(const FString& ExistingName, const FString& AliasName)
+{
+#if HAS_LUA
+	if (!LuaVM || ExistingName.IsEmpty() || AliasName.IsEmpty() || ExistingName == AliasName)
+	{
+		return;
+	}
+
+	lua_State* L = LuaVM->GetState();
+	if (!L)
+	{
+		return;
+	}
+
+	FTCHARToUTF8 UTF8Alias(*AliasName);
+	lua_getglobal(L, UTF8Alias.Get());
+	const bool bAliasExists = !lua_isnil(L, -1);
+	lua_pop(L, 1);
+	if (bAliasExists)
+	{
+		return;
+	}
+
+	FTCHARToUTF8 UTF8Existing(*ExistingName);
+	lua_getglobal(L, UTF8Existing.Get());
+	if (lua_isnil(L, -1))
+	{
+		lua_pop(L, 1);
+		return;
+	}
+
+	lua_setglobal(L, UTF8Alias.Get());
 #endif
 }
 
@@ -629,6 +748,8 @@ static bool ShouldCompileOnLoadFunctionHandler(const FString& FunctionName)
 	// Keep this intentionally narrow. A broad function="..." implementation
 	// wakes up Blizzard bootstrap paths that currently explode our Lua heap.
 	return FunctionName == TEXT("RuneFrame_OnLoad") ||
+		FunctionName == TEXT("GMChatFrame_OnLoad") ||
+		FunctionName == TEXT("Blizzard_CombatLog_QuickButtonFrame_OnLoad") ||
 		FunctionName == TEXT("LFRBrowseFrame_OnLoad") ||
 		FunctionName == TEXT("CombatFeedback_OnLoad") ||
 		FunctionName == TEXT("TextStatusBar_OnLoad") ||
@@ -1069,12 +1190,19 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 		}
 #endif
 
-	// Compile each script handler from the frame definition
+	TArray<FString> ScriptEventOrder;
+	TMap<FString, FString> FinalScripts;
+
+	// WoW FrameXML treats later same-event handlers as overrides once templates
+	// are merged into a concrete frame definition. Chaining duplicate merged
+	// handlers breaks controls like ChatFrameEditBox and GMChatFrame, where the
+	// child script is expected to replace the inherited template script.
 	for (const FWowScriptHandler& Script : Def.Scripts)
 	{
+		FString ScriptCode;
 		if (!Script.Code.IsEmpty())
 		{
-			SetFrameScript(Handle, Script.Event, Script.Code);
+			ScriptCode = Script.Code;
 		}
 		else if (!Script.File.IsEmpty())
 		{
@@ -1085,69 +1213,102 @@ void FWowEventSystem::CompileFrameScripts(int64 Handle, const FWowFrameDef& Def)
 				// initialization and exhausts the Lua heap.
 				if (ShouldCompileOnLoadFunctionHandler(Script.File))
 				{
-					SetFrameScript(Handle, Script.Event, BuildFunctionHandlerWrapper(Script.File));
+					ScriptCode = BuildFunctionHandlerWrapper(Script.File);
 				}
 			}
 			else
 			{
 				// Non-OnLoad handlers with function="..." are safe to compile
 				// since they don't fire immediately during frame creation.
-				SetFrameScript(Handle, Script.Event, BuildFunctionHandlerWrapper(Script.File));
+				ScriptCode = BuildFunctionHandlerWrapper(Script.File);
 			}
+		}
+
+		if (!ScriptCode.IsEmpty())
+		{
+			FString* ExistingCode = FinalScripts.Find(Script.Event);
+			if (!ExistingCode)
+			{
+				ScriptEventOrder.Add(Script.Event);
+				FinalScripts.Add(Script.Event, ScriptCode);
+			}
+			else
+			{
+				*ExistingCode = ScriptCode;
+			}
+		}
+	}
+
+	for (const FString& ScriptEvent : ScriptEventOrder)
+	{
+		if (const FString* FinalCode = FinalScripts.Find(ScriptEvent))
+		{
+			SetFrameScript(Handle, ScriptEvent, *FinalCode);
 		}
 	}
 
 	UE_LOG(LogWowEvent, Verbose, TEXT("Compiled %d scripts for frame [%lld] %s"),
 		Def.Scripts.Num(), Handle, *Def.Name);
 
-	// Fire OnLoad immediately after compilation (WoW fires OnLoad when frame is created)
+	// Fire OnLoad after compilation unless we're inside a batch that needs
+	// sibling/top-level globals available before handlers run.
 	TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
 	if (FrameScripts)
 	{
 		int32* OnLoadRef = FrameScripts->Find(TEXT("OnLoad"));
 		if (OnLoadRef)
 		{
-			lua_State* L = LuaVM ? LuaVM->GetState() : nullptr;
-			if (L)
+			if (DeferredOnLoadDepth > 0)
 			{
-				lua_rawgeti(L, LUA_REGISTRYINDEX, *OnLoadRef);
-				if (lua_isfunction(L, -1))
+				DeferredOnLoadHandles.Add(Handle);
+			}
+			else
+			{
+				lua_State* L = LuaVM ? LuaVM->GetState() : nullptr;
+				if (L)
 				{
-					// Push self (frame table)
-					int32* FrameRef = FrameObjectRefs.Find(Handle);
-					if (FrameRef)
-						lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
-					else
-						lua_newtable(L);
-
-					TArray<FLuaSavedGlobal> SavedGlobals;
-					SetWowHandlerGlobals(L, lua_gettop(L), 0, TArray<int32>(), SavedGlobals);
-
-					if (lua_pcall(L, 1, 0, 0) != 0)
-					{
-						RestoreLuaGlobals(L, SavedGlobals);
-						UE_LOG(LogWowEvent, Error, TEXT("OnLoad error [%lld] %s: %hs"),
-							Handle, *Def.Name, lua_tostring(L, -1));
-						lua_pop(L, 1);
-
-						// Hide frames whose OnLoad crashed — incomplete init may show broken UI
-						if (FrameManager)
-						{
-							FrameManager->SetFrameVisible(Handle, false);
-						}
-					}
-					else
-					{
-						RestoreLuaGlobals(L, SavedGlobals);
-					}
-				}
-				else
-				{
-					lua_pop(L, 1);
+					RunOnLoadHandler(L, FrameManager, ScriptRefs, FrameObjectRefs, Handle, Def.Name);
 				}
 			}
 		}
 	}
+}
+
+void FWowEventSystem::BeginOnLoadBatch()
+{
+	++DeferredOnLoadDepth;
+}
+
+void FWowEventSystem::EndOnLoadBatch()
+{
+	if (DeferredOnLoadDepth <= 0)
+	{
+		return;
+	}
+
+	--DeferredOnLoadDepth;
+	if (DeferredOnLoadDepth > 0)
+	{
+		return;
+	}
+
+#if HAS_LUA
+	lua_State* L = LuaVM ? LuaVM->GetState() : nullptr;
+	if (!L)
+	{
+		DeferredOnLoadHandles.Reset();
+		return;
+	}
+
+	const TArray<int64> PendingHandles = MoveTemp(DeferredOnLoadHandles);
+	DeferredOnLoadHandles.Reset();
+
+	for (int64 Handle : PendingHandles)
+	{
+		const FString FrameName = FrameManager ? FrameManager->GetFrameName(Handle) : FString();
+		RunOnLoadHandler(L, FrameManager, ScriptRefs, FrameObjectRefs, Handle, FrameName);
+	}
+#endif
 }
 
 void FWowEventSystem::TickOnUpdate(float DeltaTime)

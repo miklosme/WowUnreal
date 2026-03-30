@@ -593,6 +593,10 @@ bool LoadAddonInternal(
 
 	FString BasePath = FString::Printf(TEXT("Interface\\AddOns\\%s\\"), *AddonName);
 	TSet<FString> VisitedXmlFiles;
+	if (EventSystem)
+	{
+		EventSystem->BeginOnLoadBatch();
+	}
 
 	for (const FString& File : Toc.Files)
 	{
@@ -614,6 +618,11 @@ bool LoadAddonInternal(
 		{
 			ProcessXmlDirectivesRecursive(FullPath, Mpq, LuaVM, FrameManager, VisitedXmlFiles);
 		}
+	}
+
+	if (EventSystem)
+	{
+		EventSystem->EndOnLoadBatch();
 	}
 
 	MarkAddonLoadedInternal(AddonName);

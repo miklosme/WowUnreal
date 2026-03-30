@@ -17,6 +17,8 @@
 #undef private
 
 #include "WowLuaVM.h"
+#include "WowEventSystem.h"
+#include "WowFrameTypes.h"
 #include "WowOpcodes.h"
 
 #if __has_include("lua.h")
@@ -512,6 +514,122 @@ bool FLuaUseActionSpellQueuesCastSpell::RunTest(const FString& Parameters)
 
     lua_pushnil(LuaVM.GetState());
     lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDeferredOnLoadBatchResolvesSiblingGlobals, "WowUnreal.UI.DeferredOnLoadBatchResolvesSiblingGlobals",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FDeferredOnLoadBatchResolvesSiblingGlobals::RunTest(const FString& Parameters)
+{
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowEventSystem EventSystem;
+    EventSystem.SetLuaVM(&LuaVM);
+
+    EventSystem.BeginOnLoadBatch();
+
+    EventSystem.CreateFrameObject(1, TEXT("ParentFrame"));
+    FWowFrameDef ParentDef;
+    ParentDef.Name = TEXT("ParentFrame");
+    FWowScriptHandler OnLoad;
+    OnLoad.Event = TEXT("OnLoad");
+    OnLoad.Code = TEXT("assert(SiblingFrame ~= nil, 'SiblingFrame missing during OnLoad'); ParentFrameSawSibling = true");
+    ParentDef.Scripts.Add(OnLoad);
+    EventSystem.CompileFrameScripts(1, ParentDef);
+
+    EventSystem.CreateFrameObject(2, TEXT("SiblingFrame"));
+    FWowFrameDef SiblingDef;
+    SiblingDef.Name = TEXT("SiblingFrame");
+    EventSystem.CompileFrameScripts(2, SiblingDef);
+
+    lua_getglobal(LuaVM.GetState(), "ParentFrameSawSibling");
+    TestTrue(TEXT("OnLoad is deferred until the batch completes"), lua_isnil(LuaVM.GetState(), -1));
+    lua_pop(LuaVM.GetState(), 1);
+
+    EventSystem.EndOnLoadBatch();
+
+    lua_getglobal(LuaVM.GetState(), "ParentFrameSawSibling");
+    const bool bSawSibling = lua_toboolean(LuaVM.GetState(), -1) != 0;
+    lua_pop(LuaVM.GetState(), 1);
+    TestTrue(TEXT("Deferred OnLoad sees globals created later in the same batch"), bSawSibling);
+
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLaterOnLoadOverridesEarlierScript, "WowUnreal.UI.LaterOnLoadOverridesEarlierScript",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLaterOnLoadOverridesEarlierScript::RunTest(const FString& Parameters)
+{
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowEventSystem EventSystem;
+    EventSystem.SetLuaVM(&LuaVM);
+    EventSystem.CreateFrameObject(1, TEXT("TestFrame"));
+
+    FWowFrameDef Def;
+    Def.Name = TEXT("TestFrame");
+
+    FWowScriptHandler TemplateOnLoad;
+    TemplateOnLoad.Event = TEXT("OnLoad");
+    TemplateOnLoad.Code = TEXT("TemplateOnLoadRan = true");
+    Def.Scripts.Add(TemplateOnLoad);
+
+    FWowScriptHandler OverrideOnLoad;
+    OverrideOnLoad.Event = TEXT("OnLoad");
+    OverrideOnLoad.Code = TEXT("OverrideOnLoadRan = (TemplateOnLoadRan ~= true)");
+    Def.Scripts.Add(OverrideOnLoad);
+
+    EventSystem.CompileFrameScripts(1, Def);
+
+    lua_getglobal(LuaVM.GetState(), "TemplateOnLoadRan");
+    const bool bTemplateRan = lua_toboolean(LuaVM.GetState(), -1) != 0;
+    lua_pop(LuaVM.GetState(), 1);
+
+    lua_getglobal(LuaVM.GetState(), "OverrideOnLoadRan");
+    const bool bOverrideRanWithoutTemplate = lua_toboolean(LuaVM.GetState(), -1) != 0;
+    lua_pop(LuaVM.GetState(), 1);
+
+    TestFalse(TEXT("Earlier duplicate OnLoad is overridden"), bTemplateRan);
+    TestTrue(TEXT("Later duplicate OnLoad replaces the earlier handler"), bOverrideRanWithoutTemplate);
+
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiParentDefaultAttributesSeeded, "WowUnreal.UI.UiParentDefaultAttributesSeeded",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FUiParentDefaultAttributesSeeded::RunTest(const FString& Parameters)
+{
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowEventSystem EventSystem;
+    EventSystem.SetLuaVM(&LuaVM);
+    EventSystem.CreateFrameObject(1, TEXT("UIParent"));
+
+    lua_getglobal(LuaVM.GetState(), "UIParent");
+    TestTrue(TEXT("UIParent global exists"), lua_istable(LuaVM.GetState(), -1));
+    lua_getfield(LuaVM.GetState(), -1, "__attr_DEFAULT_FRAME_WIDTH");
+    const double DefaultFrameWidth = lua_tonumber(LuaVM.GetState(), -1);
+    lua_pop(LuaVM.GetState(), 2);
+    TestEqual(TEXT("UIParent seeds DEFAULT_FRAME_WIDTH"), DefaultFrameWidth, 384.0);
+
     LuaVM.Shutdown();
     return true;
 }

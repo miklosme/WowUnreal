@@ -40,11 +40,18 @@ public:
 	/** Create a Lua global table for a named texture/fontstring region */
 	void CreateTextureRegionGlobal(const FString& RegionName, int64 ParentHandle = -1, const FString& ObjectType = TEXT("Texture"));
 
+	/** Alias an existing named Lua global object to another global name. */
+	void AliasGlobalObject(const FString& ExistingName, const FString& AliasName);
+
 	/** Remove all compiled scripts and the Lua frame object for a handle */
 	void RemoveFrameScripts(int64 Handle);
 
 	/** Compile all scripts from a frame definition */
 	void CompileFrameScripts(int64 Handle, const FWowFrameDef& Def);
+
+	/** Defer OnLoad execution until EndOnLoadBatch completes. */
+	void BeginOnLoadBatch();
+	void EndOnLoadBatch();
 
 	/** Dispatch OnUpdate handlers on all frames that have one (call every tick) */
 	void TickOnUpdate(float DeltaTime);
@@ -72,4 +79,7 @@ private:
 
 	/** Frames that have an OnUpdate script handler */
 	TSet<int64> OnUpdateFrames;
+
+	int32 DeferredOnLoadDepth = 0;
+	TArray<int64> DeferredOnLoadHandles;
 };

@@ -21,6 +21,31 @@
 #include "Engine/UserInterfaceSettings.h"
 DEFINE_LOG_CATEGORY_STATIC(LogWowFrame, Log, All);
 
+namespace
+{
+FString BuildParentFrameAliasName(const FString& ParentName, const FString& ChildName)
+{
+	if (!ParentName.EndsWith(TEXT("Frame")) || ChildName.StartsWith(ParentName) || ParentName.Len() <= 5)
+	{
+		return FString();
+	}
+
+	const FString ParentBase = ParentName.LeftChop(5);
+	if (ParentBase.IsEmpty() || !ChildName.StartsWith(ParentBase))
+	{
+		return FString();
+	}
+
+	const FString Suffix = ChildName.Mid(ParentBase.Len());
+	if (Suffix.IsEmpty())
+	{
+		return FString();
+	}
+
+	return ParentName + Suffix;
+}
+}
+
 FWowFrameManager::FWowFrameManager()
 {
 }
@@ -1732,6 +1757,16 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	if (EventSystem && !Resolved.Name.IsEmpty())
 	{
 		EventSystem->CreateFrameObject(Handle, Resolved.Name, Resolved.FrameID);
+
+		if (Entry.ParentHandle != -1)
+		{
+			const FString ParentName = GetFrameName(Entry.ParentHandle);
+			const FString AliasName = BuildParentFrameAliasName(ParentName, Resolved.Name);
+			if (!AliasName.IsEmpty())
+			{
+				EventSystem->AliasGlobalObject(Resolved.Name, AliasName);
+			}
+		}
 
 		// Create Lua globals for button texture names (e.g., ActionButton1NormalTexture)
 		// These are needed by GetNormalTexture() etc.
