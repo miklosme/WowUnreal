@@ -13,6 +13,27 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharacterList, const TArray<FWowC
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWowError, const FString&, Msg);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCharCreateResult, uint8, ResultCode);
 
+enum class EWowActionInvocationKind : uint8
+{
+    None,
+    SpellCast,
+    AutoAttack,
+    ItemUse,
+    Macro,
+};
+
+struct FWowActionInvocation
+{
+    EWowActionInvocationKind Kind = EWowActionInvocationKind::None;
+    uint32 ActionId = 0;
+    int64 TargetGuid = 0;
+
+    bool IsValid() const
+    {
+        return Kind != EWowActionInvocationKind::None && ActionId != 0;
+    }
+};
+
 UCLASS(BlueprintType)
 class WOWNETWORK_API UWowConnectionManager : public UObject
 {
@@ -54,6 +75,12 @@ public:
     bool HasCursorSpellPayload() const;
     bool GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const;
     bool PlaceCursorIntoActionSlot(int32 SlotIndex);
+
+    /** Resolve the action assigned to a slot into a concrete gameplay invocation. */
+    static FWowActionInvocation ResolveActionInvocation(uint32 PackedAction, int64 TargetGuid);
+
+    /** Use the action assigned to a slot, matching Blizzard action-button behavior. */
+    bool UseActionSlot(int32 SlotIndex);
 
     /** Start melee attack on target */
     UFUNCTION(BlueprintCallable) void SendAttackSwing(int64 TargetGuid);

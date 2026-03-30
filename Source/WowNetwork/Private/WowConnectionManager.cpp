@@ -8,6 +8,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogWowNet, Log, All);
 namespace
 {
     constexpr uint8 ACTION_BUTTON_TYPE_SPELL = 0x00;
+    constexpr uint32 AUTO_ATTACK_SPELL_ID = 6603;
 }
 
 void UWowConnectionManager::SetState(EWowSessionState S)
@@ -341,6 +342,25 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
 
+    // Most UI callers pass 0 to mean "use the current selection".
+    const int64 ResolvedTargetGuid = (InTargetGuid != 0) ? InTargetGuid : TargetGuid;
+
+    // Auto Attack (spell 6603) is not cast via CMSG_CAST_SPELL in 3.3.5.
+    // Route it through the melee swing opcode so Blizzard action buttons can start combat.
+    if (SpellId == 6603)
+    {
+        if (ResolvedTargetGuid == 0)
+        {
+            UE_LOG(LogWowNet, Warning, TEXT("SendCastSpell: ignoring auto-attack without a valid target"));
+            return;
+        }
+
+        SendAttackSwing(ResolvedTargetGuid);
+        UE_LOG(LogWowNet, Log, TEXT("SendCastSpell: routed auto-attack spell %d to AttackSwing on target %lld"),
+            SpellId, ResolvedTargetGuid);
+        return;
+    }
+
     TArray<uint8> Data;
     Data.Reserve(32);
 
@@ -348,8 +368,8 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
     static uint8 CastCounter = 0;
     Data.Add(CastCounter++);
 
-    UE_LOG(LogWowNet, Log, TEXT("SendCastSpell: spell=%d target=%lld castCount=%d"),
-        SpellId, InTargetGuid, CastCounter - 1);
+    UE_LOG(LogWowNet, Log, TEXT("SendCastSpell: spell=%d target=%lld requestedTarget=%lld castCount=%d"),
+        SpellId, ResolvedTargetGuid, InTargetGuid, CastCounter - 1);
 
     // spellId (uint32)
     uint32 Spell = static_cast<uint32>(SpellId);
@@ -360,7 +380,7 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
     Data.Add(CastFlags);
 
     // targetMask (uint32) — TARGET_FLAG_UNIT (0x02) if we have a target, else TARGET_FLAG_NONE (0x00)
-    uint64 TGuid = static_cast<uint64>(InTargetGuid);
+    uint64 TGuid = static_cast<uint64>(ResolvedTargetGuid);
     uint32 TargetMask = (TGuid != 0) ? 0x0002 : 0x0000;
     Data.Append(reinterpret_cast<const uint8*>(&TargetMask), 4);
 
@@ -384,7 +404,7 @@ void UWowConnectionManager::SendCastSpell(int32 SpellId, int64 InTargetGuid)
     }
 
     WorldSocket->SendPacket(WowOpcode::CMSG_CAST_SPELL, Data);
-    UE_LOG(LogWowNet, Log, TEXT("Cast spell %d on target %lld"), SpellId, InTargetGuid);
+    UE_LOG(LogWowNet, Log, TEXT("Cast spell %d on target %lld"), SpellId, ResolvedTargetGuid);
 }
 
 void UWowConnectionManager::SendSetActionButton(int32 SlotIndex, uint32 ActionId, uint8 ActionType)
@@ -529,6 +549,85 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
     BroadcastActionButtonsChanged();
     ClearCursorPayload();
     return true;
+}
+
+FWowActionInvocation UWowConnectionManager::ResolveActionInvocation(uint32 PackedAction, int64 InTargetGuid)
+{
+    FWowActionInvocation Invocation;
+    Invocation.ActionId = PackedAction & 0x00FFFFFFu;
+    Invocation.TargetGuid = InTargetGuid;
+
+    if (Invocation.ActionId == 0)
+    {
+        return Invocation;
+    }
+
+    const uint8 ActionType = static_cast<uint8>((PackedAction >> 24) & 0xFF);
+    switch (ActionType)
+    {
+    case ACTION_BUTTON_TYPE_SPELL:
+        Invocation.Kind = (Invocation.ActionId == AUTO_ATTACK_SPELL_ID)
+            ? EWowActionInvocationKind::AutoAttack
+            : EWowActionInvocationKind::SpellCast;
+        break;
+    case 64:
+        Invocation.Kind = EWowActionInvocationKind::Macro;
+        break;
+    case 128:
+        Invocation.Kind = EWowActionInvocationKind::ItemUse;
+        break;
+    default:
+        Invocation.Kind = EWowActionInvocationKind::None;
+        break;
+    }
+
+    return Invocation;
+}
+
+bool UWowConnectionManager::UseActionSlot(int32 SlotIndex)
+{
+    if (SlotIndex < 0 || SlotIndex >= 144 || !PacketHandler.ActionButtons.IsValidIndex(SlotIndex))
+    {
+        return false;
+    }
+
+    const FWowActionInvocation Invocation =
+        ResolveActionInvocation(PacketHandler.ActionButtons[SlotIndex], GetTargetGuid());
+    if (!Invocation.IsValid())
+    {
+        return false;
+    }
+
+    switch (Invocation.Kind)
+    {
+    case EWowActionInvocationKind::SpellCast:
+        SendCastSpell(static_cast<int32>(Invocation.ActionId), Invocation.TargetGuid);
+        return true;
+
+    case EWowActionInvocationKind::AutoAttack:
+        if (Invocation.TargetGuid == 0)
+        {
+            UE_LOG(LogWowNet, Log, TEXT("UseActionSlot: slot %d auto-attack ignored with no target"), SlotIndex);
+            return false;
+        }
+
+        SendAttackSwing(Invocation.TargetGuid);
+        return true;
+
+    case EWowActionInvocationKind::ItemUse:
+        UE_LOG(LogWowNet, Log, TEXT("UseActionSlot: item use not implemented (slot=%d item=%u)"),
+            SlotIndex, Invocation.ActionId);
+        return false;
+
+    case EWowActionInvocationKind::Macro:
+        UE_LOG(LogWowNet, Log, TEXT("UseActionSlot: macro use not implemented (slot=%d macro=%u)"),
+            SlotIndex, Invocation.ActionId);
+        return false;
+
+    case EWowActionInvocationKind::None:
+    default:
+        return false;
+    }
 }
 
 void UWowConnectionManager::BroadcastActionButtonsChanged()
