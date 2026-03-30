@@ -714,6 +714,8 @@ static FWowFrameDef ParseFrameNode_Pugi(const pugi::xml_node& Node)
 	Def.bVirtual = Node.attribute("virtual").as_bool(false);
 	Def.bHidden = Node.attribute("hidden").as_bool(false);
 	Def.bSetAllPoints = Node.attribute("setAllPoints").as_bool(false);
+	Def.bEnableMouse = Node.attribute("enableMouse").as_bool(false);
+	Def.bEnableKeyboard = Node.attribute("enableKeyboard").as_bool(false);
 
 	const char* Strata = Node.attribute("frameStrata").as_string("");
 	if (Strata[0]) Def.Strata = FWowFrameXmlParser::ParseStrata(UTF8_TO_TCHAR(Strata));
@@ -1124,6 +1126,12 @@ static FWowFrameDef ParseFrameNode(const FXmlNode* Node)
 
 	FString SetAllPoints = Node->GetAttribute(TEXT("setAllPoints"));
 	Def.bSetAllPoints = SetAllPoints.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+
+	FString EnableMouse = Node->GetAttribute(TEXT("enableMouse"));
+	Def.bEnableMouse = EnableMouse.Equals(TEXT("true"), ESearchCase::IgnoreCase);
+
+	FString EnableKeyboard = Node->GetAttribute(TEXT("enableKeyboard"));
+	Def.bEnableKeyboard = EnableKeyboard.Equals(TEXT("true"), ESearchCase::IgnoreCase);
 
 	FString StrataStr = Node->GetAttribute(TEXT("frameStrata"));
 	if (!StrataStr.IsEmpty()) Def.Strata = FWowFrameXmlParser::ParseStrata(StrataStr);

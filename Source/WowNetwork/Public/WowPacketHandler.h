@@ -48,6 +48,8 @@ DECLARE_MULTICAST_DELEGATE_FourParams(FOnPlayerTeleport, uint32 /*MapId*/, float
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlayerNameReceived, uint64 /*Guid*/, const FString& /*Name*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnCreatureNameReceived, uint32 /*Entry*/, const FString& /*Name*/, const FString& /*Title*/);
 DECLARE_MULTICAST_DELEGATE(FOnPlayerInventoryUpdate);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnUnitHealthUpdate, uint64 /*EntityGuid*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnUnitPowerUpdate, uint64 /*EntityGuid*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnEmote, uint64 /*EntityGuid*/, uint32 /*EmoteId*/);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnLevelUp, uint32 /*NewLevel*/);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnXPGain, uint32 /*Amount*/, uint8 /*Type*/);
@@ -252,6 +254,8 @@ public:
     FOnPlayerNameReceived OnPlayerNameReceived;
     FOnCreatureNameReceived OnCreatureNameReceived;
     FOnPlayerInventoryUpdate OnPlayerInventoryUpdate;
+    FOnUnitHealthUpdate OnUnitHealthUpdate;
+    FOnUnitPowerUpdate OnUnitPowerUpdate;
     FOnEmote OnEmote;
     FOnLevelUp OnLevelUp;
     FOnXPGain OnXPGain;

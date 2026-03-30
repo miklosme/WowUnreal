@@ -577,6 +577,8 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
     }
 
     bool bInventoryFieldUpdated = false;
+    bool bHealthFieldUpdated = false;
+    bool bPowerFieldUpdated = false;
 
     // Each set bit in the mask means a uint32 value follows
     for (int32 Block = 0; Block < BlockCount; ++Block)
@@ -599,6 +601,19 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
                 {
                     bInventoryFieldUpdated = true;
                 }
+
+                // Check if this is a unit health field update
+                if (Entity.IsUnit() && (FieldIndex == UnitField::HEALTH || FieldIndex == UnitField::MAXHEALTH))
+                {
+                    bHealthFieldUpdated = true;
+                }
+
+                // Check if this is a unit power field update (covers all 7 power types: mana, rage, focus, energy, happiness, runes, runic power)
+                if (Entity.IsUnit() && ((FieldIndex >= UnitField::POWER1 && FieldIndex <= UnitField::POWER7) ||
+                                        (FieldIndex >= UnitField::MAXPOWER1 && FieldIndex <= UnitField::MAXPOWER7)))
+                {
+                    bPowerFieldUpdated = true;
+                }
             }
         }
     }
@@ -607,6 +622,18 @@ void FWowPacketHandler::ParseUpdateFields(FPacketReader& R, FWowEntity& Entity)
     if (bInventoryFieldUpdated)
     {
         OnPlayerInventoryUpdate.Broadcast();
+    }
+
+    // Fire health update event if unit health fields were updated
+    if (bHealthFieldUpdated)
+    {
+        OnUnitHealthUpdate.Broadcast(Entity.Guid);
+    }
+
+    // Fire power update event if unit power fields were updated
+    if (bPowerFieldUpdated)
+    {
+        OnUnitPowerUpdate.Broadcast(Entity.Guid);
     }
 }
 

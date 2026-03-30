@@ -11,6 +11,28 @@
 #include "Formats/WmoTypes.h"
 #include "Coord/WowCoordinate.h"
 
+#define private public
+#include "WowConnectionManager.h"
+#include "Net/WowWorldSocket.h"
+#undef private
+
+#include "WowLuaVM.h"
+#include "WowOpcodes.h"
+
+#if __has_include("lua.h")
+extern "C" {
+#include "lua.h"
+}
+#endif
+
+struct FWowLuaContext
+{
+    class FWowEntityManager* EntityManager = nullptr;
+    class UWowConnectionManager* ConnectionManager = nullptr;
+    class FWowEventSystem* EventSystem = nullptr;
+    class FWowFrameManager* FrameManager = nullptr;
+};
+
 // ---- Helper: shared MPQ manager for data-driven tests ----
 namespace WowTestUtils
 {
@@ -37,6 +59,32 @@ namespace WowTestUtils
             }
         }
         return Mpq;
+    }
+
+    static TSharedPtr<FWowWorldSocket> AttachTestWorldSocket(UWowConnectionManager& Connection, int64 TargetGuid)
+    {
+        Connection.State = EWowSessionState::WorldInGame;
+        Connection.TargetGuid = TargetGuid;
+        Connection.WorldSocket = MakeShared<FWowWorldSocket>();
+        return Connection.WorldSocket;
+    }
+
+    static bool DequeueClientPacket(FWowWorldSocket& Socket, uint32& OutOpcode, TArray<uint8>& OutPayload)
+    {
+        TArray<uint8> Packet;
+        if (!Socket.SendQueue.Dequeue(Packet) || Packet.Num() < 6)
+        {
+            return false;
+        }
+
+        FMemory::Memcpy(&OutOpcode, Packet.GetData() + 2, sizeof(OutOpcode));
+        OutPayload.SetNumUninitialized(Packet.Num() - 6);
+        if (OutPayload.Num() > 0)
+        {
+            FMemory::Memcpy(OutPayload.GetData(), Packet.GetData() + 6, OutPayload.Num());
+        }
+
+        return true;
     }
 }
 
@@ -90,7 +138,6 @@ bool FCoordWowRoundtrip::RunTest(const FString& Parameters)
 #include "WowEntity.h"
 #include "WowEntityManager.h"
 #include "WowUpdateFields.h"
-#include "WowConnectionManager.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEntityCreateAndLookup, "WowUnreal.Entity.CreateAndLookup",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -313,6 +360,159 @@ bool FActionCursorMovesExistingAction::RunTest(const FString& Parameters)
     TestEqual(TEXT("Destination slot receives moved action"), Connection->PacketHandler.ActionButtons[3], PackedSpellAction);
     TestFalse(TEXT("Cursor payload clears after move"), Connection->HasCursorPayload());
 
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FActionInvocationRoutesAutoAttack, "WowUnreal.UI.ActionInvocationRoutesAutoAttack",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FActionInvocationRoutesAutoAttack::RunTest(const FString& Parameters)
+{
+    const FWowActionInvocation Invocation =
+        UWowConnectionManager::ResolveActionInvocation(6603u, 0x1234);
+
+    TestEqual(TEXT("Auto-attack action resolves to auto-attack kind"),
+        Invocation.Kind, EWowActionInvocationKind::AutoAttack);
+    TestEqual(TEXT("Auto-attack action preserves spell id"), Invocation.ActionId, static_cast<uint32>(6603));
+    TestEqual(TEXT("Auto-attack action preserves target"), Invocation.TargetGuid, static_cast<int64>(0x1234));
+    TestTrue(TEXT("Auto-attack invocation is valid"), Invocation.IsValid());
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FActionInvocationRoutesRegularSpell, "WowUnreal.UI.ActionInvocationRoutesRegularSpell",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FActionInvocationRoutesRegularSpell::RunTest(const FString& Parameters)
+{
+    const uint32 PackedSpellAction = 133u; // type 0 spell action
+    const FWowActionInvocation Invocation =
+        UWowConnectionManager::ResolveActionInvocation(PackedSpellAction, 0);
+
+    TestEqual(TEXT("Regular spell resolves to spell-cast kind"),
+        Invocation.Kind, EWowActionInvocationKind::SpellCast);
+    TestEqual(TEXT("Regular spell preserves spell id"), Invocation.ActionId, static_cast<uint32>(133));
+    TestEqual(TEXT("Regular spell preserves target"), Invocation.TargetGuid, static_cast<int64>(0));
+    TestTrue(TEXT("Regular spell invocation is valid"), Invocation.IsValid());
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaUseActionAutoAttackQueuesAttackSwing, "WowUnreal.UI.LuaUseActionAutoAttackQueuesAttackSwing",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaUseActionAutoAttackQueuesAttackSwing::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    constexpr int64 TargetGuid = 0x0011223344556677LL;
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, TargetGuid);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    Connection->PacketHandler.ActionButtons.SetNumZeroed(12);
+    Connection->PacketHandler.ActionButtons[0] = 6603; // Auto Attack
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    lua_pushlightuserdata(LuaVM.GetState(), &Context);
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+
+    const bool bExecuted = LuaVM.ExecuteString(TEXT("UseAction(1)"), TEXT("LuaUseActionAutoAttack"));
+    TestTrue(TEXT("UseAction executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("UseAction queued a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("UseAction queues CMSG_ATTACKSWING for auto-attack"), Opcode, static_cast<uint32>(WowOpcode::CMSG_ATTACKSWING));
+        TestEqual(TEXT("Attack swing payload is an 8-byte guid"), Payload.Num(), 8);
+
+        uint64 SentTargetGuid = 0;
+        if (Payload.Num() == 8)
+        {
+            FMemory::Memcpy(&SentTargetGuid, Payload.GetData(), sizeof(SentTargetGuid));
+            TestEqual(TEXT("Attack swing targets the selected unit"), SentTargetGuid, static_cast<uint64>(TargetGuid));
+        }
+    }
+
+    lua_pushnil(LuaVM.GetState());
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaUseActionSpellQueuesCastSpell, "WowUnreal.UI.LuaUseActionSpellQueuesCastSpell",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaUseActionSpellQueuesCastSpell::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    constexpr int64 TargetGuid = 0x0000000000004242LL;
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, TargetGuid);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    Connection->PacketHandler.ActionButtons.SetNumZeroed(12);
+    Connection->PacketHandler.ActionButtons[0] = 133; // Fireball
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    lua_pushlightuserdata(LuaVM.GetState(), &Context);
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+
+    const bool bExecuted = LuaVM.ExecuteString(TEXT("UseAction(1)"), TEXT("LuaUseActionSpell"));
+    TestTrue(TEXT("UseAction executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("UseAction queued a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("UseAction queues CMSG_CAST_SPELL for normal spells"), Opcode, static_cast<uint32>(WowOpcode::CMSG_CAST_SPELL));
+        TestTrue(TEXT("Cast spell payload is large enough for cast count, spell id, flags, and target mask"), Payload.Num() >= 10);
+
+        if (Payload.Num() >= 5)
+        {
+            uint32 SpellId = 0;
+            FMemory::Memcpy(&SpellId, Payload.GetData() + 1, sizeof(SpellId));
+            TestEqual(TEXT("Cast spell payload preserves the spell id"), SpellId, static_cast<uint32>(133));
+        }
+    }
+
+    lua_pushnil(LuaVM.GetState());
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    LuaVM.Shutdown();
     return true;
 }
 

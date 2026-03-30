@@ -1,4 +1,7 @@
 #pragma once
+#include "CoreMinimal.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogWowLuaFrame, Log, All);
 
 struct lua_State;
 class FWowEntityManager;

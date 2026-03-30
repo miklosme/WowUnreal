@@ -143,6 +143,22 @@ public:
 	void DispatchClick(int64 Handle, const FString& Button);
 	bool DispatchReceiveDrag(int64 Handle);
 
+	/** Update mouse hover state — call once per frame from Tick.
+	 *  Dispatches OnEnter/OnLeave events to Lua scripts. */
+	void UpdateMouseHover(float ScreenX, float ScreenY);
+
+	/** Poll EditBox/Slider widgets for changes and dispatch Lua events.
+	 *  Call once per frame from Tick. */
+	void TickWidgetEvents();
+
+	/** Dispatch OnEnterPressed to the currently focused EditBox (if any).
+	 *  Returns true if an EditBox was focused and received the event. */
+	bool DispatchEditBoxEnterPressed();
+
+	/** Dispatch OnEscapePressed to the currently focused EditBox (if any).
+	 *  Returns true if an EditBox was focused and received the event. */
+	bool DispatchEditBoxEscapePressed();
+
 	/** Set the UI scale factor (typically calculated from viewport size vs WoW's base resolution) */
 	void SetUIScale(float InScale) { UIScale = InScale; }
 
@@ -156,6 +172,15 @@ private:
 		bool bKeyboardEnabled = false;
 		bool bMouseWheelEnabled = false;
 	};
+
+	/** Handle of the frame currently under the mouse cursor (-1 if none) */
+	int64 HoverFrameHandle = -1;
+
+	/** Last-known text for each EditBox, used to detect changes for OnTextChanged dispatch */
+	TMap<int64, FString> EditBoxLastText;
+
+	/** Last-known value for each Slider, used to detect changes for OnValueChanged dispatch */
+	TMap<int64, float> SliderLastValue;
 
 	TMap<int64, FFrameEntry> Frames;
 	TMap<FString, int64> NameToHandle;

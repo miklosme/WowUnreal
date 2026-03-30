@@ -283,6 +283,12 @@ void AWowGameplayController::BindEntityEvents()
 	ConnectionManager->PacketHandler.OnPlayerInventoryUpdate.AddUObject(
 		this, &AWowGameplayController::OnPlayerInventoryUpdated);
 
+	// Listen for unit health/power updates to fire UI events
+	ConnectionManager->PacketHandler.OnUnitHealthUpdate.AddUObject(
+		this, &AWowGameplayController::OnUnitHealthUpdate);
+	ConnectionManager->PacketHandler.OnUnitPowerUpdate.AddUObject(
+		this, &AWowGameplayController::OnUnitPowerUpdate);
+
 	// Bind combat log events
 	ConnectionManager->PacketHandler.OnSpellStart.AddUObject(
 		this, &AWowGameplayController::OnSpellStart);
@@ -774,6 +780,19 @@ void AWowGameplayController::Tick(float DeltaTime)
 		UIManager->GetEventSystem()->TickOnUpdate(DeltaTime);
 	}
 
+	// Update mouse hover state for OnEnter/OnLeave events
+	if (UIManager && UIManager->GetFrameManager())
+	{
+		float MX, MY;
+		if (GetMousePosition(MX, MY))
+		{
+			UIManager->GetFrameManager()->UpdateMouseHover(MX, MY);
+		}
+
+		// Poll EditBox/Slider for value changes and dispatch Lua events
+		UIManager->GetFrameManager()->TickWidgetEvents();
+	}
+
 	// Update tooltip manager
 	if (TooltipManager && FSlateApplication::IsInitialized())
 	{
@@ -925,6 +944,16 @@ void AWowGameplayController::OnOpcodeReceived(uint16 Opcode)
 	if (!EventName.IsEmpty())
 	{
 		EventSystem->FireEvent(EventName);
+
+		// Fire initial unit stats events when player logs in
+		if (EventName == TEXT("PLAYER_LOGIN"))
+		{
+			TArray<FString> PlayerArgs;
+			PlayerArgs.Add(TEXT("player"));
+			EventSystem->FireEvent(TEXT("UNIT_HEALTH"), PlayerArgs);
+			EventSystem->FireEvent(TEXT("UNIT_POWER"), PlayerArgs);
+			EventSystem->FireEvent(TEXT("UNIT_MANA"), PlayerArgs);  // WoW 3.3.5 compatibility alias
+		}
 	}
 }
 
@@ -957,6 +986,9 @@ void AWowGameplayController::OnLeftClick()
 					return; // Consume drag-drop on WoW UI before regular click handling
 				}
 
+				// Always dispatch clicks manually — UMG buttons are transparent overlays
+				// that don't have OnClicked delegates bound; our custom hit-testing
+				// handles all click routing to Lua scripts.
 				UIManager->GetFrameManager()->DispatchMouseDown(HitFrame, TEXT("LeftButton"));
 				UIManager->GetFrameManager()->DispatchClick(HitFrame, TEXT("LeftButton"));
 				UIManager->GetFrameManager()->DispatchMouseUp(HitFrame, TEXT("LeftButton"));
@@ -3456,17 +3488,8 @@ void AWowGameplayController::CastSpellFromSlot(int32 SlotIndex)
 
 	if (ActionId == 0) return;
 
-	if (ActionType == 0) // Spell
+	if (ConnectionManager->UseActionSlot(SlotIndex))
 	{
-		// Auto-Attack (spell 6603) uses CMSG_ATTACKSWING, not CMSG_CAST_SPELL
-		if (ActionId == 6603)
-		{
-			StartAutoAttack();
-		}
-		else
-		{
-			ConnectionManager->SendCastSpell(ActionId, static_cast<int64>(TargetGuid));
-		}
 		FireUIEvent(TEXT("ACTIONBAR_UPDATE_STATE"));
 	}
 	else if (ActionType == 128) // Item
@@ -3899,6 +3922,15 @@ void AWowGameplayController::CreateChatWindow()
 
 void AWowGameplayController::OnEnterKey()
 {
+	// If a Lua EditBox has keyboard focus, dispatch OnEnterPressed to it first
+	if (UIManager && UIManager->GetFrameManager())
+	{
+		if (UIManager->GetFrameManager()->DispatchEditBoxEnterPressed())
+		{
+			return;
+		}
+	}
+
 	if (ChatWindow.IsValid())
 	{
 		ChatWindow->ToggleInputFocus();
@@ -4205,6 +4237,67 @@ void AWowGameplayController::OnPlayerInventoryUpdated()
 	FireUIEvent(TEXT("PLAYER_MONEY"));
 	FireUIEvent(TEXT("PLAYER_EQUIPMENT_CHANGED"));
 	FireUIEvent(TEXT("UPDATE_INVENTORY_DURABILITY"));
+}
+
+void AWowGameplayController::OnUnitHealthUpdate(uint64 EntityGuid)
+{
+	if (!UIManager) return;
+
+	FWowEventSystem* EventSystem = UIManager->GetEventSystem();
+	if (!EventSystem) return;
+
+	// Determine which unit was updated
+	FString UnitToken;
+	if (ConnectionManager && EntityGuid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid)
+	{
+		UnitToken = TEXT("player");
+	}
+	else if (ConnectionManager && EntityGuid == static_cast<uint64>(ConnectionManager->GetTargetGuid()))
+	{
+		UnitToken = TEXT("target");
+	}
+	else
+	{
+		// For other units, we don't currently fire UNIT_HEALTH events
+		// TODO: Add support for party/raid members if needed
+		return;
+	}
+
+	// Fire UNIT_HEALTH event with unit token
+	TArray<FString> Args;
+	Args.Add(UnitToken);
+	EventSystem->FireEvent(TEXT("UNIT_HEALTH"), Args);
+}
+
+void AWowGameplayController::OnUnitPowerUpdate(uint64 EntityGuid)
+{
+	if (!UIManager) return;
+
+	FWowEventSystem* EventSystem = UIManager->GetEventSystem();
+	if (!EventSystem) return;
+
+	// Determine which unit was updated
+	FString UnitToken;
+	if (ConnectionManager && EntityGuid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid)
+	{
+		UnitToken = TEXT("player");
+	}
+	else if (ConnectionManager && EntityGuid == static_cast<uint64>(ConnectionManager->GetTargetGuid()))
+	{
+		UnitToken = TEXT("target");
+	}
+	else
+	{
+		// For other units, we don't currently fire UNIT_POWER events
+		// TODO: Add support for party/raid members if needed
+		return;
+	}
+
+	// Fire UNIT_POWER and UNIT_MANA events with unit token
+	TArray<FString> Args;
+	Args.Add(UnitToken);
+	EventSystem->FireEvent(TEXT("UNIT_POWER"), Args);
+	EventSystem->FireEvent(TEXT("UNIT_MANA"), Args);  // WoW 3.3.5 compatibility alias
 }
 
 void AWowGameplayController::OnInitialSpells(const TArray<uint32>& SpellIds)
@@ -4685,6 +4778,15 @@ void AWowGameplayController::OnSpellbookKey()
 
 void AWowGameplayController::OnEscapeKey()
 {
+	// If a Lua EditBox has keyboard focus, dispatch OnEscapePressed to it first
+	if (UIManager && UIManager->GetFrameManager())
+	{
+		if (UIManager->GetFrameManager()->DispatchEditBoxEscapePressed())
+		{
+			return;
+		}
+	}
+
 	if (IsWowUiConsumingKeyboardInput())
 	{
 		return; // Don't process escape when typing in chat

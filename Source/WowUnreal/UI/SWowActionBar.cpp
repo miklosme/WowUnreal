@@ -219,13 +219,13 @@ FReply SWowActionBar::OnActionSlotClicked(int32 SlotIndex)
 
     const FActionSlot& Slot = ActionSlots[SlotIndex];
 
-    // Only handle spell actions for now
-    if (Slot.ActionType == 0 && Slot.ActionId > 0)
+    if (Slot.ActionId > 0)
     {
         if (ConnectionManager.IsValid())
         {
-            ConnectionManager->SendCastSpell(Slot.ActionId);
-            UE_LOG(LogWowActionBar, Log, TEXT("Casting spell %u from slot %d"), Slot.ActionId, SlotIndex);
+            const bool bUsed = ConnectionManager->UseActionSlot(SlotIndex);
+            UE_LOG(LogWowActionBar, Log, TEXT("Used action slot %d (action=%u type=%u success=%d)"),
+                SlotIndex, Slot.ActionId, Slot.ActionType, bUsed ? 1 : 0);
         }
     }
 

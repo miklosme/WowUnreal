@@ -19,7 +19,6 @@
 #include "Slate/WidgetTransform.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Engine/UserInterfaceSettings.h"
-
 DEFINE_LOG_CATEGORY_STATIC(LogWowFrame, Log, All);
 
 FWowFrameManager::FWowFrameManager()
@@ -446,6 +445,10 @@ void FWowFrameManager::MergeTemplate(FWowFrameDef& Target, const FWowFrameDef& T
 	// Hidden — template hidden overrides unless target explicitly sets visible
 	if (Template.bHidden && !Target.bHidden) Target.bHidden = Template.bHidden;
 	if (Target.ParentKey.IsEmpty()) Target.ParentKey = Template.ParentKey;
+
+	// EnableMouse / EnableKeyboard — inherit from template
+	if (Template.bEnableMouse && !Target.bEnableMouse) Target.bEnableMouse = true;
+	if (Template.bEnableKeyboard && !Target.bEnableKeyboard) Target.bEnableKeyboard = true;
 
 	// SetAllPoints
 	if (Template.bSetAllPoints && !Target.bSetAllPoints) Target.bSetAllPoints = Template.bSetAllPoints;
@@ -1362,7 +1365,10 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			TransparentStyle.SetPressedPadding(FMargin(0));
 			Button->SetStyle(TransparentStyle);
 			Button->SetBackgroundColor(FLinearColor::Transparent);
-			AddFillChild(Button, -100, ESlateVisibility::SelfHitTestInvisible);
+			// HitTestInvisible — clicks are routed via our custom HitTestFrames(),
+			// not UMG's Slate hit-testing.  This prevents the transparent UButton
+			// from consuming mouse events before the PlayerController sees them.
+			AddFillChild(Button, -100, ESlateVisibility::HitTestInvisible);
 			ButtonWidgets.Add(Handle, Button);
 
 			if (!Def.ButtonText.IsEmpty())
@@ -1373,7 +1379,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 				FSlateFontInfo FontInfo = ButtonText->GetFont();
 				FontInfo.Size = FMath::RoundToInt(12.f * UIScale);
 				ButtonText->SetFont(FontInfo);
-				AddFillChild(ButtonText, 250, ESlateVisibility::SelfHitTestInvisible);
+				AddFillChild(ButtonText, 250, ESlateVisibility::HitTestInvisible);
 				PrimaryTextWidgets.Add(Handle, ButtonText);
 
 				if (!Def.Name.IsEmpty())
@@ -1412,7 +1418,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			}
 			// Use transparent bar — WoW sliders use XML textures
 			Slider->SetSliderBarColor(FLinearColor::Transparent);
-			AddFillChild(Slider, 50, ESlateVisibility::SelfHitTestInvisible);
+			AddFillChild(Slider, 50, ESlateVisibility::Visible);
 			SliderWidgets.Add(Handle, Slider);
 		}
 	}
@@ -1470,14 +1476,11 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 	}
 	else
 	{
-		// Interactive frame types (Button, EditBox, Slider, etc.) must be Visible
-		// to receive mouse events. Non-interactive frames use SelfHitTestInvisible
-		// to let clicks pass through to the 3D world.
-		bool bInteractive = (Def.Type == EWowFrameType::Button ||
-			Def.Type == EWowFrameType::CheckButton ||
-			Def.Type == EWowFrameType::EditBox ||
-			Def.Type == EWowFrameType::Slider);
-		Widget->SetVisibility(bInteractive ? ESlateVisibility::Visible : ESlateVisibility::SelfHitTestInvisible);
+		// All frame containers use SelfHitTestInvisible — clicks pass through to the
+		// 3D world and are routed to Lua via our custom HitTestFrames() in the
+		// PlayerController.  EditBox and Slider children that need UMG interaction
+		// set their own visibility to Visible.
+		Widget->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
 
 	// Add to parent canvas (may be root canvas or a parent frame's canvas)
@@ -1679,11 +1682,13 @@ int64 FWowFrameManager::CreateFrame(const FWowFrameDef& Def)
 	int64 Handle = NextHandle++;
 	FFrameEntry Entry;
 	Entry.Def = Resolved;
-	Entry.bMouseEnabled = (Resolved.Type == EWowFrameType::Button ||
+	Entry.bMouseEnabled = Resolved.bEnableMouse ||
+		Resolved.Type == EWowFrameType::Button ||
 		Resolved.Type == EWowFrameType::CheckButton ||
 		Resolved.Type == EWowFrameType::EditBox ||
-		Resolved.Type == EWowFrameType::Slider);
-	Entry.bKeyboardEnabled = (Resolved.Type == EWowFrameType::EditBox);
+		Resolved.Type == EWowFrameType::Slider;
+	Entry.bKeyboardEnabled = Resolved.bEnableKeyboard ||
+		Resolved.Type == EWowFrameType::EditBox;
 	Entry.bMouseWheelEnabled = false;
 
 	// Resolve parent handle
@@ -2183,6 +2188,106 @@ bool FWowFrameManager::IsMouseOverFrame(int64 Handle, float TopOffset, float Bot
 	const float Top = Rect->Y - TopOffset;
 	const float Bottom = Rect->Y + Rect->H - BottomOffset;
 	return WowX >= Left && WowX <= Right && WowY >= Top && WowY <= Bottom;
+}
+
+void FWowFrameManager::TickWidgetEvents()
+{
+	// Poll EditBox widgets for text changes
+	for (auto& Pair : EditBoxWidgets)
+	{
+		if (!Pair.Value.IsValid()) continue;
+		FString CurrentText = Pair.Value->GetText().ToString();
+		FString* LastText = EditBoxLastText.Find(Pair.Key);
+		if (!LastText)
+		{
+			EditBoxLastText.Add(Pair.Key, CurrentText);
+		}
+		else if (*LastText != CurrentText)
+		{
+			*LastText = CurrentText;
+			if (EventSystem)
+			{
+				EventSystem->RunFrameScript(Pair.Key, TEXT("OnTextChanged"));
+			}
+		}
+	}
+
+	// Poll Slider widgets for value changes
+	for (auto& Pair : SliderWidgets)
+	{
+		if (!Pair.Value.IsValid()) continue;
+		float CurrentValue = Pair.Value->GetValue();
+		float* LastValue = SliderLastValue.Find(Pair.Key);
+		if (!LastValue)
+		{
+			SliderLastValue.Add(Pair.Key, CurrentValue);
+		}
+		else if (!FMath::IsNearlyEqual(*LastValue, CurrentValue))
+		{
+			*LastValue = CurrentValue;
+			if (EventSystem)
+			{
+				EventSystem->RunFrameScript(Pair.Key, TEXT("OnValueChanged"),
+					{FString::SanitizeFloat(CurrentValue)});
+			}
+		}
+	}
+}
+
+bool FWowFrameManager::DispatchEditBoxEnterPressed()
+{
+	for (const auto& Pair : EditBoxWidgets)
+	{
+		if (!Pair.Value.IsValid()) continue;
+		if (Pair.Value->HasKeyboardFocus())
+		{
+			if (EventSystem)
+			{
+				EventSystem->RunFrameScript(Pair.Key, TEXT("OnEnterPressed"));
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+bool FWowFrameManager::DispatchEditBoxEscapePressed()
+{
+	for (const auto& Pair : EditBoxWidgets)
+	{
+		if (!Pair.Value.IsValid()) continue;
+		if (Pair.Value->HasKeyboardFocus())
+		{
+			if (EventSystem)
+			{
+				EventSystem->RunFrameScript(Pair.Key, TEXT("OnEscapePressed"));
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+void FWowFrameManager::UpdateMouseHover(float ScreenX, float ScreenY)
+{
+	int64 NewHover = HitTestFrames(ScreenX, ScreenY);
+
+	if (NewHover != HoverFrameHandle)
+	{
+		// Dispatch OnLeave for the old frame
+		if (HoverFrameHandle >= 0 && EventSystem)
+		{
+			EventSystem->RunFrameScript(HoverFrameHandle, TEXT("OnLeave"), {TEXT("0")});
+		}
+
+		HoverFrameHandle = NewHover;
+
+		// Dispatch OnEnter for the new frame
+		if (HoverFrameHandle >= 0 && EventSystem)
+		{
+			EventSystem->RunFrameScript(HoverFrameHandle, TEXT("OnEnter"), {TEXT("0")});
+		}
+	}
 }
 
 void FWowFrameManager::DispatchMouseDown(int64 Handle, const FString& Button)

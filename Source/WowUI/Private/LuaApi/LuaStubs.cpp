@@ -674,9 +674,16 @@ static int L_UnitHealth(lua_State* L)
 {
     FWowEntity* Entity = ResolveUnit(L);
     if (Entity)
-        lua_pushnumber(L, Entity->GetHealth());
+    {
+        int32 Health = Entity->GetHealth();
+        UE_LOG(LogWowLuaStub, Log, TEXT("UnitHealth: Entity found, Health=%d"), Health);
+        lua_pushnumber(L, Health);
+    }
     else
+    {
+        UE_LOG(LogWowLuaStub, Warning, TEXT("UnitHealth: No entity found"));
         lua_pushnumber(L, 0);
+    }
     return 1;
 }
 
@@ -684,9 +691,16 @@ static int L_UnitHealthMax(lua_State* L)
 {
     FWowEntity* Entity = ResolveUnit(L);
     if (Entity)
-        lua_pushnumber(L, Entity->GetMaxHealth());
+    {
+        int32 MaxHealth = Entity->GetMaxHealth();
+        UE_LOG(LogWowLuaStub, Log, TEXT("UnitHealthMax: Entity found, MaxHealth=%d"), MaxHealth);
+        lua_pushnumber(L, MaxHealth);
+    }
     else
+    {
+        UE_LOG(LogWowLuaStub, Warning, TEXT("UnitHealthMax: No entity found"));
         lua_pushnumber(L, 0);
+    }
     return 1;
 }
 
@@ -698,10 +712,13 @@ static int L_UnitPower(lua_State* L)
     if (Entity && Entity->IsUnit())
     {
         FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
-        lua_pushnumber(L, Unit->GetPower(static_cast<uint8>(PowerType)));
+        int32 Power = Unit->GetPower(static_cast<uint8>(PowerType));
+        UE_LOG(LogWowLuaStub, Log, TEXT("UnitPower: Entity found, PowerType=%d, Power=%d"), PowerType, Power);
+        lua_pushnumber(L, Power);
     }
     else
     {
+        UE_LOG(LogWowLuaStub, Warning, TEXT("UnitPower: No entity found or not a unit, PowerType=%d"), PowerType);
         lua_pushnumber(L, 0);
     }
     return 1;
@@ -715,10 +732,13 @@ static int L_UnitPowerMax(lua_State* L)
     if (Entity && Entity->IsUnit())
     {
         FWowUnitEntity* Unit = static_cast<FWowUnitEntity*>(Entity);
-        lua_pushnumber(L, Unit->GetMaxPower(static_cast<uint8>(PowerType)));
+        int32 MaxPower = Unit->GetMaxPower(static_cast<uint8>(PowerType));
+        UE_LOG(LogWowLuaStub, Log, TEXT("UnitPowerMax: Entity found, PowerType=%d, MaxPower=%d"), PowerType, MaxPower);
+        lua_pushnumber(L, MaxPower);
     }
     else
     {
+        UE_LOG(LogWowLuaStub, Warning, TEXT("UnitPowerMax: No entity found or not a unit, PowerType=%d"), PowerType);
         lua_pushnumber(L, 0);
     }
     return 1;
@@ -1474,20 +1494,7 @@ static int L_UseAction(lua_State* L)
 
     if (Ctx && Ctx->ConnectionManager && Slot >= 0 && Slot < 144)
     {
-        const TArray<uint32>& ActionButtons = Ctx->ConnectionManager->PacketHandler.ActionButtons;
-        if (Slot < ActionButtons.Num() && ActionButtons[Slot] != 0)
-        {
-            uint32 ActionData = ActionButtons[Slot];
-            uint8 ActionType = (ActionData >> 24) & 0xFF;
-            uint32 ActionId = ActionData & 0x00FFFFFF;
-
-            if (ActionType == 0) // Spell
-            {
-                int64 TargetGuid = Ctx->ConnectionManager->GetTargetGuid();
-                Ctx->ConnectionManager->SendCastSpell(ActionId, TargetGuid);
-            }
-            // TODO: Implement item usage for ActionType == 128
-        }
+        Ctx->ConnectionManager->UseActionSlot(Slot);
     }
 
     return 0;

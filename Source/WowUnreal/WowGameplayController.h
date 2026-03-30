@@ -403,6 +403,14 @@ private:
     UFUNCTION()
     void OnPlayerInventoryUpdated();
 
+    /** Handle unit health updates from server */
+    UFUNCTION()
+    void OnUnitHealthUpdate(uint64 EntityGuid);
+
+    /** Handle unit power updates from server */
+    UFUNCTION()
+    void OnUnitPowerUpdate(uint64 EntityGuid);
+
     /** Handle guild roster updates from server */
     UFUNCTION()
     void OnGuildRosterUpdated();

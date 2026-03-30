@@ -20,7 +20,7 @@ extern "C" {
 #include "lualib.h"
 }
 
-DEFINE_LOG_CATEGORY_STATIC(LogWowLuaFrame, Log, All);
+DEFINE_LOG_CATEGORY(LogWowLuaFrame);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 
@@ -2682,6 +2682,8 @@ static int LF_SetMinMaxValues(lua_State* L)
 	float MinValue = static_cast<float>(luaL_checknumber(L, 2));
 	float MaxValue = static_cast<float>(luaL_checknumber(L, 3));
 
+	UE_LOG(LogWowLuaFrame, Log, TEXT("SetMinMaxValues called: Min=%.1f, Max=%.1f"), MinValue, MaxValue);
+
 	// Store in Lua table
 	lua_pushnumber(L, MinValue);
 	lua_setfield(L, 1, "__minValue");
@@ -2748,8 +2750,21 @@ static int LF_SetValue(lua_State* L)
 			// Calculate percentage and update progress bar
 			float Range = MaxValue - MinValue;
 			float Percent = (Range > 0.0f) ? (Value - MinValue) / Range : 0.0f;
-			ProgressBar->SetPercent(FMath::Clamp(Percent, 0.0f, 1.0f));
+			float ClampedPercent = FMath::Clamp(Percent, 0.0f, 1.0f);
+
+			UE_LOG(LogWowLuaFrame, Log, TEXT("SetValue called: Value=%.1f, Min=%.1f, Max=%.1f, Range=%.1f, Percent=%.3f, ClampedPercent=%.3f"),
+				   Value, MinValue, MaxValue, Range, Percent, ClampedPercent);
+
+			ProgressBar->SetPercent(ClampedPercent);
 		}
+		else
+		{
+			UE_LOG(LogWowLuaFrame, Warning, TEXT("SetValue called but no ProgressBar found for Handle=%lld"), Handle);
+		}
+	}
+	else
+	{
+		UE_LOG(LogWowLuaFrame, Warning, TEXT("SetValue called but missing context or non-numeric value"));
 	}
 
 	return 0;

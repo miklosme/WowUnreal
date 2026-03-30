@@ -141,6 +141,8 @@ struct WOWUI_API FWowFrameDef
 	bool bVirtual = false;
 	bool bHidden = false;
 	bool bSetAllPoints = false;
+	bool bEnableMouse = false;
+	bool bEnableKeyboard = false;
 
 	float Width = 0.f;
 	float Height = 0.f;
