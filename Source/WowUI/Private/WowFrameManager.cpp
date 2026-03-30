@@ -954,6 +954,11 @@ void FWowFrameManager::CreateLayerContent(UCanvasPanel* Container, const FWowFra
 		for (const FWowTextureElement& Tex : Layer.Textures)
 		{
 			UImage* ImgWidget = NewObject<UImage>(Outer);
+			// Start with transparent brush — prevents default UE white/grey square
+			// from showing before the BLP texture is loaded (or for empty textures).
+			FSlateBrush TransparentBrush;
+			TransparentBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
+			ImgWidget->SetBrush(TransparentBrush);
 			ImgWidget->SetColorAndOpacity(Tex.VertexColor);
 			if (Tex.bHidden)
 			{
