@@ -3428,6 +3428,13 @@ namespace
 {
     int32 GCombatLogNumEntries = 0;
     int32 GCombatLogCurrentEntry = 0;
+    constexpr uint32 CombatLogObjectAffiliationMask = 0x0000000F;
+    constexpr uint32 CombatLogObjectReactionMask = 0x000000F0;
+    constexpr uint32 CombatLogObjectControlMask = 0x00000300;
+    constexpr uint32 CombatLogObjectTypeMask = 0x0000FC00;
+    constexpr uint32 CombatLogObjectNone = 0x80000000;
+    constexpr uint32 CombatLogObjectSpecialMask = 0xFFFF0000;
+    constexpr uint32 CombatLogObjectOptionalSpecialMask = CombatLogObjectSpecialMask & ~CombatLogObjectNone;
 
     int32 ClampCombatLogEntry(int32 Entry)
     {
@@ -3438,24 +3445,78 @@ namespace
 
         return FMath::Clamp(Entry, 1, GCombatLogNumEntries);
     }
+
+    bool IsValidCombatLogFilterMask(uint32 Value)
+    {
+        if ((Value & CombatLogObjectNone) != 0)
+        {
+            return true;
+        }
+
+        return (Value & CombatLogObjectAffiliationMask) != 0
+            && (Value & CombatLogObjectReactionMask) != 0
+            && (Value & CombatLogObjectControlMask) != 0
+            && (Value & CombatLogObjectTypeMask) != 0;
+    }
+
+    bool CombatLogObjectMatchesMask(uint32 ObjectFlags, uint32 Mask)
+    {
+        if (Mask == 0)
+        {
+            return false;
+        }
+
+        if ((ObjectFlags & CombatLogObjectNone) != 0)
+        {
+            return (Mask & CombatLogObjectNone) != 0;
+        }
+
+        if (Mask == CombatLogObjectNone)
+        {
+            return false;
+        }
+
+        if (!IsValidCombatLogFilterMask(ObjectFlags) || !IsValidCombatLogFilterMask(Mask))
+        {
+            return false;
+        }
+
+        if ((ObjectFlags & (Mask & CombatLogObjectAffiliationMask)) == 0
+            || (ObjectFlags & (Mask & CombatLogObjectReactionMask)) == 0
+            || (ObjectFlags & (Mask & CombatLogObjectControlMask)) == 0
+            || (ObjectFlags & (Mask & CombatLogObjectTypeMask)) == 0)
+        {
+            return false;
+        }
+
+        const uint32 RequestedSpecialFlags = Mask & CombatLogObjectOptionalSpecialMask;
+        if (RequestedSpecialFlags != 0 && RequestedSpecialFlags != CombatLogObjectOptionalSpecialMask)
+        {
+            return (ObjectFlags & RequestedSpecialFlags) != 0;
+        }
+
+        return true;
+    }
+
+    int PushPlaceholderCombatLogEntry(lua_State* L, const char* EventName, const char* SourceName, const char* DestName)
+    {
+        lua_pushnumber(L, FPlatformTime::Seconds()); // timestamp
+        lua_pushstring(L, EventName); // event
+        lua_pushstring(L, "0x0000000000000000"); // sourceGUID
+        lua_pushstring(L, SourceName); // sourceName
+        lua_pushnumber(L, CombatLogObjectNone); // sourceFlags
+        lua_pushstring(L, "0x0000000000000000"); // destGUID
+        lua_pushstring(L, DestName); // destName
+        lua_pushnumber(L, CombatLogObjectNone); // destFlags
+        return 8;
+    }
 }
 
 static int L_CombatLogGetCurrentEventInfo(lua_State* L)
 {
     // CombatLogGetCurrentEventInfo() → timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags, ...
-    // Return basic placeholder data
-    lua_pushnumber(L, FPlatformTime::Seconds()); // timestamp
-    lua_pushstring(L, "SPELL_DAMAGE"); // subevent
-    lua_pushboolean(L, 0); // hideCaster
-    lua_pushstring(L, "0x0000000000000000"); // sourceGUID
-    lua_pushstring(L, "Unknown"); // sourceName
-    lua_pushnumber(L, 0); // sourceFlags
-    lua_pushnumber(L, 0); // sourceRaidFlags
-    lua_pushstring(L, "0x0000000000000000"); // destGUID
-    lua_pushstring(L, "Unknown"); // destName
-    lua_pushnumber(L, 0); // destFlags
-    lua_pushnumber(L, 0); // destRaidFlags
-    return 11;
+    // Return basic placeholder data using the WotLK combat-log field order.
+    return PushPlaceholderCombatLogEntry(L, "SPELL_DAMAGE", "Unknown", "Unknown");
 }
 
 static int L_CombatLogGetNumEntries(lua_State* L)
@@ -3466,8 +3527,8 @@ static int L_CombatLogGetNumEntries(lua_State* L)
 
 static int L_CombatLogGetCurrentEntry(lua_State* L)
 {
-    lua_pushinteger(L, ClampCombatLogEntry(GCombatLogCurrentEntry));
-    return 1;
+    GCombatLogCurrentEntry = ClampCombatLogEntry(GCombatLogCurrentEntry);
+    return PushPlaceholderCombatLogEntry(L, "", "", "");
 }
 
 static int L_CombatLogSetCurrentEntry(lua_State* L)
@@ -3481,7 +3542,15 @@ static int L_CombatLogAdvanceEntry(lua_State* L)
 {
     const int32 Delta = static_cast<int32>(luaL_optinteger(L, 1, 1));
     GCombatLogCurrentEntry = ClampCombatLogEntry(GCombatLogCurrentEntry + Delta);
-    return 0;
+    return PushPlaceholderCombatLogEntry(L, "", "", "");
+}
+
+static int L_CombatLog_Object_IsA(lua_State* L)
+{
+    const uint32 ObjectFlags = static_cast<uint32>(luaL_checkinteger(L, 1));
+    const uint32 Mask = static_cast<uint32>(luaL_checkinteger(L, 2));
+    lua_pushboolean(L, CombatLogObjectMatchesMask(ObjectFlags, Mask));
+    return 1;
 }
 
 // GetInventorySlotInfo - maps slot names to IDs and textures
@@ -4134,6 +4203,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "CombatLogGetCurrentEntry", L_CombatLogGetCurrentEntry);
     lua_register(L, "CombatLogSetCurrentEntry", L_CombatLogSetCurrentEntry);
     lua_register(L, "CombatLogAdvanceEntry", L_CombatLogAdvanceEntry);
+    lua_register(L, "CombatLog_Object_IsA", L_CombatLog_Object_IsA);
     lua_register(L, "CombatLogAddFilter", [](lua_State* L2) -> int {
         return 0;
     });

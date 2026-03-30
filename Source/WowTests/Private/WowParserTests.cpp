@@ -674,6 +674,11 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     lua_pop(L, 1);
     TestTrue(TEXT("CombatLogGetCurrentEntry global exists"), bHasCombatLogGetCurrentEntry);
 
+    lua_getglobal(L, "CombatLog_Object_IsA");
+    const bool bHasCombatLogObjectIsA = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    TestTrue(TEXT("CombatLog_Object_IsA global exists"), bHasCombatLogObjectIsA);
+
     lua_getglobal(L, "CombatLogSetCurrentEntry");
     lua_pushinteger(L, 5);
     const int SetCurrentEntryResult = lua_pcall(L, 1, 0, 0);
@@ -681,8 +686,17 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
 
     lua_getglobal(L, "CombatLogAdvanceEntry");
     lua_pushinteger(L, 1);
-    const int AdvanceEntryResult = lua_pcall(L, 1, 0, 0);
+    const int AdvanceEntryResult = lua_pcall(L, 1, 8, 0);
     TestEqual(TEXT("CombatLogAdvanceEntry accepts a numeric delta"), AdvanceEntryResult, 0);
+    const bool bAdvanceEntryHasStringEvent = lua_isstring(L, -7);
+    const FString AdvancedEventName = bAdvanceEntryHasStringEvent ? UTF8_TO_TCHAR(lua_tostring(L, -7)) : FString();
+    const bool bAdvanceEntryHasNumericSourceFlags = lua_isnumber(L, -4);
+    const int32 AdvancedSourceFlags = bAdvanceEntryHasNumericSourceFlags ? static_cast<int32>(lua_tointeger(L, -4)) : 0;
+    lua_pop(L, 8);
+    TestTrue(TEXT("CombatLogAdvanceEntry returns a WotLK event tuple"), bAdvanceEntryHasStringEvent);
+    TestEqual(TEXT("CombatLogAdvanceEntry uses an empty placeholder event"), AdvancedEventName, FString());
+    TestTrue(TEXT("CombatLogAdvanceEntry returns numeric source flags"), bAdvanceEntryHasNumericSourceFlags);
+    TestEqual(TEXT("CombatLogAdvanceEntry defaults unknown source flags to COMBATLOG_OBJECT_NONE"), AdvancedSourceFlags, static_cast<int32>(0x80000000u));
 
     lua_getglobal(L, "CombatLogGetNumEntries");
     const int GetNumEntriesResult = lua_pcall(L, 0, 1, 0);
@@ -692,11 +706,44 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     TestEqual(TEXT("CombatLog cursor API defaults to an empty log"), CombatLogNumEntries, 0);
 
     lua_getglobal(L, "CombatLogGetCurrentEntry");
-    const int GetCurrentEntryResult = lua_pcall(L, 0, 1, 0);
+    const int GetCurrentEntryResult = lua_pcall(L, 0, 8, 0);
     TestEqual(TEXT("CombatLogGetCurrentEntry call succeeds"), GetCurrentEntryResult, 0);
-    const int32 CombatLogCurrentEntry = static_cast<int32>(lua_tointeger(L, -1));
+    const bool bCurrentEntryHasStringEvent = lua_isstring(L, -7);
+    const FString CurrentEntryEventName = bCurrentEntryHasStringEvent ? UTF8_TO_TCHAR(lua_tostring(L, -7)) : FString();
+    const bool bCurrentEntryHasNumericDestFlags = lua_isnumber(L, -1);
+    const int32 CurrentDestFlags = bCurrentEntryHasNumericDestFlags ? static_cast<int32>(lua_tointeger(L, -1)) : 0;
+    lua_pop(L, 8);
+    TestTrue(TEXT("CombatLogGetCurrentEntry returns a WotLK event tuple"), bCurrentEntryHasStringEvent);
+    TestEqual(TEXT("CombatLog current-entry placeholder event is empty"), CurrentEntryEventName, FString());
+    TestTrue(TEXT("CombatLogGetCurrentEntry returns numeric destination flags"), bCurrentEntryHasNumericDestFlags);
+    TestEqual(TEXT("CombatLog current-entry defaults unknown destination flags to COMBATLOG_OBJECT_NONE"), CurrentDestFlags, static_cast<int32>(0x80000000u));
+
+    lua_getglobal(L, "CombatLog_Object_IsA");
+    lua_pushinteger(L, 0x00000511);
+    lua_pushinteger(L, 0x00000511);
+    const int CombatLogObjectIsAResult = lua_pcall(L, 2, 1, 0);
+    TestEqual(TEXT("CombatLog_Object_IsA call succeeds"), CombatLogObjectIsAResult, 0);
+    const bool bCombatLogObjectMatches = lua_toboolean(L, -1) != 0;
     lua_pop(L, 1);
-    TestEqual(TEXT("CombatLog cursor clamps to zero when the log is empty"), CombatLogCurrentEntry, 0);
+    TestTrue(TEXT("CombatLog_Object_IsA matches valid composite combat log filters"), bCombatLogObjectMatches);
+
+    lua_getglobal(L, "CombatLog_Object_IsA");
+    lua_pushinteger(L, 0x00000004);
+    lua_pushinteger(L, 0x00000004);
+    const int CombatLogObjectSingleConstantResult = lua_pcall(L, 2, 1, 0);
+    TestEqual(TEXT("CombatLog_Object_IsA rejects single-category constants cleanly"), CombatLogObjectSingleConstantResult, 0);
+    const bool bCombatLogObjectSingleConstantMatches = lua_toboolean(L, -1) != 0;
+    lua_pop(L, 1);
+    TestFalse(TEXT("CombatLog_Object_IsA rejects incomplete masks"), bCombatLogObjectSingleConstantMatches);
+
+    lua_getglobal(L, "CombatLog_Object_IsA");
+    lua_pushinteger(L, static_cast<lua_Integer>(0x80000000u));
+    lua_pushinteger(L, static_cast<lua_Integer>(0x80000000u));
+    const int CombatLogObjectUnknownResult = lua_pcall(L, 2, 1, 0);
+    TestEqual(TEXT("CombatLog_Object_IsA handles COMBATLOG_OBJECT_NONE"), CombatLogObjectUnknownResult, 0);
+    const bool bCombatLogObjectUnknownMatches = lua_toboolean(L, -1) != 0;
+    lua_pop(L, 1);
+    TestTrue(TEXT("CombatLog_Object_IsA matches unknown-unit filters"), bCombatLogObjectUnknownMatches);
 
     LuaVM.Shutdown();
     return true;

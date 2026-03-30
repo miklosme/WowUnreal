@@ -238,7 +238,8 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Logged-in FrameXML script override parity (same-event merged template handlers now use WoW-style override behavior; verified chat edit boxes, GM chat bootstrap, target spell bars, and casting bars survive world login)
 - [x] Blizzard utility global parity for logged-in addon boot (added `table.wipe`, `CombatLogResetFilter`, and `CombatLogAddFilter`; verified GM chat loads cleanly and combat log advances to `CombatLogGetNumEntries` after world login)
 - [x] Blizzard combat log cursor API parity for logged-in addon boot (added `CombatLogGetNumEntries`, `CombatLogGetCurrentEntry`, `CombatLogSetCurrentEntry`, and `CombatLogAdvanceEntry`; verified Blizzard combat log loads through world login and the logged-in screenshot stays valid)
-- [ ] Blizzard combat log quick-button argument parity for logged-in addon boot (remaining `CombatLogQuickButtonFrame_Custom` `ADDON_LOADED` path still hits a string/nil argument mismatch after the cursor API batch)
+- [x] Blizzard combat log entry tuple parity for quick-button refiltering (combat log current-entry helpers now return the WotLK `timestamp, event, sourceGUID, sourceName, sourceFlags, destGUID, destName, destFlags` tuple Blizzard_CombatLog expects)
+- [x] Blizzard combat log object-flag helper parity for quick-button refiltering (`CombatLog_Object_IsA` now follows WotLK composite combat-log mask rules, the logged-in Blizzard_CombatLog quick-button path loads cleanly, and the delayed screenshot fired after world login)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
