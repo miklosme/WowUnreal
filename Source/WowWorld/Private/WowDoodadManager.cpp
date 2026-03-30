@@ -496,6 +496,9 @@ UStaticMesh* FWowDoodadManager::CreateStaticMeshFromM2(const FM2Data& Data, cons
     Params.bFastBuild = true;
     Params.bCommitMeshDescription = true;
     StaticMesh->BuildFromMeshDescriptions(MeshDescs, Params);
+    StaticMesh->NeverStream = true;
+    StaticMesh->InitResources();
+    for (FStaticMaterial& Mat : StaticMesh->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
     // Log material state after build to diagnose
     static bool bLoggedMatState = false;

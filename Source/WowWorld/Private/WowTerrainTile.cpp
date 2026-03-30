@@ -169,6 +169,9 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         Params.bFastBuild = true;
         Params.bCommitMeshDescription = true;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
+        SM->NeverStream = true;
+        SM->InitResources();
+        for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
         // Enable complex collision (use render mesh as collision)
         if (SM->GetBodySetup() == nullptr)

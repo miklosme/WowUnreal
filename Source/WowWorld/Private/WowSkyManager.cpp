@@ -171,6 +171,9 @@ static UStaticMesh* BuildDomeMesh(
 	Params.bBuildSimpleCollision = false;
 	Params.bFastBuild = true;
 	SM->BuildFromMeshDescriptions(Descs, Params);
+	SM->NeverStream = true;
+	SM->InitResources();
+	for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 	return SM;
 }
 

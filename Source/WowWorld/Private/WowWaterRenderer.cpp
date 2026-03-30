@@ -76,6 +76,9 @@ static UStaticMesh* BuildLiquidStaticMesh(
 	BuildParams.bBuildSimpleCollision = false;
 	BuildParams.bFastBuild = true;
 	SM->BuildFromMeshDescriptions(MeshDescs, BuildParams);
+	SM->NeverStream = true;
+	SM->InitResources();
+	for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
 	if (Material)
 	{

@@ -1197,6 +1197,9 @@ void AWowWorldManager::SpawnWdlTile(int32 TX, int32 TY)
     Params.bBuildSimpleCollision = false;
     Params.bFastBuild = true;
     SM->BuildFromMeshDescriptions(MeshDescs, Params);
+    SM->NeverStream = true;
+    SM->InitResources();
+    for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
     // Simple green-brown material for distant terrain
     UMaterialInstanceDynamic* Mat = UMaterialInstanceDynamic::Create(
@@ -1423,6 +1426,9 @@ void AWowWorldManager::SpawnLod1Tile(int32 TX, int32 TY)
         Params.bFastBuild = true;
         Params.bCommitMeshDescription = true;
         SM->BuildFromMeshDescriptions(MeshDescs, Params);
+        SM->NeverStream = true;
+        SM->InitResources();
+        for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
         UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(Lod1Actor, TEXT("Lod1Mesh"));
         MeshComp->SetStaticMesh(SM);

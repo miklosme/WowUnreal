@@ -244,6 +244,9 @@ AActor* FWowWmoRenderer::SpawnWmo(UWorld* World, const FString& WmoPath, const F
                 LiqBuild.bBuildSimpleCollision = false;
                 LiqBuild.bFastBuild = true;
                 LiqSM->BuildFromMeshDescriptions(LiqDescs, LiqBuild);
+                LiqSM->NeverStream = true;
+                LiqSM->InitResources();
+                for (FStaticMaterial& Mat : LiqSM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
                 UMaterial* LiqMat = FWowWaterMaterial::GetMaterialForCategory(Category);
                 if (LiqMat)
@@ -444,6 +447,9 @@ UStaticMesh* FWowWmoRenderer::CreateStaticMeshFromWmoGroup(
     Params.bFastBuild = true;
     Params.bCommitMeshDescription = true;
     SM->BuildFromMeshDescriptions(MeshDescs, Params);
+    SM->NeverStream = true;
+    SM->InitResources();
+    for (FStaticMaterial& Mat : SM->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
 
     return SM;
 }

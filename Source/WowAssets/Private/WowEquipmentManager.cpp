@@ -415,6 +415,9 @@ USceneComponent* FWowEquipmentManager::AttachEquipment(FMpqManager* Mpq, FWowAss
             UStaticMesh::FBuildMeshDescriptionsParams Params;
             Params.bFastBuild = true;
             WeaponMesh->BuildFromMeshDescriptions(MeshDescs, Params);
+            WeaponMesh->NeverStream = true;
+            WeaponMesh->InitResources();
+            for (FStaticMaterial& Mat : WeaponMesh->GetStaticMaterials()) { Mat.UVChannelData.bInitialized = true; }
             if (WeaponMesh->GetStaticMaterials().Num() == 0)
             {
                 WeaponMesh->GetStaticMaterials().Add(FStaticMaterial(UMaterial::GetDefaultMaterial(MD_Surface)));
