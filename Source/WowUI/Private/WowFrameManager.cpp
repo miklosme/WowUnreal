@@ -1523,7 +1523,8 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		Bar->SetWidgetStyle(BarStyle);
 		Bar->SetFillColorAndOpacity(FLinearColor::Green); // default, Lua will override
 		Bar->SetPercent(0.0f);
-		UCanvasPanelSlot* BarSlot = Cast<UCanvasPanel>(Widget)->AddChildToCanvas(Bar);
+		UCanvasPanel* CanvasPanel = Cast<UCanvasPanel>(Widget);
+		UCanvasPanelSlot* BarSlot = CanvasPanel ? CanvasPanel->AddChildToCanvas(Bar) : nullptr;
 		if (BarSlot)
 		{
 			BarSlot->SetAnchors(FAnchors(0, 0));
@@ -1534,9 +1535,9 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 	}
 
 	// Create backdrop (9-slice background) if specified
-	if (Def.Backdrop.IsSet() && Cast<UCanvasPanel>(Widget))
+	if (UCanvasPanel* BackdropCanvas = Cast<UCanvasPanel>(Widget); Def.Backdrop.IsSet() && BackdropCanvas)
 	{
-		CreateBackdrop(Cast<UCanvasPanel>(Widget), Def.Backdrop.GetValue());
+		CreateBackdrop(BackdropCanvas, Def.Backdrop.GetValue());
 	}
 
 	// Create layer content (textures and fontstrings) inside the frame

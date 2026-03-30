@@ -100,6 +100,15 @@ public:
     /** Decline a pending duel request or forfeit an active duel */
     void SendCancelDuel(int64 ArbiterGuid);
 
+    /** Request the current pet action bar state from the server */
+    void SendRequestPetInfo();
+
+    /** Trigger the pet action currently assigned to a pet action bar slot */
+    void SendPetActionBarSlot(int32 SlotIndex, int64 TargetGuid = 0);
+
+    /** Toggle pet spell autocast for the action currently assigned to a slot */
+    void SendPetSpellAutocast(int32 SlotIndex, bool bEnabled);
+
     /** Request the current raid target icon assignments */
     void SendRequestRaidTargetIcons();
 

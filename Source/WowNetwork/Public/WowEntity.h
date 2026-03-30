@@ -51,6 +51,8 @@ struct FAuraInfo
     uint8 Level = 0;
     uint8 Charges = 0;
     uint64 CasterGuid = 0;
+    uint32 DurationMs = 0;
+    uint32 RemainingMs = 0;
     bool bActive = false;
 };
 
@@ -270,6 +272,32 @@ namespace WowDuelResultReason
     inline constexpr uint8 FLED = 1;
 }
 
+namespace WowPetActionType
+{
+    inline constexpr uint8 PASSIVE  = 0x01;
+    inline constexpr uint8 DISABLED = 0x81;
+    inline constexpr uint8 ENABLED  = 0xC1;
+    inline constexpr uint8 COMMAND  = 0x07;
+    inline constexpr uint8 REACTION = 0x06;
+}
+
+namespace WowPetCommand
+{
+    inline constexpr uint32 STAY    = 0;
+    inline constexpr uint32 FOLLOW  = 1;
+    inline constexpr uint32 ATTACK  = 2;
+    inline constexpr uint32 ABANDON = 3;
+}
+
+namespace WowPetReactState
+{
+    inline constexpr uint32 PASSIVE    = 0;
+    inline constexpr uint32 DEFENSIVE  = 1;
+    inline constexpr uint32 AGGRESSIVE = 2;
+}
+
+inline constexpr int32 WOW_PET_ACTION_SLOT_COUNT = 10;
+
 enum class EWowDuelPhase : uint8
 {
     None,
@@ -413,6 +441,154 @@ struct FWowDuelState
     bool ShouldShowCompletionText() const
     {
         return IsComplete() && FPlatformTime::Seconds() < StatusEndTimeSeconds;
+    }
+};
+
+struct FWowPetActionSlot
+{
+    uint32 PackedData = 0;
+    uint32 ActionId = 0;
+    uint8 ActionType = WowPetActionType::PASSIVE;
+
+    void SetPackedData(uint32 InPackedData)
+    {
+        PackedData = InPackedData;
+        ActionId = PackedData & 0x00FFFFFF;
+        ActionType = static_cast<uint8>((PackedData >> 24) & 0xFF);
+    }
+
+    bool IsSpell() const
+    {
+        return ActionType == WowPetActionType::PASSIVE
+            || ActionType == WowPetActionType::DISABLED
+            || ActionType == WowPetActionType::ENABLED;
+    }
+
+    bool IsCommand() const
+    {
+        return ActionType == WowPetActionType::COMMAND;
+    }
+
+    bool IsReaction() const
+    {
+        return ActionType == WowPetActionType::REACTION;
+    }
+
+    bool IsAutocastCapable() const
+    {
+        return ActionType == WowPetActionType::DISABLED || ActionType == WowPetActionType::ENABLED;
+    }
+
+    bool IsAutocastEnabled() const
+    {
+        return ActionType == WowPetActionType::ENABLED;
+    }
+
+    bool IsEmpty() const
+    {
+        return IsSpell() && ActionId == 0;
+    }
+
+    bool IsUsable() const
+    {
+        return IsCommand() || IsReaction() || (IsSpell() && ActionId != 0);
+    }
+
+    FString GetDisplayName() const
+    {
+        if (IsCommand())
+        {
+            switch (ActionId)
+            {
+            case WowPetCommand::ATTACK: return TEXT("Attack");
+            case WowPetCommand::FOLLOW: return TEXT("Follow");
+            case WowPetCommand::STAY: return TEXT("Stay");
+            case WowPetCommand::ABANDON: return TEXT("Dismiss");
+            default: return TEXT("Command");
+            }
+        }
+
+        if (IsReaction())
+        {
+            switch (ActionId)
+            {
+            case WowPetReactState::AGGRESSIVE: return TEXT("Aggressive");
+            case WowPetReactState::DEFENSIVE: return TEXT("Defensive");
+            case WowPetReactState::PASSIVE: return TEXT("Passive");
+            default: return TEXT("Reaction");
+            }
+        }
+
+        return ActionId != 0
+            ? FString::Printf(TEXT("Spell %u"), ActionId)
+            : TEXT("");
+    }
+};
+
+struct FWowPetActionBarState
+{
+    uint64 PetGuid = 0;
+    uint16 Family = 0;
+    uint32 DurationMs = 0;
+    uint8 ReactState = 0;
+    uint8 CommandState = 0;
+    uint16 Flags = 0;
+    TArray<FWowPetActionSlot> ActionSlots;
+    TArray<uint32> KnownSpells;
+    TMap<uint32, double> SpellCooldownExpirySeconds;
+
+    FWowPetActionBarState()
+    {
+        Clear();
+    }
+
+    void Clear()
+    {
+        PetGuid = 0;
+        Family = 0;
+        DurationMs = 0;
+        ReactState = 0;
+        CommandState = 0;
+        Flags = 0;
+        ActionSlots.Init(FWowPetActionSlot{}, WOW_PET_ACTION_SLOT_COUNT);
+        KnownSpells.Empty();
+        SpellCooldownExpirySeconds.Empty();
+    }
+
+    bool HasPet() const
+    {
+        return PetGuid != 0;
+    }
+
+    bool HasActionBar() const
+    {
+        return HasPet() && ActionSlots.Num() == WOW_PET_ACTION_SLOT_COUNT;
+    }
+
+    const FWowPetActionSlot* GetSlot(int32 SlotIndex) const
+    {
+        return ActionSlots.IsValidIndex(SlotIndex) ? &ActionSlots[SlotIndex] : nullptr;
+    }
+
+    FWowPetActionSlot* GetMutableSlot(int32 SlotIndex)
+    {
+        return ActionSlots.IsValidIndex(SlotIndex) ? &ActionSlots[SlotIndex] : nullptr;
+    }
+
+    float GetCooldownRemaining(int32 SlotIndex) const
+    {
+        const FWowPetActionSlot* Slot = GetSlot(SlotIndex);
+        if (!Slot || !Slot->IsSpell() || Slot->ActionId == 0)
+        {
+            return 0.0f;
+        }
+
+        if (const double* ExpirySeconds = SpellCooldownExpirySeconds.Find(Slot->ActionId))
+        {
+            return static_cast<float>(FMath::Max(0.0, *ExpirySeconds - FPlatformTime::Seconds()));
+        }
+
+        return 0.0f;
     }
 };
 

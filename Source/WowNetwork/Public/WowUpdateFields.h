@@ -129,6 +129,8 @@ namespace UnitField
     inline constexpr uint16 MAXPOWER3            = BASE + 0x001D;
     inline constexpr uint16 MAXPOWER4            = BASE + 0x001E;
     inline constexpr uint16 MAXPOWER5            = BASE + 0x001F;
+    inline constexpr uint16 MAXPOWER6            = BASE + 0x0020; // Runes
+    inline constexpr uint16 MAXPOWER7            = BASE + 0x0021; // Runic Power
     inline constexpr uint16 LEVEL                = BASE + 0x0030;
     inline constexpr uint16 FACTIONTEMPLATE      = BASE + 0x0031;
     inline constexpr uint16 FLAGS                = BASE + 0x0035;

@@ -769,6 +769,90 @@ void UWowConnectionManager::SendCancelDuel(int64 ArbiterGuid)
     UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_DUEL_CANCELLED arbiter=%llu"), Guid);
 }
 
+void UWowConnectionManager::SendRequestPetInfo()
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_REQUEST_PET_INFO, {});
+    UE_LOG(LogWowNet, Verbose, TEXT("Sent CMSG_REQUEST_PET_INFO"));
+}
+
+void UWowConnectionManager::SendPetActionBarSlot(int32 SlotIndex, int64 InTargetGuid)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    const FWowPetActionSlot* Slot = PacketHandler.PetActionBar.GetSlot(SlotIndex);
+    if (!Slot || !Slot->IsUsable() || PacketHandler.PetActionBar.PetGuid == 0)
+    {
+        return;
+    }
+
+    uint64 Target = static_cast<uint64>(InTargetGuid != 0 ? InTargetGuid : TargetGuid);
+    if (!Slot->IsSpell() && (!Slot->IsCommand() || Slot->ActionId != WowPetCommand::ATTACK))
+    {
+        Target = 0;
+    }
+
+    TArray<uint8> Data;
+    Data.Reserve(sizeof(uint64) + sizeof(uint32) + sizeof(uint64));
+
+    const uint64 PetGuid = PacketHandler.PetActionBar.PetGuid;
+    const uint32 PackedData = Slot->PackedData;
+    Data.Append(reinterpret_cast<const uint8*>(&PetGuid), sizeof(PetGuid));
+    Data.Append(reinterpret_cast<const uint8*>(&PackedData), sizeof(PackedData));
+    Data.Append(reinterpret_cast<const uint8*>(&Target), sizeof(Target));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_PET_ACTION, Data);
+
+    if (Slot->IsReaction())
+    {
+        PacketHandler.PetActionBar.ReactState = static_cast<uint8>(Slot->ActionId);
+        PacketHandler.OnPetBarUpdated.Broadcast(PacketHandler.PetActionBar);
+    }
+    else if (Slot->IsCommand())
+    {
+        if (Slot->ActionId == WowPetCommand::FOLLOW || Slot->ActionId == WowPetCommand::STAY)
+        {
+            PacketHandler.PetActionBar.CommandState = static_cast<uint8>(Slot->ActionId);
+            PacketHandler.OnPetBarUpdated.Broadcast(PacketHandler.PetActionBar);
+        }
+    }
+
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_PET_ACTION slot=%d pet=%llu packed=0x%08X target=%llu"),
+        SlotIndex, PetGuid, PackedData, Target);
+}
+
+void UWowConnectionManager::SendPetSpellAutocast(int32 SlotIndex, bool bEnabled)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;
+
+    const FWowPetActionSlot* Slot = PacketHandler.PetActionBar.GetSlot(SlotIndex);
+    if (!Slot || !Slot->IsAutocastCapable() || PacketHandler.PetActionBar.PetGuid == 0 || Slot->ActionId == 0)
+    {
+        return;
+    }
+
+    TArray<uint8> Data;
+    Data.Reserve(sizeof(uint64) + sizeof(uint32) + sizeof(uint8));
+
+    const uint64 PetGuid = PacketHandler.PetActionBar.PetGuid;
+    Data.Append(reinterpret_cast<const uint8*>(&PetGuid), sizeof(PetGuid));
+    Data.Append(reinterpret_cast<const uint8*>(&Slot->ActionId), sizeof(Slot->ActionId));
+    Data.Add(bEnabled ? 1u : 0u);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_PET_SPELL_AUTOCAST, Data);
+
+    if (FWowPetActionSlot* MutableSlot = PacketHandler.PetActionBar.GetMutableSlot(SlotIndex))
+    {
+        MutableSlot->ActionType = bEnabled ? WowPetActionType::ENABLED : WowPetActionType::DISABLED;
+        MutableSlot->PackedData = (MutableSlot->PackedData & 0x00FFFFFF) | (static_cast<uint32>(MutableSlot->ActionType) << 24);
+        PacketHandler.OnPetBarUpdated.Broadcast(PacketHandler.PetActionBar);
+    }
+
+    UE_LOG(LogWowNet, Log, TEXT("Sent CMSG_PET_SPELL_AUTOCAST slot=%d spell=%u enabled=%d"),
+        SlotIndex, Slot->ActionId, bEnabled ? 1 : 0);
+}
+
 void UWowConnectionManager::SendRequestRaidTargetIcons()
 {
     if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame) return;

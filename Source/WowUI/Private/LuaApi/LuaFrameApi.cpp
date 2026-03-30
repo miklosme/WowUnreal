@@ -1015,6 +1015,7 @@ static int LF_GetChildren(lua_State* L)
 			FString ChildName = Ctx->FrameManager->GetFrameName(ChildHandle);
 			if (!ChildName.IsEmpty())
 			{
+				// Push named children as Lua globals
 				lua_getglobal(L, TCHAR_TO_UTF8(*ChildName));
 				if (lua_istable(L, -1))
 				{
@@ -1025,10 +1026,18 @@ static int LF_GetChildren(lua_State* L)
 					lua_pop(L, 1);
 				}
 			}
+			else
+			{
+				// Push nil for unnamed children to match GetNumChildren count
+				lua_pushnil(L);
+				Count++;
+			}
 		}
 		return Count;
 	}
-	return 0;
+	// Push nil when FrameManager is null to maintain stack balance
+	lua_pushnil(L);
+	return 1;
 }
 
 // frame:GetNumChildren()

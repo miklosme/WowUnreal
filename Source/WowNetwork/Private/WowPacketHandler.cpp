@@ -187,6 +187,9 @@ void FWowPacketHandler::HandleLoginVerifyWorld(FPacketReader& R)
     UE_LOG(LogWowPacket, Log, TEXT("LOGIN_VERIFY_WORLD: map=%d pos=(%.1f, %.1f, %.1f) orient=%.2f"),
         MapId, X, Y, Z, O);
 
+    // Clear quest log on zone change
+    QuestLog.Empty();
+
     OnLoginVerifyWorld.Broadcast(MapId, X, Y, Z, O);
 }
 
@@ -289,7 +292,24 @@ void FWowPacketHandler::ParseUpdateBlock(FPacketReader& R)
         else
         {
             UE_LOG(LogWowPacket, Warning, TEXT("VALUES update for unknown GUID %llu"), Guid);
-            // Skip fields we can't parse without knowing the entity
+            // Must consume the field block to keep packet aligned
+            uint8 SkipBlockCount = R.ReadU8();
+            TArray<uint32> SkipMask;
+            SkipMask.SetNum(SkipBlockCount);
+            for (int32 m = 0; m < SkipBlockCount; ++m)
+            {
+                SkipMask[m] = R.ReadU32();
+            }
+            for (int32 Block = 0; Block < SkipBlockCount; ++Block)
+            {
+                for (int32 Bit = 0; Bit < 32; ++Bit)
+                {
+                    if (SkipMask[Block] & (1u << Bit))
+                    {
+                        R.Skip(4);
+                    }
+                }
+            }
             break;
         }
         break;
@@ -1058,6 +1078,17 @@ void FWowPacketHandler::HandleAuraUpdate(FPacketReader& R)
         }
     }
 
+    // Check if duration data is present (WOTLK 3.3.5a aura flags)
+    const uint8 AFLAG_DURATION = 0x20;
+    if (Flags & AFLAG_DURATION)
+    {
+        if (R.CanRead(8)) // 2x uint32
+        {
+            Aura.DurationMs = R.ReadU32();
+            Aura.RemainingMs = R.ReadU32();
+        }
+    }
+
     UE_LOG(LogWowPacket, Log, TEXT("AURA_UPDATE: target=%llu slot=%d spell=%u"),
         TargetGuid, Slot, SpellId);
 }
@@ -1189,6 +1220,11 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
         uint32 SplineFlags = R.ReadU32();
         uint32 Duration = R.ReadU32();
         PointCount = R.ReadU32();
+        if (PointCount > 500)
+        {
+            UE_LOG(LogWowPacket, Warning, TEXT("MONSTER_MOVE: excessive point count %u, capping"), PointCount);
+            PointCount = 500;
+        }
 
         Entity->Movement.SplineFlags = SplineFlags;
         Entity->Movement.SplineDuration = Duration;
@@ -1225,10 +1261,17 @@ void FWowPacketHandler::HandleMonsterMove(FPacketReader& R)
                 for (uint32 i = 1; i < PointCount && R.CanRead(4); ++i)
                 {
                     uint32 Packed = R.ReadU32();
-                    // Unpack: each component is 11 bits (x), 11 bits (y), 10 bits (z)
-                    float UnpackX = MidPoint.X + static_cast<float>(static_cast<int32>(Packed << 21) >> 21) * 0.25f;
-                    float UnpackY = MidPoint.Y + static_cast<float>(static_cast<int32>((Packed >> 11) << 21) >> 21) * 0.25f;
-                    float UnpackZ = MidPoint.Z + static_cast<float>(static_cast<int32>((Packed >> 22) << 22) >> 22) * 0.25f;
+                    // Unpack: 11 bits (x), 11 bits (y), 10 bits (z) with sign extension
+                    int32 ix = static_cast<int32>(Packed & 0x7FF);
+                    int32 iy = static_cast<int32>((Packed >> 11) & 0x7FF);
+                    int32 iz = static_cast<int32>((Packed >> 22) & 0x3FF);
+                    // Sign-extend from 11-bit / 10-bit
+                    if (ix & 0x400) ix |= ~0x7FF;
+                    if (iy & 0x400) iy |= ~0x7FF;
+                    if (iz & 0x200) iz |= ~0x3FF;
+                    float UnpackX = MidPoint.X + static_cast<float>(ix) * 0.25f;
+                    float UnpackY = MidPoint.Y + static_cast<float>(iy) * 0.25f;
+                    float UnpackZ = MidPoint.Z + static_cast<float>(iz) * 0.25f;
                     Entity->Movement.SplineWaypoints.Add(FWowSplineWaypoint(FVector(UnpackX, UnpackY, UnpackZ)));
                 }
 
@@ -2318,6 +2361,7 @@ void FWowPacketHandler::HandleMoveTeleport(FPacketReader& R)
     uint32 Flags = 0;
     uint32 Time = 0;
     uint32 MapId = 0;
+    float X = 0.0f, Y = 0.0f, Z = 0.0f, Orientation = 0.0f;
 
     // Try to read as new format first (SMSG_MOVE_TELEPORT)
     if (R.CanRead(8 + 4 + 4 + 4*4 + 1))
@@ -2325,10 +2369,10 @@ void FWowPacketHandler::HandleMoveTeleport(FPacketReader& R)
         Guid = R.ReadU64();
         uint32 Counter = R.ReadU32();
         MapId = R.ReadU32();
-    float X = R.ReadFloat();
-    float Y = R.ReadFloat();
-    float Z = R.ReadFloat();
-    float Orientation = R.ReadFloat();
+        X = R.ReadFloat();
+        Y = R.ReadFloat();
+        Z = R.ReadFloat();
+        Orientation = R.ReadFloat();
     }
     else
     {
@@ -2336,17 +2380,16 @@ void FWowPacketHandler::HandleMoveTeleport(FPacketReader& R)
         Guid = R.ReadPackedGuid();
         Flags = R.ReadU32();
         Time = R.ReadU32();
+        X = R.ReadFloat();
+        Y = R.ReadFloat();
+        Z = R.ReadFloat();
+        Orientation = R.ReadFloat();
     }
-
-    float X = R.ReadFloat();
-    float Y = R.ReadFloat();
-    float Z = R.ReadFloat();
-    float Orientation = R.ReadFloat();
 
     // Read optional unknown byte if available
     if (R.CanRead(1))
     {
-        uint8 Unknown = R.ReadU8();
+        R.ReadU8();
     }
 
     FVector Position(X, Y, Z);
@@ -2399,6 +2442,9 @@ void FWowPacketHandler::HandleNewWorld(FPacketReader& R)
 
     UE_LOG(LogWowPacket, Log, TEXT("NEW_WORLD: map=%u pos=(%.1f,%.1f,%.1f) orient=%.2f"),
            MapId, X, Y, Z, Orientation);
+
+    // Clear quest log on map transfer
+    QuestLog.Empty();
 
     // Broadcast map transfer
     OnMapTransfer.Broadcast(MapId, X, Y, Z, Orientation);
@@ -3310,7 +3356,8 @@ void FWowPacketHandler::HandleTradeStatusExtended(FPacketReader& R)
 
     const bool bTraderData = (R.ReadU8() != 0);
     R.ReadU32(); // unknown window/session id
-    const uint32 SlotCount = R.ReadU32();
+    const uint32 RawSlotCount = R.ReadU32();
+    const uint32 SlotCount = FMath::Min(RawSlotCount, 7u); // WoW 3.3.5a max 7 trade slots
     R.ReadU32(); // duplicated slot count
     const uint32 Money = R.ReadU32();
     const uint32 SpellId = R.ReadU32();

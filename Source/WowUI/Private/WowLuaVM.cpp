@@ -1,6 +1,7 @@
 #include "WowLuaVM.h"
 #include "LuaApi/LuaApiRegistry.h"
 #include "WowSavedVariables.h"
+#include "WowEventSystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowLua, Log, All);
 
@@ -242,4 +243,20 @@ bool FWowLuaVM::ExecuteBuffer(const TArray<uint8>& Buffer, const FString& ChunkN
 void FWowLuaVM::FireEvent(const FString& Name, const TArray<FString>& Args)
 {
 	UE_LOG(LogWowLua, Verbose, TEXT("Event: %s (%d args)"), *Name, Args.Num());
+
+#if HAS_LUA
+	if (L)
+	{
+		// Get the EventSystem from the Lua context to dispatch the event
+		FWowLuaContext* Context = WowLuaApi::GetContext(L);
+		if (Context && Context->EventSystem)
+		{
+			Context->EventSystem->FireEvent(Name, Args);
+		}
+		else
+		{
+			UE_LOG(LogWowLua, Warning, TEXT("Cannot fire event '%s': EventSystem not available in Lua context"), *Name);
+		}
+	}
+#endif
 }

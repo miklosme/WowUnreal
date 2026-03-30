@@ -26,6 +26,9 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case SMSG_DUEL_COMPLETE:            return TEXT("SMSG_DUEL_COMPLETE");
     case SMSG_DUEL_WINNER:              return TEXT("SMSG_DUEL_WINNER");
     case SMSG_DUEL_COUNTDOWN:           return TEXT("SMSG_DUEL_COUNTDOWN");
+    case SMSG_PET_SPELLS:               return TEXT("SMSG_PET_SPELLS");
+    case SMSG_PET_MODE:                 return TEXT("SMSG_PET_MODE");
+    case SMSG_PET_ACTION_FEEDBACK:      return TEXT("SMSG_PET_ACTION_FEEDBACK");
     case SMSG_TIME_SYNC_REQ:            return TEXT("SMSG_TIME_SYNC_REQ");
     case SMSG_TUTORIAL_FLAGS:           return TEXT("SMSG_TUTORIAL_FLAGS");
     case SMSG_ACCOUNT_DATA_TIMES:       return TEXT("SMSG_ACCOUNT_DATA_TIMES");
@@ -52,6 +55,12 @@ const TCHAR* WowOpcode::GetName(uint16 Opcode)
     case CMSG_SET_TRADE_GOLD:           return TEXT("CMSG_SET_TRADE_GOLD");
     case CMSG_DUEL_ACCEPTED:            return TEXT("CMSG_DUEL_ACCEPTED");
     case CMSG_DUEL_CANCELLED:           return TEXT("CMSG_DUEL_CANCELLED");
+    case CMSG_PET_SET_ACTION:           return TEXT("CMSG_PET_SET_ACTION");
+    case CMSG_PET_ACTION:               return TEXT("CMSG_PET_ACTION");
+    case CMSG_PET_CAST_SPELL:           return TEXT("CMSG_PET_CAST_SPELL");
+    case CMSG_REQUEST_PET_INFO:         return TEXT("CMSG_REQUEST_PET_INFO");
+    case CMSG_PET_STOP_ATTACK:          return TEXT("CMSG_PET_STOP_ATTACK");
+    case CMSG_PET_SPELL_AUTOCAST:       return TEXT("CMSG_PET_SPELL_AUTOCAST");
     case CMSG_SET_ACTION_BUTTON:        return TEXT("CMSG_SET_ACTION_BUTTON");
 
     // Social / Guild / Friends
