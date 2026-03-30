@@ -634,6 +634,35 @@ bool FUiParentDefaultAttributesSeeded::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaUiUtilityGlobalsExist, "WowUnreal.UI.LuaUiUtilityGlobalsExist",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
+{
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    lua_State* L = LuaVM.GetState();
+
+    lua_getglobal(L, "table");
+    TestTrue(TEXT("table library exists"), lua_istable(L, -1));
+    lua_getfield(L, -1, "wipe");
+    const bool bHasTableWipe = lua_isfunction(L, -1);
+    lua_pop(L, 2);
+    TestTrue(TEXT("table.wipe is exposed for Blizzard UI code"), bHasTableWipe);
+
+    lua_getglobal(L, "CombatLogResetFilter");
+    const bool bHasCombatLogResetFilter = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    TestTrue(TEXT("CombatLogResetFilter global exists"), bHasCombatLogResetFilter);
+
+    LuaVM.Shutdown();
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPlayerInventoryFieldAccessors, "WowUnreal.Entity.PlayerInventoryFieldAccessors",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FPlayerInventoryFieldAccessors::RunTest(const FString& Parameters)

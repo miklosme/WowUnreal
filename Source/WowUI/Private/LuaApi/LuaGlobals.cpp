@@ -673,6 +673,16 @@ void WowLuaApi::RegisterGlobals(lua_State* L)
     lua_register(L, "rawget", L_rawget);
     lua_register(L, "rawset", L_rawset);
 
+    // Blizzard FrameXML frequently calls table.wipe(...) instead of the global
+    // wipe(...) helper, so expose the same function through the table library.
+    lua_getglobal(L, "table");
+    if (lua_istable(L, -1))
+    {
+        lua_pushcfunction(L, L_wipe);
+        lua_setfield(L, -2, "wipe");
+    }
+    lua_pop(L, 1);
+
     // Time
     lua_register(L, "GetTime", L_GetTime);
     lua_register(L, "debugprofilestop", L_debugprofilestop);
