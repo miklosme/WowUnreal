@@ -236,7 +236,8 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] UIParent arena layout stub parity (`GetNumArenaOpponents` returns a safe non-arena default for watch-frame placement)
 - [x] Scoped XML `OnLoad function="..."` parity for LFR browse bootstrap (`LFRBrowseFrame_OnLoad` is allowed without reopening broad handler compilation)
 - [x] Logged-in FrameXML script override parity (same-event merged template handlers now use WoW-style override behavior; verified chat edit boxes, GM chat bootstrap, target spell bars, and casting bars survive world login)
-- [?] Blizzard utility global parity for logged-in addon boot (added `table.wipe` and `CombatLogResetFilter`; verified GM chat loads cleanly and combat log advances to the next missing helper)
+- [x] Blizzard utility global parity for logged-in addon boot (added `table.wipe`, `CombatLogResetFilter`, and `CombatLogAddFilter`; verified GM chat loads cleanly and combat log advances to `CombatLogGetNumEntries` after world login)
+- [?] Blizzard combat log cursor API parity for logged-in addon boot (next missing helper is `CombatLogGetNumEntries`; add the combat-log entry cursor globals needed by `Blizzard_CombatLog_Refilter`, then verify the logged-in UI advances again)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds

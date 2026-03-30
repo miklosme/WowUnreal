@@ -659,6 +659,11 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     lua_pop(L, 1);
     TestTrue(TEXT("CombatLogResetFilter global exists"), bHasCombatLogResetFilter);
 
+    lua_getglobal(L, "CombatLogAddFilter");
+    const bool bHasCombatLogAddFilter = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    TestTrue(TEXT("CombatLogAddFilter global exists"), bHasCombatLogAddFilter);
+
     LuaVM.Shutdown();
     return true;
 }

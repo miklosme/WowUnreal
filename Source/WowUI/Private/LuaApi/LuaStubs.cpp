@@ -4088,6 +4088,9 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
     // Combat log
     lua_register(L, "CombatLogGetCurrentEventInfo", L_CombatLogGetCurrentEventInfo);
+    lua_register(L, "CombatLogAddFilter", [](lua_State* L2) -> int {
+        return 0;
+    });
     lua_register(L, "CombatLogResetFilter", [](lua_State* L2) -> int {
         return 0;
     });
