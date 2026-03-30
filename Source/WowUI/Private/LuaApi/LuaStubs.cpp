@@ -3424,6 +3424,22 @@ static int L_GetTalentInfo(lua_State* L)
 }
 
 // ─── Combat Log ─────────────────────────────────────────────────────────────────
+namespace
+{
+    int32 GCombatLogNumEntries = 0;
+    int32 GCombatLogCurrentEntry = 0;
+
+    int32 ClampCombatLogEntry(int32 Entry)
+    {
+        if (GCombatLogNumEntries <= 0)
+        {
+            return 0;
+        }
+
+        return FMath::Clamp(Entry, 1, GCombatLogNumEntries);
+    }
+}
+
 static int L_CombatLogGetCurrentEventInfo(lua_State* L)
 {
     // CombatLogGetCurrentEventInfo() → timestamp, subevent, hideCaster, sourceGUID, sourceName, sourceFlags, sourceRaidFlags, destGUID, destName, destFlags, destRaidFlags, ...
@@ -3440,6 +3456,32 @@ static int L_CombatLogGetCurrentEventInfo(lua_State* L)
     lua_pushnumber(L, 0); // destFlags
     lua_pushnumber(L, 0); // destRaidFlags
     return 11;
+}
+
+static int L_CombatLogGetNumEntries(lua_State* L)
+{
+    lua_pushinteger(L, GCombatLogNumEntries);
+    return 1;
+}
+
+static int L_CombatLogGetCurrentEntry(lua_State* L)
+{
+    lua_pushinteger(L, ClampCombatLogEntry(GCombatLogCurrentEntry));
+    return 1;
+}
+
+static int L_CombatLogSetCurrentEntry(lua_State* L)
+{
+    const int32 RequestedEntry = static_cast<int32>(luaL_optinteger(L, 1, GCombatLogCurrentEntry));
+    GCombatLogCurrentEntry = ClampCombatLogEntry(RequestedEntry);
+    return 0;
+}
+
+static int L_CombatLogAdvanceEntry(lua_State* L)
+{
+    const int32 Delta = static_cast<int32>(luaL_optinteger(L, 1, 1));
+    GCombatLogCurrentEntry = ClampCombatLogEntry(GCombatLogCurrentEntry + Delta);
+    return 0;
 }
 
 // GetInventorySlotInfo - maps slot names to IDs and textures
@@ -4088,6 +4130,10 @@ void WowLuaApi::RegisterStubs(lua_State* L)
 
     // Combat log
     lua_register(L, "CombatLogGetCurrentEventInfo", L_CombatLogGetCurrentEventInfo);
+    lua_register(L, "CombatLogGetNumEntries", L_CombatLogGetNumEntries);
+    lua_register(L, "CombatLogGetCurrentEntry", L_CombatLogGetCurrentEntry);
+    lua_register(L, "CombatLogSetCurrentEntry", L_CombatLogSetCurrentEntry);
+    lua_register(L, "CombatLogAdvanceEntry", L_CombatLogAdvanceEntry);
     lua_register(L, "CombatLogAddFilter", [](lua_State* L2) -> int {
         return 0;
     });

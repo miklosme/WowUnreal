@@ -664,6 +664,40 @@ bool FLuaUiUtilityGlobalsExist::RunTest(const FString& Parameters)
     lua_pop(L, 1);
     TestTrue(TEXT("CombatLogAddFilter global exists"), bHasCombatLogAddFilter);
 
+    lua_getglobal(L, "CombatLogGetNumEntries");
+    const bool bHasCombatLogGetNumEntries = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    TestTrue(TEXT("CombatLogGetNumEntries global exists"), bHasCombatLogGetNumEntries);
+
+    lua_getglobal(L, "CombatLogGetCurrentEntry");
+    const bool bHasCombatLogGetCurrentEntry = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    TestTrue(TEXT("CombatLogGetCurrentEntry global exists"), bHasCombatLogGetCurrentEntry);
+
+    lua_getglobal(L, "CombatLogSetCurrentEntry");
+    lua_pushinteger(L, 5);
+    const int SetCurrentEntryResult = lua_pcall(L, 1, 0, 0);
+    TestEqual(TEXT("CombatLogSetCurrentEntry accepts a numeric cursor"), SetCurrentEntryResult, 0);
+
+    lua_getglobal(L, "CombatLogAdvanceEntry");
+    lua_pushinteger(L, 1);
+    const int AdvanceEntryResult = lua_pcall(L, 1, 0, 0);
+    TestEqual(TEXT("CombatLogAdvanceEntry accepts a numeric delta"), AdvanceEntryResult, 0);
+
+    lua_getglobal(L, "CombatLogGetNumEntries");
+    const int GetNumEntriesResult = lua_pcall(L, 0, 1, 0);
+    TestEqual(TEXT("CombatLogGetNumEntries call succeeds"), GetNumEntriesResult, 0);
+    const int32 CombatLogNumEntries = static_cast<int32>(lua_tointeger(L, -1));
+    lua_pop(L, 1);
+    TestEqual(TEXT("CombatLog cursor API defaults to an empty log"), CombatLogNumEntries, 0);
+
+    lua_getglobal(L, "CombatLogGetCurrentEntry");
+    const int GetCurrentEntryResult = lua_pcall(L, 0, 1, 0);
+    TestEqual(TEXT("CombatLogGetCurrentEntry call succeeds"), GetCurrentEntryResult, 0);
+    const int32 CombatLogCurrentEntry = static_cast<int32>(lua_tointeger(L, -1));
+    lua_pop(L, 1);
+    TestEqual(TEXT("CombatLog cursor clamps to zero when the log is empty"), CombatLogCurrentEntry, 0);
+
     LuaVM.Shutdown();
     return true;
 }

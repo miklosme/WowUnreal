@@ -237,7 +237,8 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Scoped XML `OnLoad function="..."` parity for LFR browse bootstrap (`LFRBrowseFrame_OnLoad` is allowed without reopening broad handler compilation)
 - [x] Logged-in FrameXML script override parity (same-event merged template handlers now use WoW-style override behavior; verified chat edit boxes, GM chat bootstrap, target spell bars, and casting bars survive world login)
 - [x] Blizzard utility global parity for logged-in addon boot (added `table.wipe`, `CombatLogResetFilter`, and `CombatLogAddFilter`; verified GM chat loads cleanly and combat log advances to `CombatLogGetNumEntries` after world login)
-- [?] Blizzard combat log cursor API parity for logged-in addon boot (next missing helper is `CombatLogGetNumEntries`; add the combat-log entry cursor globals needed by `Blizzard_CombatLog_Refilter`, then verify the logged-in UI advances again)
+- [x] Blizzard combat log cursor API parity for logged-in addon boot (added `CombatLogGetNumEntries`, `CombatLogGetCurrentEntry`, `CombatLogSetCurrentEntry`, and `CombatLogAdvanceEntry`; verified Blizzard combat log loads through world login and the logged-in screenshot stays valid)
+- [ ] Blizzard combat log quick-button argument parity for logged-in addon boot (remaining `CombatLogQuickButtonFrame_Custom` `ADDON_LOADED` path still hits a string/nil argument mismatch after the cursor API batch)
 - [ ] Character creation 3D preview with customization sliders
 
 ### P9: 3D Login Screen Backgrounds
