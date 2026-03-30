@@ -518,6 +518,124 @@ bool FLuaUseActionSpellQueuesCastSpell::RunTest(const FString& Parameters)
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaTargetUnitResolvesTargetTarget, "WowUnreal.UI.LuaTargetUnitResolvesTargetTarget",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaTargetUnitResolvesTargetTarget::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    constexpr int64 CurrentTargetGuid = 0x0102030405060708LL;
+    constexpr uint64 ChainedTargetGuid = 0x1122334455667788ULL;
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, CurrentTargetGuid);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    FWowEntity& CurrentTarget = Connection->PacketHandler.EntityManager.GetOrCreate(static_cast<uint64>(CurrentTargetGuid));
+    CurrentTarget.TypeMask = WowTypeMask::UNIT;
+    CurrentTarget.SetField(UnitField::TARGET, static_cast<uint32>(ChainedTargetGuid & 0xFFFFFFFFULL));
+    CurrentTarget.SetField(UnitField::TARGET + 1, static_cast<uint32>(ChainedTargetGuid >> 32));
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    Context.EntityManager = &Connection->PacketHandler.EntityManager;
+    lua_pushlightuserdata(LuaVM.GetState(), &Context);
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+
+    const bool bExecuted = LuaVM.ExecuteString(TEXT("TargetUnit(\"targettarget\")"), TEXT("LuaTargetUnitResolvesTargetTarget"));
+    TestTrue(TEXT("TargetUnit executes successfully"), bExecuted);
+    TestEqual(TEXT("TargetUnit updates the selected GUID"), Connection->GetTargetGuid(), static_cast<int64>(ChainedTargetGuid));
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("TargetUnit queued a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("TargetUnit queues CMSG_SET_SELECTION"), Opcode, static_cast<uint32>(WowOpcode::CMSG_SET_SELECTION));
+        TestEqual(TEXT("Target selection payload is an 8-byte guid"), Payload.Num(), 8);
+
+        uint64 SentTargetGuid = 0;
+        if (Payload.Num() == 8)
+        {
+            FMemory::Memcpy(&SentTargetGuid, Payload.GetData(), sizeof(SentTargetGuid));
+            TestEqual(TEXT("TargetUnit selects the chained target"), SentTargetGuid, ChainedTargetGuid);
+        }
+    }
+
+    lua_pushnil(LuaVM.GetState());
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaTargetUnitResolvesPlayerName, "WowUnreal.UI.LuaTargetUnitResolvesPlayerName",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaTargetUnitResolvesPlayerName::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    constexpr uint64 RemotePlayerGuid = 0x8877665544332211ULL;
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    Connection->PacketHandler.PlayerNameCache.Add(RemotePlayerGuid, TEXT("TargetableMage"));
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    Context.EntityManager = &Connection->PacketHandler.EntityManager;
+    lua_pushlightuserdata(LuaVM.GetState(), &Context);
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+
+    const bool bExecuted = LuaVM.ExecuteString(TEXT("TargetUnit(\"TargetableMage\", 1)"), TEXT("LuaTargetUnitResolvesPlayerName"));
+    TestTrue(TEXT("TargetUnit by player name executes successfully"), bExecuted);
+    TestEqual(TEXT("TargetUnit by player name updates the selected GUID"), Connection->GetTargetGuid(), static_cast<int64>(RemotePlayerGuid));
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("TargetUnit by player name queued a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("TargetUnit by player name queues CMSG_SET_SELECTION"), Opcode, static_cast<uint32>(WowOpcode::CMSG_SET_SELECTION));
+    }
+
+    lua_pushnil(LuaVM.GetState());
+    lua_setfield(LuaVM.GetState(), LUA_REGISTRYINDEX, "WowLuaContext");
+    LuaVM.Shutdown();
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDeferredOnLoadBatchResolvesSiblingGlobals, "WowUnreal.UI.DeferredOnLoadBatchResolvesSiblingGlobals",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FDeferredOnLoadBatchResolvesSiblingGlobals::RunTest(const FString& Parameters)

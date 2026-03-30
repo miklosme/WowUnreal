@@ -4,6 +4,7 @@
 #include "WowConnectionManager.h"
 #include "WowPacketHandler.h"
 #include "WowUpdateFields.h"
+#include "WowEventSystem.h"
 #include "Formats/Dbc/DbcStore.h"
 #include "Formats/Dbc/SpellDbc.h"
 #include "Formats/Dbc/SpellIconDbc.h"
@@ -93,73 +94,232 @@ namespace WowSpellSchool
     static int L_##name(lua_State* L) { return 0; }
 
 // Helper: resolve common WoW unit strings to entity GUID
+static uint64 ResolveGuidByName(const FWowLuaContext* Ctx, const FString& Name)
+{
+    if (!Ctx || !Ctx->EntityManager || !Ctx->ConnectionManager || Name.IsEmpty())
+    {
+        return 0;
+    }
+
+    const FString CharacterName = Ctx->ConnectionManager->GetCharacterName();
+    if (!CharacterName.IsEmpty() && CharacterName.Equals(Name, ESearchCase::IgnoreCase))
+    {
+        return Ctx->EntityManager->LocalPlayerGuid;
+    }
+
+    for (const TPair<uint64, FString>& Pair : Ctx->ConnectionManager->PacketHandler.PlayerNameCache)
+    {
+        if (Pair.Value.Equals(Name, ESearchCase::IgnoreCase))
+        {
+            return Pair.Key;
+        }
+    }
+
+    const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+    for (const FWowGroupMember& Member : GroupInfo.Members)
+    {
+        if (Member.Guid != 0 && Member.Name.Equals(Name, ESearchCase::IgnoreCase))
+        {
+            return Member.Guid;
+        }
+    }
+
+    for (const TPair<uint64, TSharedPtr<FWowEntity>>& Pair : Ctx->EntityManager->GetAll())
+    {
+        const TSharedPtr<FWowEntity>& EntityPtr = Pair.Value;
+        if (!EntityPtr.IsValid() || !EntityPtr->IsUnit() || EntityPtr->IsPlayer())
+        {
+            continue;
+        }
+
+        if (const FString* CreatureName = Ctx->ConnectionManager->PacketHandler.CreatureNameCache.Find(EntityPtr->Entry))
+        {
+            if (CreatureName->Equals(Name, ESearchCase::IgnoreCase))
+            {
+                return Pair.Key;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static uint64 ResolveDirectUnitGuid(const FWowLuaContext* Ctx, const FString& UnitToken)
+{
+    if (!Ctx || !Ctx->EntityManager)
+    {
+        return 0;
+    }
+
+    if (UnitToken.Equals(TEXT("player"), ESearchCase::IgnoreCase))
+    {
+        return Ctx->EntityManager->LocalPlayerGuid;
+    }
+
+    if (UnitToken.Equals(TEXT("target"), ESearchCase::IgnoreCase) && Ctx->ConnectionManager)
+    {
+        return static_cast<uint64>(Ctx->ConnectionManager->GetTargetGuid());
+    }
+
+    if (UnitToken.Equals(TEXT("focus"), ESearchCase::IgnoreCase))
+    {
+        return 0;
+    }
+
+    if (UnitToken.Equals(TEXT("mouseover"), ESearchCase::IgnoreCase))
+    {
+        return 0;
+    }
+
+    if (UnitToken.Equals(TEXT("pet"), ESearchCase::IgnoreCase))
+    {
+        if (FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer())
+        {
+            return Player->GetField64(UnitField::SUMMON);
+        }
+
+        return 0;
+    }
+
+    if (UnitToken.StartsWith(TEXT("partypet"), ESearchCase::IgnoreCase))
+    {
+        if (!Ctx->ConnectionManager)
+        {
+            return 0;
+        }
+
+        const FString IndexString = UnitToken.RightChop(8);
+        if (IndexString.Len() != 1 || IndexString[0] < TCHAR('1') || IndexString[0] > TCHAR('4'))
+        {
+            return 0;
+        }
+
+        const int32 PartyIndex = IndexString[0] - TCHAR('1');
+        const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+        if (!GroupInfo.Members.IsValidIndex(PartyIndex))
+        {
+            return 0;
+        }
+
+        if (FWowPlayerEntity* PartyMember = Ctx->EntityManager->FindPlayer(GroupInfo.Members[PartyIndex].Guid))
+        {
+            return PartyMember->GetField64(UnitField::SUMMON);
+        }
+
+        return 0;
+    }
+
+    if (UnitToken.StartsWith(TEXT("party"), ESearchCase::IgnoreCase))
+    {
+        if (!Ctx->ConnectionManager)
+        {
+            return 0;
+        }
+
+        const FString IndexString = UnitToken.RightChop(5);
+        if (IndexString.Len() != 1 || IndexString[0] < TCHAR('1') || IndexString[0] > TCHAR('4'))
+        {
+            return 0;
+        }
+
+        const int32 PartyIndex = IndexString[0] - TCHAR('1');
+        const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+        return GroupInfo.Members.IsValidIndex(PartyIndex) ? GroupInfo.Members[PartyIndex].Guid : 0;
+    }
+
+    if (UnitToken.StartsWith(TEXT("raid"), ESearchCase::IgnoreCase))
+    {
+        if (!Ctx->ConnectionManager)
+        {
+            return 0;
+        }
+
+        const FString IndexString = UnitToken.RightChop(4);
+        if (IndexString.IsEmpty())
+        {
+            return 0;
+        }
+
+        for (const TCHAR Digit : IndexString)
+        {
+            if (!FChar::IsDigit(Digit))
+            {
+                return 0;
+            }
+        }
+
+        const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
+        if (!GroupInfo.IsRaidGroup())
+        {
+            return 0;
+        }
+
+        const int32 RaidIndex = FCString::Atoi(*IndexString);
+        if (RaidIndex <= 0)
+        {
+            return 0;
+        }
+
+        if (RaidIndex == 1)
+        {
+            return Ctx->EntityManager->LocalPlayerGuid;
+        }
+
+        const int32 MemberIndex = RaidIndex - 2;
+        return GroupInfo.Members.IsValidIndex(MemberIndex) ? GroupInfo.Members[MemberIndex].Guid : 0;
+    }
+
+    return 0;
+}
+
+static uint64 ResolveUnitGuidToken(const FWowLuaContext* Ctx, const FString& UnitToken)
+{
+    if (!Ctx || UnitToken.IsEmpty())
+    {
+        return 0;
+    }
+
+    if (const uint64 DirectGuid = ResolveDirectUnitGuid(Ctx, UnitToken))
+    {
+        return DirectGuid;
+    }
+
+    if (UnitToken.EndsWith(TEXT("target"), ESearchCase::IgnoreCase) && UnitToken.Len() > 6)
+    {
+        const FString BaseToken = UnitToken.LeftChop(6);
+        const uint64 BaseGuid = ResolveUnitGuidToken(Ctx, BaseToken);
+        if (BaseGuid == 0)
+        {
+            return 0;
+        }
+
+        if (BaseToken.Equals(TEXT("player"), ESearchCase::IgnoreCase) && Ctx->ConnectionManager)
+        {
+            const uint64 CurrentTargetGuid = static_cast<uint64>(Ctx->ConnectionManager->GetTargetGuid());
+            if (CurrentTargetGuid != 0)
+            {
+                return CurrentTargetGuid;
+            }
+        }
+
+        if (FWowEntity* BaseEntity = Ctx->EntityManager->Find(BaseGuid))
+        {
+            return BaseEntity->GetField64(UnitField::TARGET);
+        }
+
+        return 0;
+    }
+
+    return ResolveGuidByName(Ctx, UnitToken);
+}
+
 static uint64 ResolveUnitGuid(lua_State* L, int ArgIdx = 1)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
     if (!Ctx || !Ctx->EntityManager) return 0;
 
-    const char* unit = luaL_optstring(L, ArgIdx, "player");
-
-    if (strcmp(unit, "player") == 0)
-    {
-        return Ctx->EntityManager->LocalPlayerGuid;
-    }
-    else if (strcmp(unit, "target") == 0 && Ctx->ConnectionManager)
-    {
-        return static_cast<uint64>(Ctx->ConnectionManager->GetTargetGuid());
-    }
-    else if (strncmp(unit, "party", 5) == 0 && unit[5] >= '1' && unit[5] <= '4' && unit[6] == '\0')
-    {
-        if (Ctx->ConnectionManager)
-        {
-            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-            const int32 PartyIndex = unit[5] - '1';
-            if (PartyIndex >= 0 && PartyIndex < GroupInfo.Members.Num())
-            {
-                return GroupInfo.Members[PartyIndex].Guid;
-            }
-        }
-    }
-    else if (strncmp(unit, "raid", 4) == 0 && unit[4] != '\0')
-    {
-        if (Ctx->ConnectionManager)
-        {
-            const FWowGroupInfo& GroupInfo = Ctx->ConnectionManager->PacketHandler.GroupInfo;
-            if (!GroupInfo.IsRaidGroup())
-            {
-                return 0;
-            }
-
-            const int32 RaidIndex = FCStringAnsi::Atoi(unit + 4);
-            if (RaidIndex <= 0)
-            {
-                return 0;
-            }
-
-            if (RaidIndex == 1)
-            {
-                return Ctx->EntityManager->LocalPlayerGuid;
-            }
-
-            const int32 MemberIndex = RaidIndex - 2;
-            if (GroupInfo.Members.IsValidIndex(MemberIndex))
-            {
-                return GroupInfo.Members[MemberIndex].Guid;
-            }
-        }
-    }
-    else if (strcmp(unit, "focus") == 0)
-    {
-        // Focus target not implemented yet
-        return 0;
-    }
-    else if (strcmp(unit, "pet") == 0)
-    {
-        // Pet not implemented yet
-        return 0;
-    }
-
-    return 0;
+    const FString UnitToken = UTF8_TO_TCHAR(luaL_optstring(L, ArgIdx, "player"));
+    return ResolveUnitGuidToken(Ctx, UnitToken);
 }
 
 // Helper: resolve unit string to entity (wraps ResolveUnitGuid for backwards compatibility)
@@ -2345,9 +2505,21 @@ static int L_TargetUnit(lua_State* L)
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
     if (Ctx && Ctx->ConnectionManager && Ctx->EntityManager)
     {
-        const char* unit = luaL_optstring(L, 1, "");
-        // TODO: resolve unit name to GUID
+        const uint64 TargetGuid = ResolveUnitGuid(L, 1);
+        if (TargetGuid != 0)
+        {
+            Ctx->ConnectionManager->SendSetSelection(static_cast<int64>(TargetGuid));
+
+            if (Ctx->EventSystem)
+            {
+                Ctx->EventSystem->FireEvent(TEXT("PLAYER_TARGET_CHANGED"));
+                Ctx->EventSystem->FireEvent(TEXT("UNIT_HEALTH"), {TEXT("target")});
+                Ctx->EventSystem->FireEvent(TEXT("UNIT_POWER"), {TEXT("target")});
+                Ctx->EventSystem->FireEvent(TEXT("UNIT_MANA"), {TEXT("target")});
+            }
+        }
     }
+
     return 0;
 }
 
