@@ -213,11 +213,14 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 		return;
 	}
 
+	LuaVM->CollectGarbageIfNeeded(0.60);
+
 	// Copy handles — handlers may modify the registration set during iteration
 	TArray<int64> HandlesCopy = Handles->Array();
 
-	for (int64 Handle : HandlesCopy)
+	for (int32 HandleIndex = 0; HandleIndex < HandlesCopy.Num(); ++HandleIndex)
 	{
+		const int64 Handle = HandlesCopy[HandleIndex];
 		// Look up compiled OnEvent function
 		TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
 		if (!FrameScripts) continue;
@@ -280,7 +283,15 @@ void FWowEventSystem::FireEvent(const FString& EventName, const TArray<FString>&
 		{
 			RestoreLuaGlobals(L, SavedGlobals);
 		}
+
+		if ((HandleIndex & 15) == 15)
+		{
+			LuaVM->CollectGarbageIfNeeded(0.60);
+			LuaVM->StepGarbageCollector();
+		}
 	}
+
+	LuaVM->StepGarbageCollector();
 #endif
 }
 
@@ -1382,10 +1393,13 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 	lua_State* L = LuaVM->GetState();
 	if (!L) return;
 
+	LuaVM->CollectGarbageIfNeeded(0.60);
+
 	TArray<int64> Handles = OnUpdateFrames.Array();
 
-	for (int64 Handle : Handles)
+	for (int32 HandleIndex = 0; HandleIndex < Handles.Num(); ++HandleIndex)
 	{
+		const int64 Handle = Handles[HandleIndex];
 		TMap<FString, int32>* FrameScripts = ScriptRefs.Find(Handle);
 		if (!FrameScripts) continue;
 
@@ -1428,9 +1442,20 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 		if (lua_pcall(L, 2, 0, 0) != 0)
 		{
 			RestoreLuaGlobals(L, SavedGlobals);
-			UE_LOG(LogWowEvent, Warning, TEXT("OnUpdate error [frame %lld]: %s — disabling OnUpdate for this frame"),
-				Handle, UTF8_TO_TCHAR(lua_tostring(L, -1)));
+			const FString FrameName = FrameManager ? FrameManager->GetFrameName(Handle) : FString();
+			const FString ErrorText = UTF8_TO_TCHAR(lua_tostring(L, -1));
 			lua_pop(L, 1);
+
+			if (ErrorText.Contains(TEXT("not enough memory")))
+			{
+				LuaVM->CollectGarbage();
+				UE_LOG(LogWowEvent, Warning, TEXT("OnUpdate memory pressure [frame %lld] %s: %s — forced full GC, will retry next tick"),
+					Handle, FrameName.IsEmpty() ? TEXT("<unnamed>") : *FrameName, *ErrorText);
+				break;
+			}
+
+			UE_LOG(LogWowEvent, Warning, TEXT("OnUpdate error [frame %lld] %s: %s — disabling OnUpdate for this frame"),
+				Handle, FrameName.IsEmpty() ? TEXT("<unnamed>") : *FrameName, *ErrorText);
 			// Disable further OnUpdate calls for this erroring frame to prevent spam
 			OnUpdateFrames.Remove(Handle);
 			break; // Iterator invalidated
@@ -1439,7 +1464,15 @@ void FWowEventSystem::TickOnUpdate(float DeltaTime)
 		{
 			RestoreLuaGlobals(L, SavedGlobals);
 		}
+
+		if ((HandleIndex & 15) == 15)
+		{
+			LuaVM->CollectGarbageIfNeeded(0.60);
+			LuaVM->StepGarbageCollector();
+		}
 	}
+
+	LuaVM->StepGarbageCollector();
 #endif
 }
 

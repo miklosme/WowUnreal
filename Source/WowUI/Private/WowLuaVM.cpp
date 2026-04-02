@@ -26,31 +26,37 @@ FWowLuaVM::~FWowLuaVM() { Shutdown(); }
 void* FWowLuaVM::LuaAlloc(void* ud, void* ptr, size_t osize, size_t nsize)
 {
 	FWowLuaVM* VM = static_cast<FWowLuaVM*>(ud);
+	const SIZE_T OldSize = ptr ? static_cast<SIZE_T>(osize) : 0;
+	const SIZE_T NewSize = static_cast<SIZE_T>(nsize);
 
 	if (nsize == 0)
 	{
 		// Free
 		if (ptr)
 		{
-			VM->MemoryUsed -= osize;
+			VM->MemoryUsed = VM->MemoryUsed >= OldSize ? VM->MemoryUsed - OldSize : 0;
 			FMemory::Free(ptr);
 		}
 		return nullptr;
 	}
 
-	// Check memory limit before allocating
-	SIZE_T Delta = nsize - (ptr ? osize : 0);
-	if (VM->MemoryLimit > 0 && VM->MemoryUsed + Delta > VM->MemoryLimit)
+	// Only growth counts against the limit. Shrinks are always allowed.
+	if (VM->MemoryLimit > 0 && NewSize > OldSize)
 	{
-		UE_LOG(LogWowLua, Error, TEXT("Lua memory limit exceeded (%zu / %zu bytes)"),
-			VM->MemoryUsed + Delta, VM->MemoryLimit);
-		return nullptr; // Allocation denied — triggers Lua out-of-memory error
+		const SIZE_T Growth = NewSize - OldSize;
+		if (VM->MemoryUsed + Growth > VM->MemoryLimit)
+		{
+			UE_LOG(LogWowLua, Error, TEXT("Lua memory limit exceeded (%zu / %zu bytes)"),
+				VM->MemoryUsed + Growth, VM->MemoryLimit);
+			return nullptr; // Allocation denied — triggers Lua out-of-memory error
+		}
 	}
 
 	void* NewPtr = FMemory::Realloc(ptr, nsize);
 	if (NewPtr)
 	{
-		VM->MemoryUsed += Delta;
+		const SIZE_T TrimmedUsage = VM->MemoryUsed >= OldSize ? VM->MemoryUsed - OldSize : 0;
+		VM->MemoryUsed = TrimmedUsage + NewSize;
 	}
 	return NewPtr;
 }
@@ -121,6 +127,8 @@ bool FWowLuaVM::Initialize()
 	SandboxGlobals();
 	RegisterWowApi();
 	InstallInstructionHook();
+	lua_gc(L, LUA_GCSETPAUSE, 110);
+	lua_gc(L, LUA_GCSETSTEPMUL, 300);
 
 	UE_LOG(LogWowLua, Log, TEXT("Lua 5.1 VM initialized (memory limit: %zu MB, instruction limit: %d)"),
 		MemoryLimit / (1024 * 1024), InstructionLimit);
@@ -197,6 +205,54 @@ void FWowLuaVM::RegisterWowApi()
 	if (!L) return;
 	WowLuaApi::RegisterAll(L);
 	UE_LOG(LogWowLua, Log, TEXT("WoW Lua API registered"));
+#endif
+}
+
+void FWowLuaVM::StepGarbageCollector(int32 StepSize)
+{
+#if HAS_LUA
+	if (!L) return;
+	lua_gc(L, LUA_GCSTEP, FMath::Max(StepSize, 1));
+#endif
+}
+
+void FWowLuaVM::CollectGarbage()
+{
+#if HAS_LUA
+	if (!L) return;
+
+	const SIZE_T MemoryBefore = MemoryUsed;
+	lua_gc(L, LUA_GCCOLLECT, 0);
+	const SIZE_T MemoryAfter = MemoryUsed;
+	if (MemoryAfter < MemoryBefore)
+	{
+		UE_LOG(LogWowLua, Verbose, TEXT("Lua GC reclaimed %.2f MB (%.2f -> %.2f MB)"),
+			static_cast<double>(MemoryBefore - MemoryAfter) / (1024.0 * 1024.0),
+			static_cast<double>(MemoryBefore) / (1024.0 * 1024.0),
+			static_cast<double>(MemoryAfter) / (1024.0 * 1024.0));
+	}
+#endif
+}
+
+bool FWowLuaVM::CollectGarbageIfNeeded(double PressureThreshold)
+{
+#if HAS_LUA
+	if (!L || MemoryLimit == 0)
+	{
+		return false;
+	}
+
+	const double ClampedThreshold = FMath::Clamp(PressureThreshold, 0.0, 1.0);
+	const SIZE_T PressureLimit = static_cast<SIZE_T>(static_cast<double>(MemoryLimit) * ClampedThreshold);
+	if (MemoryUsed < PressureLimit)
+	{
+		return false;
+	}
+
+	CollectGarbage();
+	return true;
+#else
+	return false;
 #endif
 }
 
