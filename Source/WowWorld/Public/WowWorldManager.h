@@ -161,8 +161,11 @@ private:
     float AutoScreenshotDelaySeconds = -1.0f;
     float AutoQuitDelaySeconds = -1.0f;
     double AutoStartWallClockSeconds = 0.0;
+    bool bAutoWaitForInitialLoad = false;
+    bool bAutoTimerArmed = false;
     bool bAutoScreenshotRequested = false;
     bool bAutoQuitRequested = false;
+    int32 AutoLogBucket = -1;
 
     void LoadTile(int32 TX, int32 TY);
     void LoadTileAsync(int32 TX, int32 TY);

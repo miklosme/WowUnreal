@@ -331,24 +331,28 @@ AWowWorldManager::AWowWorldManager() { PrimaryActorTick.bCanEverTick = true; Pri
 void AWowWorldManager::BeginPlay()
 {
     Super::BeginPlay();
+    const TCHAR* CmdLine = FCommandLine::Get();
     MpqManager = MakeUnique<FMpqManager>();
     AssetCache = MakeUnique<FWowAssetCache>();
     FString DataPath;
-    FParse::Value(FCommandLine::Get(), TEXT("-wowdata="), DataPath);
+    FParse::Value(CmdLine, TEXT("-wowdata="), DataPath);
     if (DataPath.IsEmpty()) DataPath = TEXT("/Users/clancey/Downloads/World of Warcraft 3.3.5a/Data");
     int32 StartupTileX = DebugTileX;
     int32 StartupTileY = DebugTileY;
     float StartupCameraHeight = 40000.0f;
     float StartupCameraPitch = -20.0f;
     float StartupCameraYaw = 0.0f;
-    FParse::Value(FCommandLine::Get(), TEXT("-tilex="), StartupTileX);
-    FParse::Value(FCommandLine::Get(), TEXT("-tiley="), StartupTileY);
-    FParse::Value(FCommandLine::Get(), TEXT("-cameraheight="), StartupCameraHeight);
-    FParse::Value(FCommandLine::Get(), TEXT("-camerapitch="), StartupCameraPitch);
-    FParse::Value(FCommandLine::Get(), TEXT("-camerayaw="), StartupCameraYaw);
-    FParse::Value(FCommandLine::Get(), TEXT("-autoscreenshotdelay="), AutoScreenshotDelaySeconds);
-    FParse::Value(FCommandLine::Get(), TEXT("-autoquitdelay="), AutoQuitDelaySeconds);
-    FParse::Value(FCommandLine::Get(), TEXT("-autoscreenshot="), AutoScreenshotPath);
+    FParse::Value(CmdLine, TEXT("-tilex="), StartupTileX);
+    FParse::Value(CmdLine, TEXT("-tiley="), StartupTileY);
+    FParse::Value(CmdLine, TEXT("-cameraheight="), StartupCameraHeight);
+    FParse::Value(CmdLine, TEXT("-camerapitch="), StartupCameraPitch);
+    FParse::Value(CmdLine, TEXT("-camerayaw="), StartupCameraYaw);
+    FParse::Value(CmdLine, TEXT("-autoscreenshotdelay="), AutoScreenshotDelaySeconds);
+    FParse::Value(CmdLine, TEXT("-autoquitdelay="), AutoQuitDelaySeconds);
+    FParse::Value(CmdLine, TEXT("-autoscreenshot="), AutoScreenshotPath);
+    bAutoWaitForInitialLoad = FParse::Param(CmdLine, TEXT("autologin"))
+        && (AutoScreenshotDelaySeconds >= 0.0f || AutoQuitDelaySeconds >= 0.0f);
+    bAutoTimerArmed = !bAutoWaitForInitialLoad;
     if (AutoScreenshotDelaySeconds >= 0.0f)
     {
         if (AutoScreenshotPath.IsEmpty())
@@ -362,11 +366,16 @@ void AWowWorldManager::BeginPlay()
 
         IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
         PlatformFile.CreateDirectoryTree(*FPaths::GetPath(AutoScreenshotPath));
-        UE_LOG(LogWowWorld, Log, TEXT("Auto screenshot scheduled at %.1fs -> %s"), AutoScreenshotDelaySeconds, *AutoScreenshotPath);
+        UE_LOG(LogWowWorld, Log, TEXT("Auto screenshot scheduled at %.1fs%s -> %s"),
+            AutoScreenshotDelaySeconds,
+            bAutoWaitForInitialLoad ? TEXT(" after initial terrain load") : TEXT(""),
+            *AutoScreenshotPath);
     }
     if (AutoQuitDelaySeconds >= 0.0f)
     {
-        UE_LOG(LogWowWorld, Log, TEXT("Auto quit scheduled at %.1fs"), AutoQuitDelaySeconds);
+        UE_LOG(LogWowWorld, Log, TEXT("Auto quit scheduled at %.1fs%s"),
+            AutoQuitDelaySeconds,
+            bAutoWaitForInitialLoad ? TEXT(" after initial terrain load") : TEXT(""));
     }
     AutoStartWallClockSeconds = FPlatformTime::Seconds();
     if (!MpqManager->Initialize(DataPath))
@@ -640,11 +649,27 @@ void AWowWorldManager::EndPlay(const EEndPlayReason::Type R)
 void AWowWorldManager::Tick(float DT)
 {
     Super::Tick(DT);
-    const double AutoElapsedSeconds = FPlatformTime::Seconds() - AutoStartWallClockSeconds;
-    static int32 AutoLogBucket = -1;
 
     // Always process completed async loads, even before streaming is enabled
     ProcessPendingLoads();
+
+    if (bAutoWaitForInitialLoad && !bAutoTimerArmed)
+    {
+        if (IsInitialLoadComplete())
+        {
+            bAutoTimerArmed = true;
+            AutoStartWallClockSeconds = FPlatformTime::Seconds();
+            AutoLogBucket = -1;
+            UE_LOG(LogWowWorld, Log, TEXT("Auto timers armed after initial terrain load (%d/%d tiles)"),
+                InitialTilesLoaded, InitialTilesQueued);
+        }
+        else if (InitialTilesQueued > 0)
+        {
+            return;
+        }
+    }
+
+    const double AutoElapsedSeconds = FPlatformTime::Seconds() - AutoStartWallClockSeconds;
 
     if ((AutoScreenshotDelaySeconds >= 0.0f || AutoQuitDelaySeconds >= 0.0f) && AutoElapsedSeconds >= 0.0)
     {
