@@ -20,6 +20,7 @@
 #include "WowEventSystem.h"
 #include "WowFrameManager.h"
 #include "WowFrameTypes.h"
+#include "WowInventoryManager.h"
 #include "WowOpcodes.h"
 #include "Components/CanvasPanel.h"
 
@@ -1128,6 +1129,106 @@ bool FLuaTogglePetAutocastQueuesAutocastPacket::RunTest(const FString& Parameter
 
     WowTestUtils::ClearLuaContext(LuaVM);
     LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSendAutoEquipItemEncodesPacket, "WowUnreal.Network.AutoEquipItemEncodesPacket",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FSendAutoEquipItemEncodesPacket::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    Connection->SendAutoEquipItem(255, 23);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("Auto-equip packet enqueued"), bDequeued);
+    if (!bDequeued)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Opcode is CMSG_AUTOEQUIP_ITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOEQUIP_ITEM));
+    TestEqual(TEXT("Auto-equip payload length"), Payload.Num(), 2);
+    if (Payload.Num() == 2)
+    {
+        TestEqual(TEXT("Auto-equip source bag"), static_cast<int32>(Payload[0]), 255);
+        TestEqual(TEXT("Auto-equip source slot"), static_cast<int32>(Payload[1]), 23);
+    }
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInventoryManagerRoutesEquipAndUnequipPackets, "WowUnreal.UI.InventoryManagerRoutesEquipAndUnequipPackets",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FInventoryManagerRoutesEquipAndUnequipPackets::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    FWowInventoryManager InventoryManager;
+    InventoryManager.SetConnectionManager(Connection);
+
+    InventoryManager.AutoEquipItem(255, 24);
+    InventoryManager.AutoStoreItem(255, 15, 255);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("Inventory manager enqueues equip packet"), bDequeued);
+    if (!bDequeued)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Inventory manager equip opcode"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOEQUIP_ITEM));
+    TestEqual(TEXT("Inventory manager equip payload length"), Payload.Num(), 2);
+    if (Payload.Num() == 2)
+    {
+        TestEqual(TEXT("Inventory manager equip source bag"), static_cast<int32>(Payload[0]), 255);
+        TestEqual(TEXT("Inventory manager equip source slot"), static_cast<int32>(Payload[1]), 24);
+    }
+
+    bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("Inventory manager enqueues auto-store packet"), bDequeued);
+    if (!bDequeued)
+    {
+        return false;
+    }
+
+    TestEqual(TEXT("Inventory manager auto-store opcode"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOSTORE_BAG_ITEM));
+    TestEqual(TEXT("Inventory manager auto-store payload length"), Payload.Num(), 3);
+    if (Payload.Num() == 3)
+    {
+        TestEqual(TEXT("Inventory manager auto-store source bag"), static_cast<int32>(Payload[0]), 255);
+        TestEqual(TEXT("Inventory manager auto-store source slot"), static_cast<int32>(Payload[1]), 15);
+        TestEqual(TEXT("Inventory manager auto-store destination bag"), static_cast<int32>(Payload[2]), 255);
+    }
+
     return true;
 }
 

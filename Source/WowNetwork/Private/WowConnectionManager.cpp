@@ -472,6 +472,32 @@ void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
     CursorPayload.SourceActionSlot = SlotIndex;
 }
 
+void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink)
+{
+    CursorPayload.Type = ECursorPayloadType::Item;
+    CursorPayload.PrimaryId = ItemId;
+    CursorPayload.Detail = ItemLink;
+    CursorPayload.SourceBag = SourceBag;
+    CursorPayload.SourceSlot = SourceSlot;
+    CursorPayload.SourceInventorySlot = 0;
+    CursorPayload.bFromInventorySlot = false;
+    CursorPayload.ActionType = 0;
+    CursorPayload.SourceActionSlot = -1;
+}
+
+void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink)
+{
+    CursorPayload.Type = ECursorPayloadType::Item;
+    CursorPayload.PrimaryId = ItemId;
+    CursorPayload.Detail = ItemLink;
+    CursorPayload.SourceBag = 255;
+    CursorPayload.SourceSlot = InventorySlot;
+    CursorPayload.SourceInventorySlot = InventorySlot;
+    CursorPayload.bFromInventorySlot = true;
+    CursorPayload.ActionType = 0;
+    CursorPayload.SourceActionSlot = -1;
+}
+
 void UWowConnectionManager::ClearCursorPayload()
 {
     CursorPayload = FCursorPayloadState();
@@ -485,6 +511,11 @@ bool UWowConnectionManager::HasCursorPayload() const
 bool UWowConnectionManager::HasCursorSpellPayload() const
 {
     return CursorPayload.Type == ECursorPayloadType::Spell;
+}
+
+bool UWowConnectionManager::HasCursorItemPayload() const
+{
+    return CursorPayload.Type == ECursorPayloadType::Item;
 }
 
 bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const
@@ -502,6 +533,14 @@ bool UWowConnectionManager::GetCursorInfo(FString& OutType, int32& OutId, FStrin
         OutType = TEXT("action");
         OutId = CursorPayload.SourceActionSlot + 1;
         OutDetail.Empty();
+        return true;
+    }
+
+    if (CursorPayload.Type == ECursorPayloadType::Item)
+    {
+        OutType = TEXT("item");
+        OutId = CursorPayload.PrimaryId;
+        OutDetail = CursorPayload.Detail;
         return true;
     }
 
@@ -547,6 +586,37 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
     }
 
     BroadcastActionButtonsChanged();
+    ClearCursorPayload();
+    return true;
+}
+
+bool UWowConnectionManager::AutoEquipCursorItem()
+{
+    if (CursorPayload.Type != ECursorPayloadType::Item || CursorPayload.bFromInventorySlot)
+    {
+        return false;
+    }
+
+    SendAutoEquipItem(CursorPayload.SourceBag, CursorPayload.SourceSlot);
+    ClearCursorPayload();
+    return true;
+}
+
+bool UWowConnectionManager::AutoStoreCursorItem(uint8 DestinationBag)
+{
+    if (CursorPayload.Type != ECursorPayloadType::Item)
+    {
+        return false;
+    }
+
+    if (CursorPayload.bFromInventorySlot)
+    {
+        SendAutoStoreBagItem(255, CursorPayload.SourceInventorySlot, DestinationBag);
+        ClearCursorPayload();
+        return true;
+    }
+
+    SendAutoStoreBagItem(CursorPayload.SourceBag, CursorPayload.SourceSlot, DestinationBag);
     ClearCursorPayload();
     return true;
 }
@@ -754,6 +824,40 @@ void UWowConnectionManager::SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8
 
     WorldSocket->SendPacket(WowOpcode::CMSG_SELL_ITEM, Data);
     UE_LOG(LogWowNet, Log, TEXT("Sell item %lld (count=%d) to vendor %lld"), ItemGuid, Count, VendorGuid);
+}
+
+void UWowConnectionManager::SendAutoEquipItem(uint8 SourceBag, uint8 SourceSlot)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame)
+    {
+        return;
+    }
+
+    TArray<uint8> Data;
+    Data.Reserve(2);
+    Data.Add(SourceBag);
+    Data.Add(SourceSlot);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_AUTOEQUIP_ITEM, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Auto equip item from bag=%u slot=%u"), SourceBag, SourceSlot);
+}
+
+void UWowConnectionManager::SendAutoStoreBagItem(uint8 SourceBag, uint8 SourceSlot, uint8 DestinationBag)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame)
+    {
+        return;
+    }
+
+    TArray<uint8> Data;
+    Data.Reserve(3);
+    Data.Add(SourceBag);
+    Data.Add(SourceSlot);
+    Data.Add(DestinationBag);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_AUTOSTORE_BAG_ITEM, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Auto store item from bag=%u slot=%u into bag=%u"),
+        SourceBag, SourceSlot, DestinationBag);
 }
 
 void UWowConnectionManager::SendInitiateTrade(int64 TargetGuidToTrade)

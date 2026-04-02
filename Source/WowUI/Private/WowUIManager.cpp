@@ -432,6 +432,11 @@ void UWowUIManager::SetConnectionManager(UWowConnectionManager* InConnectionMana
 		UE_LOG(LogWowUIManager, Log, TEXT("Updated Lua context with ConnectionManager and EntityManager"));
 	}
 
+	if (InventoryManager.IsValid())
+	{
+		InventoryManager->SetConnectionManager(ConnectionManager);
+	}
+
 	if (CharacterPanel.IsValid())
 	{
 		CharacterPanel->SetConnectionManager(ConnectionManager);

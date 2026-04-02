@@ -2,6 +2,8 @@
 #include "CoreMinimal.h"
 #include "WowEntity.h"
 
+class UWowConnectionManager;
+
 DECLARE_MULTICAST_DELEGATE(FOnInventoryChanged);
 
 // Item slot information
@@ -53,8 +55,14 @@ public:
     /** Number of purchased bank bag slots */
     int32 GetPurchasedBankBagSlots() const { return PurchasedBankBagSlots; }
 
+    /** Provide the live connection manager so inventory actions can send packets. */
+    void SetConnectionManager(UWowConnectionManager* InConnectionManager);
+
     /** Send autoequip item packet */
     void AutoEquipItem(uint8 SrcBag, uint8 SrcSlot);
+
+    /** Send auto-store item packet (used for unequipping into a bag). */
+    void AutoStoreItem(uint8 SrcBag, uint8 SrcSlot, uint8 DestBag = 255);
 
     /** Equipment slot constants */
     static constexpr uint8 EQUIP_SLOT_HEAD = 0;
@@ -93,6 +101,7 @@ private:
     TArray<FWowItemSlot> BankBagSlots; // 7 purchasable bank bag slots
     TArray<FWowItemSlot> EquippedItems; // 19 equipment slots
     int32 PurchasedBankBagSlots = 0;
+    TWeakObjectPtr<UWowConnectionManager> ConnectionManager;
 
     void UpdateItemSlot(FWowItemSlot& Slot, uint64 ItemGuid, class FWowEntityManager& EntityManager, uint8 Bag, uint8 SlotIndex);
 };

@@ -8,6 +8,7 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Layout/SGridPanel.h"
 #include "Framework/Application/SlateApplication.h"
+#include "InputCoreTypes.h"
 #include "HAL/UnrealMemory.h"
 
 void SWowEquipmentSlot::Construct(const FArguments& InArgs, TSharedPtr<FWowInventoryManager> InInventoryManager)
@@ -54,6 +55,21 @@ void SWowEquipmentSlot::Construct(const FArguments& InArgs, TSharedPtr<FWowInven
     ];
 
     UpdateSlotDisplay();
+}
+
+FReply SWowEquipmentSlot::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
+{
+    if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && InventoryManager.IsValid())
+    {
+        const FWowItemSlot* ItemSlot = InventoryManager->GetEquippedItem(SlotIndex);
+        if (ItemSlot && !ItemSlot->IsEmpty())
+        {
+            InventoryManager->AutoStoreItem(ItemSlot->Bag, ItemSlot->Slot, 255);
+            return FReply::Handled();
+        }
+    }
+
+    return FReply::Unhandled();
 }
 
 void SWowEquipmentSlot::OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)

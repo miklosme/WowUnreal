@@ -1,4 +1,5 @@
 #include "WowInventoryManager.h"
+#include "WowConnectionManager.h"
 #include "WowEntityManager.h"
 
 FWowInventoryManager::FWowInventoryManager()
@@ -79,10 +80,25 @@ const FWowItemSlot* FWowInventoryManager::GetEquippedItem(uint8 Slot) const
     return (Slot < EQUIP_SLOT_COUNT) ? &EquippedItems[Slot] : nullptr;
 }
 
+void FWowInventoryManager::SetConnectionManager(UWowConnectionManager* InConnectionManager)
+{
+    ConnectionManager = InConnectionManager;
+}
+
 void FWowInventoryManager::AutoEquipItem(uint8 SrcBag, uint8 SrcSlot)
 {
-    // TODO: Implement proper packet sending when network connection is available
-    UE_LOG(LogTemp, Log, TEXT("Auto-equip item requested: bag=%d, slot=%d"), SrcBag, SrcSlot);
+    if (UWowConnectionManager* Connection = ConnectionManager.Get())
+    {
+        Connection->SendAutoEquipItem(SrcBag, SrcSlot);
+    }
+}
+
+void FWowInventoryManager::AutoStoreItem(uint8 SrcBag, uint8 SrcSlot, uint8 DestBag)
+{
+    if (UWowConnectionManager* Connection = ConnectionManager.Get())
+    {
+        Connection->SendAutoStoreBagItem(SrcBag, SrcSlot, DestBag);
+    }
 }
 
 const TCHAR* FWowInventoryManager::GetSlotName(uint8 SlotIndex)

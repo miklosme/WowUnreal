@@ -18,6 +18,7 @@ public:
     void Construct(const FArguments& InArgs, TSharedPtr<FWowInventoryManager> InInventoryManager);
 
     // SWidget overrides
+    virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
     virtual void OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
     virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override;
 

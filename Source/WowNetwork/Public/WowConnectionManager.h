@@ -70,11 +70,16 @@ public:
     /** Cursor payload helpers for spell/action pickup flows */
     void PickupSpellCursor(int32 SpellId, const FString& BookType = TEXT("spell"));
     void PickupActionCursor(int32 SlotIndex);
+    void PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink = TEXT(""));
+    void PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink = TEXT(""));
     void ClearCursorPayload();
     bool HasCursorPayload() const;
     bool HasCursorSpellPayload() const;
+    bool HasCursorItemPayload() const;
     bool GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const;
     bool PlaceCursorIntoActionSlot(int32 SlotIndex);
+    bool AutoEquipCursorItem();
+    bool AutoStoreCursorItem(uint8 DestinationBag = 255);
 
     /** Resolve the action assigned to a slot into a concrete gameplay invocation. */
     static FWowActionInvocation ResolveActionInvocation(uint32 PackedAction, int64 TargetGuid);
@@ -102,6 +107,12 @@ public:
 
     /** Send sell item to vendor command */
     UFUNCTION(BlueprintCallable) void SendSellItem(int64 VendorGuid, int64 ItemGuid, uint8 Count = 1);
+
+    /** Auto-equip an inventory item from the specified bag/slot. */
+    void SendAutoEquipItem(uint8 SourceBag, uint8 SourceSlot);
+
+    /** Auto-store an equipped or bag item into the requested destination bag. */
+    void SendAutoStoreBagItem(uint8 SourceBag, uint8 SourceSlot, uint8 DestinationBag = 255);
 
     /** Start a player trade with the target player */
     UFUNCTION(BlueprintCallable) void SendInitiateTrade(int64 TargetGuid);
@@ -218,6 +229,7 @@ private:
         None,
         Spell,
         Action,
+        Item,
     };
 
     struct FCursorPayloadState
@@ -227,6 +239,10 @@ private:
         FString Detail;
         uint8 ActionType = 0;
         int32 SourceActionSlot = -1;
+        uint8 SourceBag = 255;
+        uint8 SourceSlot = 0;
+        uint8 SourceInventorySlot = 0;
+        bool bFromInventorySlot = false;
     };
 
     EWowSessionState State = EWowSessionState::Disconnected;
