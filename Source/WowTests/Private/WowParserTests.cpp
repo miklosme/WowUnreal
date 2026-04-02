@@ -92,6 +92,12 @@ namespace WowTestUtils
         return true;
     }
 
+    static void SetGuidField64(FWowEntity& Entity, uint16 FieldIndex, uint64 Guid)
+    {
+        Entity.SetField(FieldIndex, static_cast<uint32>(Guid & 0xFFFFFFFFu));
+        Entity.SetField(FieldIndex + 1, static_cast<uint32>(Guid >> 32));
+    }
+
     static void SetLuaContext(FWowLuaVM& LuaVM, FWowLuaContext& Context)
     {
         lua_pushlightuserdata(LuaVM.GetState(), &Context);
@@ -410,6 +416,292 @@ bool FActionCursorMovesExistingAction::RunTest(const FString& Parameters)
     TestEqual(TEXT("Destination slot receives moved action"), Connection->PacketHandler.ActionButtons[3], PackedSpellAction);
     TestFalse(TEXT("Cursor payload clears after move"), Connection->HasCursorPayload());
 
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FItemCursorTracksBagItemPickup, "WowUnreal.UI.ItemCursorTracksBagItemPickup",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FItemCursorTracksBagItemPickup::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    Connection->PickupBagItemCursor(255, 2, 6948, TEXT("|cffffffff|Hitem:6948:0:0:0:0:0:0:0:0:0|h[Item 6948]|h|r"));
+
+    FString CursorType;
+    FString CursorDetail;
+    int32 CursorId = 0;
+    TestTrue(TEXT("Cursor info available after item pickup"), Connection->GetCursorInfo(CursorType, CursorId, CursorDetail));
+    TestEqual(TEXT("Cursor type is item"), CursorType, FString(TEXT("item")));
+    TestEqual(TEXT("Cursor item id matches"), CursorId, 6948);
+    TestTrue(TEXT("Cursor item detail preserves the item link"), CursorDetail.Contains(TEXT("Hitem:6948")));
+    TestTrue(TEXT("Item payload is reported"), Connection->HasCursorItemPayload());
+
+    Connection->ClearCursorPayload();
+    TestFalse(TEXT("Cursor payload clears cleanly"), Connection->HasCursorPayload());
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaUseContainerItemQueuesAutoEquip, "WowUnreal.UI.LuaUseContainerItemQueuesAutoEquip",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaUseContainerItemQueuesAutoEquip::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    const bool bExecuted = LuaVM.ExecuteString(TEXT("UseContainerItem(0, 3)"), TEXT("LuaUseContainerItemQueuesAutoEquip"));
+    TestTrue(TEXT("UseContainerItem executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("UseContainerItem queues a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("UseContainerItem queues CMSG_AUTOEQUIP_ITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOEQUIP_ITEM));
+        TestEqual(TEXT("Autoequip payload stores bag+slot"), Payload.Num(), 2);
+        if (Payload.Num() == 2)
+        {
+            TestEqual(TEXT("Backpack bag id normalizes to 255"), Payload[0], static_cast<uint8>(255));
+            TestEqual(TEXT("Lua bag slots convert to zero-based server slots"), Payload[1], static_cast<uint8>(2));
+        }
+    }
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaInventoryAccessorsUseWowSlotIds, "WowUnreal.UI.LuaInventoryAccessorsUseWowSlotIds",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaInventoryAccessorsUseWowSlotIds::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    FWowEntityManager& EM = Connection->PacketHandler.EntityManager;
+    constexpr uint64 PlayerGuid = 0x0102030405060708ULL;
+    constexpr uint64 HeadItemGuid = 0x1111111122222222ULL;
+    constexpr uint64 TabardItemGuid = 0x3333333344444444ULL;
+
+    FWowEntity& PlayerBase = EM.GetOrCreate(PlayerGuid);
+    PlayerBase.SetField(ObjectField::TYPE, WowTypeMask::UNIT | WowTypeMask::PLAYER);
+    EM.PromoteToTyped(PlayerGuid, PlayerBase.GetField(ObjectField::TYPE));
+    FWowPlayerEntity* Player = EM.FindPlayer(PlayerGuid);
+    TestNotNull(TEXT("Typed player entity created"), Player);
+    if (!Player)
+    {
+        return false;
+    }
+    EM.LocalPlayerGuid = PlayerGuid;
+
+    FWowEntity& HeadItemBase = EM.GetOrCreate(HeadItemGuid);
+    HeadItemBase.SetField(ObjectField::TYPE, WowTypeMask::ITEM);
+    HeadItemBase.SetField(ObjectField::ENTRY, 6948);
+    HeadItemBase.SetField(ItemField::STACK_COUNT, 1);
+    EM.PromoteToTyped(HeadItemGuid, HeadItemBase.GetField(ObjectField::TYPE));
+    if (FWowItemEntity* HeadItem = EM.FindItem(HeadItemGuid))
+    {
+        HeadItem->Entry = HeadItem->GetField(ObjectField::ENTRY);
+    }
+
+    FWowEntity& TabardItemBase = EM.GetOrCreate(TabardItemGuid);
+    TabardItemBase.SetField(ObjectField::TYPE, WowTypeMask::ITEM);
+    TabardItemBase.SetField(ObjectField::ENTRY, 5976);
+    TabardItemBase.SetField(ItemField::STACK_COUNT, 1);
+    EM.PromoteToTyped(TabardItemGuid, TabardItemBase.GetField(ObjectField::TYPE));
+    if (FWowItemEntity* TabardItem = EM.FindItem(TabardItemGuid))
+    {
+        TabardItem->Entry = TabardItem->GetField(ObjectField::ENTRY);
+    }
+
+    WowTestUtils::SetGuidField64(*Player, PlayerField::INV_SLOT_HEAD, HeadItemGuid);
+    WowTestUtils::SetGuidField64(*Player, PlayerField::INV_SLOT_TABARD, TabardItemGuid);
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    Context.EntityManager = &EM;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    const bool bExecuted = LuaVM.ExecuteString(
+        TEXT("HEAD_LINK = GetInventoryItemLink(\"player\", 1)\n")
+        TEXT("HEAD_TEXTURE = GetInventoryItemTexture(\"player\", 1)\n")
+        TEXT("TABARD_TEXTURE = GetInventoryItemTexture(\"player\", 19)\n"),
+        TEXT("LuaInventoryAccessorsUseWowSlotIds"));
+    TestTrue(TEXT("Inventory accessor Lua helpers execute successfully"), bExecuted);
+
+    lua_State* L = LuaVM.GetState();
+    TestTrue(TEXT("GetInventoryItemLink uses WoW 1-based slot ids"), WowTestUtils::GetLuaStringGlobal(L, "HEAD_LINK").Contains(TEXT("Hitem:6948")));
+    TestTrue(TEXT("GetInventoryItemTexture resolves head slot from WoW slot id 1"), !WowTestUtils::GetLuaStringGlobal(L, "HEAD_TEXTURE").IsEmpty());
+    TestTrue(TEXT("GetInventoryItemTexture resolves tabard slot from WoW slot id 19"), !WowTestUtils::GetLuaStringGlobal(L, "TABARD_TEXTURE").IsEmpty());
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets, "WowUnreal.UI.LuaInventoryPickupFlowsQueueEquipAndUnequipPackets",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    FWowEntityManager& EM = Connection->PacketHandler.EntityManager;
+    constexpr uint64 PlayerGuid = 0x777788889999AAAAULL;
+    constexpr uint64 BagItemGuid = 0x0101010102020202ULL;
+    constexpr uint64 EquippedItemGuid = 0x0303030304040404ULL;
+
+    FWowEntity& PlayerBase = EM.GetOrCreate(PlayerGuid);
+    PlayerBase.SetField(ObjectField::TYPE, WowTypeMask::UNIT | WowTypeMask::PLAYER);
+    EM.PromoteToTyped(PlayerGuid, PlayerBase.GetField(ObjectField::TYPE));
+    FWowPlayerEntity* Player = EM.FindPlayer(PlayerGuid);
+    TestNotNull(TEXT("Typed player entity created"), Player);
+    if (!Player)
+    {
+        return false;
+    }
+    EM.LocalPlayerGuid = PlayerGuid;
+
+    FWowEntity& BagItemBase = EM.GetOrCreate(BagItemGuid);
+    BagItemBase.SetField(ObjectField::TYPE, WowTypeMask::ITEM);
+    BagItemBase.SetField(ObjectField::ENTRY, 6948);
+    BagItemBase.SetField(ItemField::STACK_COUNT, 1);
+    EM.PromoteToTyped(BagItemGuid, BagItemBase.GetField(ObjectField::TYPE));
+    if (FWowItemEntity* BagItem = EM.FindItem(BagItemGuid))
+    {
+        BagItem->Entry = BagItem->GetField(ObjectField::ENTRY);
+    }
+
+    FWowEntity& EquippedItemBase = EM.GetOrCreate(EquippedItemGuid);
+    EquippedItemBase.SetField(ObjectField::TYPE, WowTypeMask::ITEM);
+    EquippedItemBase.SetField(ObjectField::ENTRY, 5976);
+    EquippedItemBase.SetField(ItemField::STACK_COUNT, 1);
+    EM.PromoteToTyped(EquippedItemGuid, EquippedItemBase.GetField(ObjectField::TYPE));
+    if (FWowItemEntity* EquippedItem = EM.FindItem(EquippedItemGuid))
+    {
+        EquippedItem->Entry = EquippedItem->GetField(ObjectField::ENTRY);
+    }
+
+    WowTestUtils::SetGuidField64(*Player, PlayerField::PACK_SLOT_START, BagItemGuid);
+    WowTestUtils::SetGuidField64(*Player, PlayerField::INV_SLOT_HEAD, EquippedItemGuid);
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    Context.EntityManager = &EM;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    bool bExecuted = LuaVM.ExecuteString(
+        TEXT("PickupContainerItem(0, 1)\n")
+        TEXT("CURSOR_AFTER_PICKUP = CursorHasItem()\n")
+        TEXT("PickupInventoryItem(1)\n"),
+        TEXT("LuaInventoryPickupEquip"));
+    TestTrue(TEXT("Container pickup to equipment executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("Picking up a bag item then clicking equipment queues a packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("Bag-to-equipment flow queues CMSG_AUTOEQUIP_ITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOEQUIP_ITEM));
+        TestEqual(TEXT("Autoequip payload stores backpack source slot"), Payload.Num(), 2);
+        if (Payload.Num() == 2)
+        {
+            TestEqual(TEXT("Backpack bag id normalizes to 255"), Payload[0], static_cast<uint8>(255));
+            TestEqual(TEXT("Backpack item source slot is zero-based"), Payload[1], static_cast<uint8>(0));
+        }
+    }
+
+    bool bIsBoolean = false;
+    const bool bCursorAfterPickup = WowTestUtils::GetLuaBooleanGlobal(LuaVM.GetState(), "CURSOR_AFTER_PICKUP", bIsBoolean);
+    TestFalse(TEXT("Equip flow clears the cursor payload"), Connection->HasCursorItemPayload());
+    TestTrue(TEXT("CursorHasItem reports true after bag pickup"), bCursorAfterPickup && bIsBoolean);
+
+    bExecuted = LuaVM.ExecuteString(
+        TEXT("PickupInventoryItem(1)\n")
+        TEXT("CURSOR_AFTER_EQUIP_PICKUP = CursorHasItem()\n")
+        TEXT("PutItemInBackpack()\n"),
+        TEXT("LuaInventoryPickupUnequip"));
+    TestTrue(TEXT("Equipment pickup to backpack executes successfully"), bExecuted);
+
+    Opcode = 0;
+    Payload.Reset();
+    bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("Picking up an equipped item then placing it in the backpack queues a packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("Equipment-to-backpack flow queues CMSG_AUTOSTORE_BAG_ITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_AUTOSTORE_BAG_ITEM));
+        TestEqual(TEXT("Autostore payload stores source bag, source slot, and destination bag"), Payload.Num(), 3);
+        if (Payload.Num() == 3)
+        {
+            TestEqual(TEXT("Equipped items source from bag 255"), Payload[0], static_cast<uint8>(255));
+            TestEqual(TEXT("Head slot uses zero-based equipment slot 0"), Payload[1], static_cast<uint8>(0));
+            TestEqual(TEXT("PutItemInBackpack stores into backpack bag 255"), Payload[2], static_cast<uint8>(255));
+        }
+    }
+
+    const bool bCursorAfterEquipPickup = WowTestUtils::GetLuaBooleanGlobal(LuaVM.GetState(), "CURSOR_AFTER_EQUIP_PICKUP", bIsBoolean);
+    TestFalse(TEXT("Unequip flow clears the cursor payload"), Connection->HasCursorItemPayload());
+    TestTrue(TEXT("CursorHasItem reports true after equipment pickup"), bCursorAfterEquipPickup && bIsBoolean);
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
     return true;
 }
 

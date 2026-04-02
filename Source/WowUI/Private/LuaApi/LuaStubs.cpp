@@ -2382,6 +2382,89 @@ static int L_GetItemInfo(lua_State* L)
     return 11;
 }
 
+static FString BuildItemLink(uint32 ItemEntry)
+{
+    return FString::Printf(TEXT("|cffffffff|Hitem:%u:0:0:0:0:0:0:0:0:0|h[Item %u]|h|r"), ItemEntry, ItemEntry);
+}
+
+static int32 NormalizeEquipmentInventorySlot(int32 SlotId)
+{
+    return (SlotId >= 1 && SlotId <= 19) ? (SlotId - 1) : INDEX_NONE;
+}
+
+static bool ResolveContainerItem(FWowLuaContext* Ctx, int32 BagId, int32 SlotId, uint64& OutItemGuid, FWowItemEntity*& OutItem)
+{
+    OutItemGuid = 0;
+    OutItem = nullptr;
+
+    if (!Ctx || !Ctx->EntityManager)
+    {
+        return false;
+    }
+
+    FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+    if (!Player || SlotId <= 0)
+    {
+        return false;
+    }
+
+    if (BagId == 0)
+    {
+        OutItemGuid = Player->GetBackpackItemGuid(static_cast<uint8>(SlotId - 1));
+    }
+    else if (BagId >= 1 && BagId <= 4)
+    {
+        const uint64 BagGuid = Player->GetBagGuid(static_cast<uint8>(BagId));
+        if (BagGuid != 0)
+        {
+            if (FWowContainerEntity* Container = Ctx->EntityManager->FindContainer(BagGuid))
+            {
+                OutItemGuid = Container->GetItemGuidAtSlot(SlotId - 1);
+            }
+        }
+    }
+
+    if (OutItemGuid == 0)
+    {
+        return false;
+    }
+
+    OutItem = Ctx->EntityManager->FindItem(OutItemGuid);
+    return OutItem != nullptr;
+}
+
+static bool ResolveInventoryItem(FWowLuaContext* Ctx, int32 SlotId, uint64& OutItemGuid, FWowItemEntity*& OutItem)
+{
+    OutItemGuid = 0;
+    OutItem = nullptr;
+
+    if (!Ctx || !Ctx->EntityManager)
+    {
+        return false;
+    }
+
+    const int32 EquipmentSlot = NormalizeEquipmentInventorySlot(SlotId);
+    if (EquipmentSlot == INDEX_NONE)
+    {
+        return false;
+    }
+
+    FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
+    if (!Player)
+    {
+        return false;
+    }
+
+    OutItemGuid = Player->GetEquipmentItemGuid(static_cast<uint8>(EquipmentSlot));
+    if (OutItemGuid == 0)
+    {
+        return false;
+    }
+
+    OutItem = Ctx->EntityManager->FindItem(OutItemGuid);
+    return OutItem != nullptr;
+}
+
 static int L_GetContainerItemInfo(lua_State* L)
 {
     // GetContainerItemInfo(bag, slot) → texture, count, locked, quality, readable, lootable, link
@@ -2389,50 +2472,20 @@ static int L_GetContainerItemInfo(lua_State* L)
     int32 BagId = static_cast<int32>(luaL_checknumber(L, 1));
     int32 SlotId = static_cast<int32>(luaL_checknumber(L, 2));
 
-    if (Ctx && Ctx->EntityManager)
+    uint64 ItemGuid = 0;
+    FWowItemEntity* Item = nullptr;
+    if (ResolveContainerItem(Ctx, BagId, SlotId, ItemGuid, Item))
     {
-        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
-        if (Player)
-        {
-            uint64 ItemGuid = 0;
-
-            if (BagId == 0) // Backpack
-            {
-                ItemGuid = Player->GetBackpackItemGuid(static_cast<uint8>(SlotId - 1)); // Convert 1-based to 0-based
-            }
-            else if (BagId >= 1 && BagId <= 4) // Additional bags
-            {
-                uint64 BagGuid = Player->GetBagGuid(static_cast<uint8>(BagId));
-                if (BagGuid != 0)
-                {
-                    FWowContainerEntity* Container = Ctx->EntityManager->FindContainer(BagGuid);
-                    if (Container)
-                    {
-                        ItemGuid = Container->GetItemGuidAtSlot(SlotId - 1); // Convert 1-based to 0-based
-                    }
-                }
-            }
-
-            if (ItemGuid != 0)
-            {
-                FWowItemEntity* Item = Ctx->EntityManager->FindItem(ItemGuid);
-                if (Item)
-                {
-                    FString IconPath = FString::Printf(TEXT("Interface\\Icons\\INV_Misc_Item_%d"), Item->Entry);
-                    lua_pushstring(L, TCHAR_TO_UTF8(*IconPath)); // texture
-                    lua_pushnumber(L, Item->GetStackCount()); // count
-                    lua_pushboolean(L, 0); // locked
-                    lua_pushnumber(L, 1); // quality (would need item DBC lookup)
-                    lua_pushboolean(L, 0); // readable
-                    lua_pushboolean(L, 0); // lootable
-
-                    // Create basic item link
-                    FString ItemLink = FString::Printf(TEXT("|cffffffff|Hitem:%d:0:0:0:0:0:0:0:0:0|h[Item %d]|h|r"), Item->Entry, Item->Entry);
-                    lua_pushstring(L, TCHAR_TO_UTF8(*ItemLink)); // link
-                    return 7;
-                }
-            }
-        }
+        const FString IconPath = FString::Printf(TEXT("Interface\\Icons\\INV_Misc_Item_%d"), Item->Entry);
+        const FString ItemLink = BuildItemLink(Item->Entry);
+        lua_pushstring(L, TCHAR_TO_UTF8(*IconPath)); // texture
+        lua_pushnumber(L, Item->GetStackCount()); // count
+        lua_pushboolean(L, 0); // locked
+        lua_pushnumber(L, 1); // quality (would need item DBC lookup)
+        lua_pushboolean(L, 0); // readable
+        lua_pushboolean(L, 0); // lootable
+        lua_pushstring(L, TCHAR_TO_UTF8(*ItemLink)); // link
+        return 7;
     }
 
     lua_pushnil(L); // texture
@@ -2513,42 +2566,13 @@ static int L_GetContainerItemLink(lua_State* L)
     int32 BagId = static_cast<int32>(luaL_checknumber(L, 1));
     int32 SlotId = static_cast<int32>(luaL_checknumber(L, 2));
 
-    if (Ctx && Ctx->EntityManager)
+    uint64 ItemGuid = 0;
+    FWowItemEntity* Item = nullptr;
+    if (ResolveContainerItem(Ctx, BagId, SlotId, ItemGuid, Item))
     {
-        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
-        if (Player)
-        {
-            uint64 ItemGuid = 0;
-
-            if (BagId == 0) // Backpack
-            {
-                ItemGuid = Player->GetBackpackItemGuid(static_cast<uint8>(SlotId - 1)); // Convert 1-based to 0-based
-            }
-            else if (BagId >= 1 && BagId <= 4) // Additional bags
-            {
-                uint64 BagGuid = Player->GetBagGuid(static_cast<uint8>(BagId));
-                if (BagGuid != 0)
-                {
-                    FWowContainerEntity* Container = Ctx->EntityManager->FindContainer(BagGuid);
-                    if (Container)
-                    {
-                        ItemGuid = Container->GetItemGuidAtSlot(SlotId - 1); // Convert 1-based to 0-based
-                    }
-                }
-            }
-
-            if (ItemGuid != 0)
-            {
-                FWowItemEntity* Item = Ctx->EntityManager->FindItem(ItemGuid);
-                if (Item)
-                {
-                    // Create basic item link
-                    FString ItemLink = FString::Printf(TEXT("|cffffffff|Hitem:%d:0:0:0:0:0:0:0:0:0|h[Item %d]|h|r"), Item->Entry, Item->Entry);
-                    lua_pushstring(L, TCHAR_TO_UTF8(*ItemLink));
-                    return 1;
-                }
-            }
-        }
+        const FString ItemLink = BuildItemLink(Item->Entry);
+        lua_pushstring(L, TCHAR_TO_UTF8(*ItemLink));
+        return 1;
     }
 
     lua_pushnil(L);
@@ -2565,6 +2589,30 @@ static int L_GetContainerFreeSlots(lua_State* L)
 
 static int L_GetInventoryItemLink(lua_State* L)
 {
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    int32 ArgIndex = 1;
+    if (lua_gettop(L) >= 2 && lua_isstring(L, 1))
+    {
+        const FString UnitId = UTF8_TO_TCHAR(lua_tostring(L, 1));
+        if (UnitId != TEXT("player"))
+        {
+            lua_pushnil(L);
+            return 1;
+        }
+        ArgIndex = 2;
+    }
+
+    int32 SlotId = static_cast<int32>(luaL_checknumber(L, ArgIndex));
+
+    uint64 ItemGuid = 0;
+    FWowItemEntity* Item = nullptr;
+    if (ResolveInventoryItem(Ctx, SlotId, ItemGuid, Item))
+    {
+        const FString ItemLink = BuildItemLink(Item->Entry);
+        lua_pushstring(L, TCHAR_TO_UTF8(*ItemLink));
+        return 1;
+    }
+
     lua_pushnil(L);
     return 1;
 }
@@ -2572,55 +2620,190 @@ static int L_GetInventoryItemLink(lua_State* L)
 static int L_GetInventoryItemTexture(lua_State* L)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
-    int32 SlotId = static_cast<int32>(luaL_checknumber(L, 1));
-
-    if (Ctx && Ctx->EntityManager)
+    int32 ArgIndex = 1;
+    if (lua_gettop(L) >= 2 && lua_isstring(L, 1))
     {
-        FWowPlayerEntity* Player = Ctx->EntityManager->GetLocalPlayer();
-        if (Player && SlotId >= 0 && SlotId < 19) // 0-18 are equipment slots
+        const FString UnitId = UTF8_TO_TCHAR(lua_tostring(L, 1));
+        if (UnitId != TEXT("player"))
         {
-            uint64 ItemGuid = Player->GetEquipmentItemGuid(static_cast<uint8>(SlotId));
-            if (ItemGuid != 0)
-            {
-                FWowItemEntity* Item = Ctx->EntityManager->FindItem(ItemGuid);
-                if (Item)
-                {
-                    // TODO: Look up item texture from ItemDisplayInfo DBC
-                    // For now, return a generic texture based on slot
-                    const char* SlotTextures[] = {
-                        "Interface\\Icons\\INV_Helmet_02", // Head
-                        "Interface\\Icons\\INV_Jewelry_Necklace_03", // Neck
-                        "Interface\\Icons\\INV_Shoulder_05", // Shoulder
-                        "Interface\\Icons\\INV_Shirt_02", // Shirt
-                        "Interface\\Icons\\INV_Chest_Leather_01", // Chest
-                        "Interface\\Icons\\INV_Belt_05", // Waist
-                        "Interface\\Icons\\INV_Pants_03", // Legs
-                        "Interface\\Icons\\INV_Boots_08", // Feet
-                        "Interface\\Icons\\INV_Bracer_03", // Wrist
-                        "Interface\\Icons\\INV_Gauntlets_05", // Hands
-                        "Interface\\Icons\\INV_Jewelry_Ring_03", // Finger1
-                        "Interface\\Icons\\INV_Jewelry_Ring_02", // Finger2
-                        "Interface\\Icons\\INV_Jewelry_Talisman_01", // Trinket1
-                        "Interface\\Icons\\INV_Jewelry_Talisman_02", // Trinket2
-                        "Interface\\Icons\\INV_Misc_Cape_01", // Back
-                        "Interface\\Icons\\INV_Weapon_Rifle_01", // Main Hand
-                        "Interface\\Icons\\INV_Shield_05", // Off Hand
-                        "Interface\\Icons\\INV_Weapon_Bow_01", // Ranged
-                        "Interface\\Icons\\INV_Misc_Tabard_01" // Tabard
-                    };
+            lua_pushnil(L);
+            return 1;
+        }
+        ArgIndex = 2;
+    }
 
-                    if (SlotId < UE_ARRAY_COUNT(SlotTextures))
-                    {
-                        lua_pushstring(L, SlotTextures[SlotId]);
-                        return 1;
-                    }
-                }
-            }
+    int32 SlotId = static_cast<int32>(luaL_checknumber(L, ArgIndex));
+
+    uint64 ItemGuid = 0;
+    FWowItemEntity* Item = nullptr;
+    if (ResolveInventoryItem(Ctx, SlotId, ItemGuid, Item))
+    {
+        // TODO: Look up item texture from ItemDisplayInfo DBC
+        // For now, return a generic texture based on the WoW slot id (1-19).
+        const char* SlotTextures[] = {
+            "Interface\\Icons\\INV_Helmet_02", // Head
+            "Interface\\Icons\\INV_Jewelry_Necklace_03", // Neck
+            "Interface\\Icons\\INV_Shoulder_05", // Shoulder
+            "Interface\\Icons\\INV_Shirt_02", // Shirt
+            "Interface\\Icons\\INV_Chest_Leather_01", // Chest
+            "Interface\\Icons\\INV_Belt_05", // Waist
+            "Interface\\Icons\\INV_Pants_03", // Legs
+            "Interface\\Icons\\INV_Boots_08", // Feet
+            "Interface\\Icons\\INV_Bracer_03", // Wrist
+            "Interface\\Icons\\INV_Gauntlets_05", // Hands
+            "Interface\\Icons\\INV_Jewelry_Ring_03", // Finger1
+            "Interface\\Icons\\INV_Jewelry_Ring_02", // Finger2
+            "Interface\\Icons\\INV_Jewelry_Talisman_01", // Trinket1
+            "Interface\\Icons\\INV_Jewelry_Talisman_02", // Trinket2
+            "Interface\\Icons\\INV_Misc_Cape_01", // Back
+            "Interface\\Icons\\INV_Weapon_Rifle_01", // Main Hand
+            "Interface\\Icons\\INV_Shield_05", // Off Hand
+            "Interface\\Icons\\INV_Weapon_Bow_01", // Ranged
+            "Interface\\Icons\\INV_Misc_Tabard_01" // Tabard
+        };
+
+        const int32 EquipmentSlot = NormalizeEquipmentInventorySlot(SlotId);
+        if (EquipmentSlot != INDEX_NONE && EquipmentSlot < UE_ARRAY_COUNT(SlotTextures))
+        {
+            lua_pushstring(L, SlotTextures[EquipmentSlot]);
+            return 1;
         }
     }
 
     lua_pushnil(L);
     return 1;
+}
+
+static uint8 NormalizeDestinationBagId(int32 BagIdOrInventorySlot)
+{
+    if (BagIdOrInventorySlot <= 0)
+    {
+        return 255;
+    }
+
+    if (BagIdOrInventorySlot >= 1 && BagIdOrInventorySlot <= 4)
+    {
+        return static_cast<uint8>(BagIdOrInventorySlot);
+    }
+
+    if (BagIdOrInventorySlot >= 20 && BagIdOrInventorySlot <= 23)
+    {
+        return static_cast<uint8>(BagIdOrInventorySlot - 19);
+    }
+
+    return 255;
+}
+
+static int L_PickupContainerItem(lua_State* L)
+{
+    const int32 Bag = static_cast<int32>(luaL_checknumber(L, 1));
+    const int32 Slot = static_cast<int32>(luaL_checknumber(L, 2));
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (!Ctx || !Ctx->ConnectionManager)
+    {
+        return 0;
+    }
+
+    if (Ctx->ConnectionManager->HasCursorItemPayload())
+    {
+        Ctx->ConnectionManager->AutoStoreCursorItem(NormalizeDestinationBagId(Bag));
+        return 0;
+    }
+
+    uint64 ItemGuid = 0;
+    FWowItemEntity* Item = nullptr;
+    if (ResolveContainerItem(Ctx, Bag, Slot, ItemGuid, Item))
+    {
+        Ctx->ConnectionManager->PickupBagItemCursor(
+            static_cast<uint8>(Bag == 0 ? 255 : Bag),
+            static_cast<uint8>(Slot - 1),
+            static_cast<int32>(Item->Entry),
+            BuildItemLink(Item->Entry));
+    }
+
+    return 0;
+}
+
+static int L_UseContainerItem(lua_State* L)
+{
+    const int32 Bag = static_cast<int32>(luaL_checknumber(L, 1));
+    const int32 Slot = static_cast<int32>(luaL_checknumber(L, 2));
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        Ctx->ConnectionManager->SendAutoEquipItem(
+            static_cast<uint8>(Bag == 0 ? 255 : Bag),
+            static_cast<uint8>(FMath::Max(Slot - 1, 0)));
+    }
+    return 0;
+}
+
+static int L_PickupInventoryItem(lua_State* L)
+{
+    const int32 InventorySlot = static_cast<int32>(luaL_checknumber(L, 1));
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (!Ctx || !Ctx->ConnectionManager)
+    {
+        return 0;
+    }
+
+    if (Ctx->ConnectionManager->HasCursorItemPayload())
+    {
+        Ctx->ConnectionManager->AutoEquipCursorItem();
+        return 0;
+    }
+
+    uint64 ItemGuid = 0;
+    FWowItemEntity* Item = nullptr;
+    if (ResolveInventoryItem(Ctx, InventorySlot, ItemGuid, Item))
+    {
+        const int32 EquipmentSlot = NormalizeEquipmentInventorySlot(InventorySlot);
+        if (EquipmentSlot != INDEX_NONE)
+        {
+            Ctx->ConnectionManager->PickupInventoryItemCursor(
+                static_cast<uint8>(EquipmentSlot),
+                static_cast<int32>(Item->Entry),
+                BuildItemLink(Item->Entry));
+        }
+    }
+
+    return 0;
+}
+
+static int L_UseInventoryItem(lua_State* L)
+{
+    return L_PickupInventoryItem(L);
+}
+
+static int L_AutoEquipCursorItem(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        Ctx->ConnectionManager->AutoEquipCursorItem();
+    }
+    return 0;
+}
+
+static int L_PutItemInBackpack(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        Ctx->ConnectionManager->AutoStoreCursorItem(255);
+    }
+    return 0;
+}
+
+static int L_PutItemInBag(lua_State* L)
+{
+    const int32 BagInventorySlot = static_cast<int32>(luaL_checknumber(L, 1));
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    if (Ctx && Ctx->ConnectionManager)
+    {
+        Ctx->ConnectionManager->AutoStoreCursorItem(NormalizeDestinationBagId(BagInventorySlot));
+    }
+    return 0;
 }
 
 // L_GetInventorySlotInfo defined before RegisterStubs
@@ -5226,7 +5409,8 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         return 3;
     });
     lua_register(L, "CursorHasItem", [](lua_State* L2) -> int {
-        lua_pushboolean(L2, false);
+        FWowLuaContext* C = WowLuaApi::GetContext(L2);
+        lua_pushboolean(L2, C && C->ConnectionManager && C->ConnectionManager->HasCursorItemPayload());
         return 1;
     });
     lua_register(L, "CursorHasSpell", L_CursorHasSpell);
@@ -6381,26 +6565,8 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetNumTradeItems", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
 
     // Container/item operations
-    lua_register(L, "PickupContainerItem", [](lua_State* L2) -> int {
-        int32 Bag = static_cast<int32>(luaL_checknumber(L2, 1));
-        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 2));
-        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
-        if (Ctx && Ctx->ConnectionManager) {
-            // TODO: Send CMSG_AUTOSTORE_BAG_ITEM when available
-            UE_LOG(LogWowLuaStub, Log, TEXT("PickupContainerItem: bag %d slot %d"), Bag, Slot);
-        }
-        return 0;
-    });
-    lua_register(L, "UseContainerItem", [](lua_State* L2) -> int {
-        int32 Bag = static_cast<int32>(luaL_checknumber(L2, 1));
-        int32 Slot = static_cast<int32>(luaL_checknumber(L2, 2));
-        FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
-        if (Ctx && Ctx->ConnectionManager) {
-            // TODO: Send CMSG_USE_ITEM when available
-            UE_LOG(LogWowLuaStub, Log, TEXT("UseContainerItem: bag %d slot %d"), Bag, Slot);
-        }
-        return 0;
-    });
+    lua_register(L, "PickupContainerItem", L_PickupContainerItem);
+    lua_register(L, "UseContainerItem", L_UseContainerItem);
     lua_register(L, "SplitContainerItem", [](lua_State* L2) -> int {
         int32 Bag = static_cast<int32>(luaL_checknumber(L2, 1));
         int32 Slot = static_cast<int32>(luaL_checknumber(L2, 2));
@@ -6408,11 +6574,11 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         UE_LOG(LogWowLuaStub, Log, TEXT("SplitContainerItem: bag %d slot %d count %d"), Bag, Slot, Count);
         return 0;
     });
-    lua_register(L, "PickupInventoryItem", [](lua_State* L2) -> int {
-        int32 InvSlot = static_cast<int32>(luaL_checknumber(L2, 1));
-        UE_LOG(LogWowLuaStub, Log, TEXT("PickupInventoryItem: slot %d"), InvSlot);
-        return 0;
-    });
+    lua_register(L, "PickupInventoryItem", L_PickupInventoryItem);
+    lua_register(L, "UseInventoryItem", L_UseInventoryItem);
+    lua_register(L, "AutoEquipCursorItem", L_AutoEquipCursorItem);
+    lua_register(L, "PutItemInBackpack", L_PutItemInBackpack);
+    lua_register(L, "PutItemInBag", L_PutItemInBag);
 
     // Shaman multi-cast bar
     lua_register(L, "GetMultiCastBarOffset", [](lua_State* L2) -> int { lua_pushnumber(L2, 0); return 1; });
