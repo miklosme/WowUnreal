@@ -194,7 +194,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Bag UI (16-slot backpack + 4 equipped bags)
 - [x] Item icons from ItemDisplayInfo.dbc → BLP
 - [x] Item tooltips (name, stats, flavor text from item cache)
-- [?] Equip/unequip items (CMSG_AUTOEQUIP_ITEM) - verified: editor nolink build, editor build, inventory automation, game build, delayed logged-in screenshot
+- [x] Equip/unequip items (CMSG_AUTOEQUIP_ITEM)
 - [x] Item quality colors (poor/common/uncommon/rare/epic/legendary)
 - [ ] Stack splitting, item deletion
 
