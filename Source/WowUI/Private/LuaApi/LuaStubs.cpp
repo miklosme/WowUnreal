@@ -1377,6 +1377,80 @@ static int32 SafeActionSlot(lua_State* L)
     return static_cast<int32>(lua_tonumber(L, 1)) - 1; // Convert 1-based to 0-based
 }
 
+static int32 SafePetActionSlot(lua_State* L)
+{
+    if (lua_isnil(L, 1) || lua_isnone(L, 1)) return -1;
+    return static_cast<int32>(lua_tonumber(L, 1)) - 1; // Convert 1-based to 0-based
+}
+
+static const FWowPetActionBarState* GetPetActionBarState(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    return (Ctx && Ctx->ConnectionManager) ? &Ctx->ConnectionManager->PacketHandler.PetActionBar : nullptr;
+}
+
+static FString GetSpellIconTexturePath(uint32 SpellId)
+{
+    const FSpellDbcEntry* SpellEntry = FDbcStore::Get().Spells().GetById(SpellId);
+    if (!SpellEntry)
+    {
+        return TEXT("Interface\\Icons\\INV_Misc_QuestionMark");
+    }
+
+    const FSpellIconDbcEntry* IconEntry = FDbcStore::Get().SpellIcons().GetById(SpellEntry->SpellIconID);
+    return (IconEntry && !IconEntry->TexturePath.IsEmpty())
+        ? IconEntry->TexturePath
+        : TEXT("Interface\\Icons\\INV_Misc_QuestionMark");
+}
+
+static FString GetPetActionTexturePath(const FWowPetActionSlot& Slot)
+{
+    if (Slot.IsSpell() && Slot.ActionId != 0)
+    {
+        return GetSpellIconTexturePath(Slot.ActionId);
+    }
+
+    if (Slot.IsCommand())
+    {
+        switch (Slot.ActionId)
+        {
+        case WowPetCommand::ATTACK: return TEXT("Interface\\Icons\\Ability_GhoulFrenzy");
+        case WowPetCommand::FOLLOW: return TEXT("Interface\\Icons\\Ability_Tracking");
+        case WowPetCommand::STAY: return TEXT("Interface\\Icons\\Spell_Nature_TimeStop");
+        case WowPetCommand::ABANDON: return TEXT("Interface\\Icons\\Spell_Shadow_AnimateDead");
+        default: break;
+        }
+    }
+
+    if (Slot.IsReaction())
+    {
+        switch (Slot.ActionId)
+        {
+        case WowPetReactState::AGGRESSIVE: return TEXT("Interface\\Icons\\Ability_Racial_BloodRage");
+        case WowPetReactState::DEFENSIVE: return TEXT("Interface\\Icons\\Ability_Defend");
+        case WowPetReactState::PASSIVE: return TEXT("Interface\\Icons\\Ability_Seal");
+        default: break;
+        }
+    }
+
+    return TEXT("Interface\\Icons\\INV_Misc_QuestionMark");
+}
+
+static bool IsPetActionActive(const FWowPetActionBarState& PetActionBar, const FWowPetActionSlot& Slot)
+{
+    if (Slot.IsReaction())
+    {
+        return PetActionBar.ReactState == Slot.ActionId;
+    }
+
+    if (Slot.IsCommand())
+    {
+        return PetActionBar.CommandState == Slot.ActionId;
+    }
+
+    return false;
+}
+
 static bool ResolveSpellBookSpellId(lua_State* L, int32 SpellIndexOrId, const char* BookType, uint32& OutSpellId)
 {
     FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
@@ -1746,6 +1820,125 @@ static int L_GetActionCooldown(lua_State* L)
     lua_pushnumber(L, 0); // duration
     lua_pushnumber(L, 1); // enabled
     return 3;
+}
+
+static int L_PetHasActionBar(lua_State* L)
+{
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    lua_pushboolean(L, PetActionBar && PetActionBar->HasActionBar());
+    return 1;
+}
+
+static int L_GetPetActionsUsable(lua_State* L)
+{
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    lua_pushboolean(L, PetActionBar && PetActionBar->HasActionBar());
+    return 1;
+}
+
+static int L_GetPetActionInfo(lua_State* L)
+{
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    const int32 SlotIndex = SafePetActionSlot(L);
+    const FWowPetActionSlot* Slot = (PetActionBar && SlotIndex >= 0) ? PetActionBar->GetSlot(SlotIndex) : nullptr;
+    if (!Slot || !Slot->IsUsable())
+    {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const FString Name = Slot->GetDisplayName();
+    const FString TexturePath = GetPetActionTexturePath(*Slot);
+    lua_pushstring(L, TCHAR_TO_UTF8(*Name));
+    lua_pushstring(L, "");
+    lua_pushstring(L, TCHAR_TO_UTF8(*TexturePath));
+    lua_pushboolean(L, 0); // isToken
+    lua_pushboolean(L, IsPetActionActive(*PetActionBar, *Slot));
+    lua_pushboolean(L, Slot->IsAutocastCapable());
+    lua_pushboolean(L, Slot->IsAutocastEnabled());
+    return 7;
+}
+
+static int L_GetPetActionTexture(lua_State* L)
+{
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    const int32 SlotIndex = SafePetActionSlot(L);
+    const FWowPetActionSlot* Slot = (PetActionBar && SlotIndex >= 0) ? PetActionBar->GetSlot(SlotIndex) : nullptr;
+    if (!Slot || !Slot->IsUsable())
+    {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const FString TexturePath = GetPetActionTexturePath(*Slot);
+    lua_pushstring(L, TCHAR_TO_UTF8(*TexturePath));
+    return 1;
+}
+
+static int L_GetPetActionCooldown(lua_State* L)
+{
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    const int32 SlotIndex = SafePetActionSlot(L);
+    const FWowPetActionSlot* Slot = (PetActionBar && SlotIndex >= 0) ? PetActionBar->GetSlot(SlotIndex) : nullptr;
+    if (PetActionBar && Slot && Slot->IsUsable())
+    {
+        const float RemainingTime = PetActionBar->GetCooldownRemaining(SlotIndex);
+        if (RemainingTime > 0.0f)
+        {
+            const double CurrentTime = FPlatformTime::Seconds();
+            lua_pushnumber(L, CurrentTime - RemainingTime);
+            lua_pushnumber(L, RemainingTime);
+            lua_pushnumber(L, 1);
+            return 3;
+        }
+    }
+
+    lua_pushnumber(L, 0);
+    lua_pushnumber(L, 0);
+    lua_pushnumber(L, 1);
+    return 3;
+}
+
+static int L_GetPetActionSlotUsable(lua_State* L)
+{
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    const int32 SlotIndex = SafePetActionSlot(L);
+    const FWowPetActionSlot* Slot = (PetActionBar && SlotIndex >= 0) ? PetActionBar->GetSlot(SlotIndex) : nullptr;
+    lua_pushboolean(L, Slot && Slot->IsUsable());
+    return 1;
+}
+
+static int L_IsPetAttackAction(lua_State* L)
+{
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    const int32 SlotIndex = SafePetActionSlot(L);
+    const FWowPetActionSlot* Slot = (PetActionBar && SlotIndex >= 0) ? PetActionBar->GetSlot(SlotIndex) : nullptr;
+    lua_pushboolean(L, Slot && Slot->IsCommand() && Slot->ActionId == WowPetCommand::ATTACK);
+    return 1;
+}
+
+static int L_CastPetAction(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    const int32 SlotIndex = SafePetActionSlot(L);
+    if (Ctx && Ctx->ConnectionManager && SlotIndex >= 0)
+    {
+        Ctx->ConnectionManager->SendPetActionBarSlot(SlotIndex);
+    }
+    return 0;
+}
+
+static int L_TogglePetAutocast(lua_State* L)
+{
+    FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+    const FWowPetActionBarState* PetActionBar = GetPetActionBarState(L);
+    const int32 SlotIndex = SafePetActionSlot(L);
+    const FWowPetActionSlot* Slot = (PetActionBar && SlotIndex >= 0) ? PetActionBar->GetSlot(SlotIndex) : nullptr;
+    if (Ctx && Ctx->ConnectionManager && Slot && Slot->IsAutocastCapable())
+    {
+        Ctx->ConnectionManager->SendPetSpellAutocast(SlotIndex, !Slot->IsAutocastEnabled());
+    }
+    return 0;
 }
 
 static int L_IsCurrentAction(lua_State* L)
@@ -4270,6 +4463,15 @@ void WowLuaApi::RegisterStubs(lua_State* L)
     lua_register(L, "GetCurrentActionBarPage", L_GetCurrentActionBarPage);
     lua_register(L, "GetActionBarPage", L_GetCurrentActionBarPage); // WoW 3.3.5 alias
     lua_register(L, "UseAction", L_UseAction);
+    lua_register(L, "PetHasActionBar", L_PetHasActionBar);
+    lua_register(L, "GetPetActionsUsable", L_GetPetActionsUsable);
+    lua_register(L, "GetPetActionInfo", L_GetPetActionInfo);
+    lua_register(L, "GetPetActionTexture", L_GetPetActionTexture);
+    lua_register(L, "GetPetActionCooldown", L_GetPetActionCooldown);
+    lua_register(L, "GetPetActionSlotUsable", L_GetPetActionSlotUsable);
+    lua_register(L, "IsPetAttackAction", L_IsPetAttackAction);
+    lua_register(L, "CastPetAction", L_CastPetAction);
+    lua_register(L, "TogglePetAutocast", L_TogglePetAutocast);
 
     // Spell
     lua_register(L, "PickupSpell", L_PickupSpell);
@@ -5144,7 +5346,7 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushstring(L2, Player->GetClassId() == 9 ? "DEMON" : "PET");
         return 2;
     });
-    lua_register(L, "PetHasActionBar", [](lua_State* L2) -> int { lua_pushboolean(L2, 0); return 1; });
+    lua_register(L, "PetHasActionBar", L_PetHasActionBar);
     lua_register(L, "HasFullControl", [](lua_State* L2) -> int { lua_pushboolean(L2, 1); return 1; });
     lua_register(L, "GetComboPoints", [](lua_State* L2) -> int {
         FWowLuaContext* Ctx = WowLuaApi::GetContext(L2);
@@ -5701,8 +5903,8 @@ void WowLuaApi::RegisterStubs(lua_State* L)
         lua_pushnumber(L2, 0); lua_pushnumber(L2, 0);
         return 5;
     });
-    lua_register(L, "GetPetActionInfo", [](lua_State* L2) -> int { lua_pushnil(L2); return 1; });
-    lua_register(L, "GetPetActionsUsable", [](lua_State* L2) -> int { lua_pushboolean(L2, false); return 1; });
+    lua_register(L, "GetPetActionInfo", L_GetPetActionInfo);
+    lua_register(L, "GetPetActionsUsable", L_GetPetActionsUsable);
     lua_register(L, "UnitInRange", [](lua_State* L2) -> int {
         // UnitInRange(unit) → boolean (true if unit is in range)
         FWowEntity* Entity = ResolveUnit(L2, 1);

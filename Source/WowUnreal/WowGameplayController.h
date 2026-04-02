@@ -18,6 +18,7 @@ class FWowAssetCache;
 class SWowCombatLog;
 class SWowChatWindow;
 struct FWowEntity;
+struct FWowPetActionBarState;
 class SWowActionBar;
 class SWowCastBar;
 class SWowMinimap;
@@ -101,6 +102,7 @@ public:
     /** Tracks whether the current raid roster already requested icon sync */
     bool bRaidIconsRequested = false;
     uint64 LastRaidGroupGuid = 0;
+    uint64 LastKnownLocalPetGuid = 0;
 
     /** Party invite dialog widget */
     TSharedPtr<SWowPartyInvite> PartyInviteWidget;
@@ -323,6 +325,7 @@ private:
     void OnEmote(uint64 EntityGuid, uint32 EmoteId);
     void OnInitialSpells(const TArray<uint32>& SpellIds);
     void OnActionButtonsUpdated();
+    void OnPetBarUpdated(const FWowPetActionBarState& PetActionBar);
 
     /** Play emote animation on a character actor */
     void PlayEmoteAnimation(AActor* CharacterActor, uint32 EmoteId);

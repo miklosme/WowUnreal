@@ -188,7 +188,7 @@ Goal: Walk around, fight mobs, cast spells, see other players doing the same.
 - [x] Group/party UI (invite, accept, leave, ready check)
 - [x] Raid UI (raid frames, marks, ready check)
 - [x] Duel system (SMSG_DUEL_REQUESTED)
-- [ ] Pet/companion system (pet bar, pet actions)
+- [?] Pet/companion system (pet bar, pet actions) - verified: editor nolink build, editor build, pet UI/network automation, game build, delayed logged-in screenshot
 
 ### P4: Bag & Inventory
 - [x] Bag UI (16-slot backpack + 4 equipped bags)

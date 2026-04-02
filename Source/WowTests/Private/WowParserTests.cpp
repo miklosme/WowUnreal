@@ -119,6 +119,14 @@ namespace WowTestUtils
         return Value;
     }
 
+    static double GetLuaNumberGlobal(lua_State* L, const char* Name)
+    {
+        lua_getglobal(L, Name);
+        const double Value = lua_isnumber(L, -1) ? lua_tonumber(L, -1) : 0.0;
+        lua_pop(L, 1);
+        return Value;
+    }
+
     static bool GetLuaBooleanGlobal(lua_State* L, const char* Name, bool& bOutIsBoolean)
     {
         lua_getglobal(L, Name);
@@ -835,6 +843,288 @@ bool FButtonDefaultClickDispatchesOnMouseUp::RunTest(const FString& Parameters)
     TestEqual(TEXT("Default button stores a Lua boolean for down"), LastClickDownType, FString(TEXT("boolean")));
     TestFalse(TEXT("Default button OnClick down value is false on mouse up"), bLastClickDown);
     TestTrue(TEXT("Default button OnClick down arg remains a boolean"), bIsBoolean);
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPetSpellsPacketParsesActionBar, "WowUnreal.Network.PetSpellsPacketParsesActionBar",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FPetSpellsPacketParsesActionBar::RunTest(const FString& Parameters)
+{
+    FWowPacketHandler Handler;
+
+    bool bBroadcasted = false;
+    Handler.OnPetBarUpdated.AddLambda([&bBroadcasted](const FWowPetActionBarState&)
+    {
+        bBroadcasted = true;
+    });
+
+    constexpr uint64 PetGuid = 0x0102030405060708ULL;
+    constexpr uint32 SpellId = 16827u;
+    const uint32 AttackPacked = WowPetCommand::ATTACK | (static_cast<uint32>(WowPetActionType::COMMAND) << 24);
+    const uint32 DefensivePacked = WowPetReactState::DEFENSIVE | (static_cast<uint32>(WowPetActionType::REACTION) << 24);
+    const uint32 SpellPacked = SpellId | (static_cast<uint32>(WowPetActionType::DISABLED) << 24);
+
+    TArray<uint8> Packet;
+    auto AppendValue = [&Packet](auto Value)
+    {
+        using TValue = decltype(Value);
+        const int32 Offset = Packet.AddUninitialized(sizeof(TValue));
+        FMemory::Memcpy(Packet.GetData() + Offset, &Value, sizeof(TValue));
+    };
+
+    AppendValue(PetGuid);
+    AppendValue(static_cast<uint16>(17));
+    AppendValue(static_cast<uint32>(0));
+    AppendValue(static_cast<uint8>(WowPetReactState::DEFENSIVE));
+    AppendValue(static_cast<uint8>(WowPetCommand::FOLLOW));
+    AppendValue(static_cast<uint16>(0));
+    AppendValue(AttackPacked);
+    AppendValue(DefensivePacked);
+    AppendValue(SpellPacked);
+    for (int32 SlotIndex = 3; SlotIndex < WOW_PET_ACTION_SLOT_COUNT; ++SlotIndex)
+    {
+        AppendValue(static_cast<uint32>(0));
+    }
+    AppendValue(static_cast<uint8>(1));
+    AppendValue(SpellId);
+    AppendValue(static_cast<uint8>(1));
+    AppendValue(SpellId);
+    AppendValue(static_cast<uint16>(0));
+    AppendValue(static_cast<uint32>(5000));
+    AppendValue(static_cast<uint32>(0));
+
+    FPacketReader Reader(Packet);
+    Handler.HandlePetSpells(Reader);
+
+    TestTrue(TEXT("PET_SPELLS broadcasts pet bar updates"), bBroadcasted);
+    TestEqual(TEXT("PET_SPELLS preserves pet guid"), Handler.PetActionBar.PetGuid, PetGuid);
+    TestEqual(TEXT("PET_SPELLS preserves react state"), Handler.PetActionBar.ReactState, static_cast<uint8>(WowPetReactState::DEFENSIVE));
+    TestEqual(TEXT("PET_SPELLS keeps the expected slot count"), Handler.PetActionBar.ActionSlots.Num(), WOW_PET_ACTION_SLOT_COUNT);
+
+    const FWowPetActionSlot* AttackSlot = Handler.PetActionBar.GetSlot(0);
+    TestTrue(TEXT("Slot 1 parsed as pet attack command"), AttackSlot && AttackSlot->IsCommand() && AttackSlot->ActionId == WowPetCommand::ATTACK);
+
+    const FWowPetActionSlot* DefensiveSlot = Handler.PetActionBar.GetSlot(1);
+    TestTrue(TEXT("Slot 2 parsed as defensive reaction"), DefensiveSlot && DefensiveSlot->IsReaction() && DefensiveSlot->ActionId == WowPetReactState::DEFENSIVE);
+
+    const FWowPetActionSlot* SpellSlot = Handler.PetActionBar.GetSlot(2);
+    TestTrue(TEXT("Slot 3 parsed as pet spell"), SpellSlot && SpellSlot->IsSpell() && SpellSlot->ActionId == SpellId);
+    TestTrue(TEXT("PET_SPELLS tracks known pet spells"), Handler.PetActionBar.KnownSpells.Contains(SpellId));
+    TestTrue(TEXT("PET_SPELLS records cooldown data"), Handler.PetActionBar.GetCooldownRemaining(2) > 0.0f);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaPetActionInfoReflectsPetBarState, "WowUnreal.UI.LuaPetActionInfoReflectsPetBarState",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaPetActionInfoReflectsPetBarState::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    Connection->PacketHandler.PetActionBar.PetGuid = 0x1020304050607080ULL;
+    Connection->PacketHandler.PetActionBar.ReactState = static_cast<uint8>(WowPetReactState::DEFENSIVE);
+    Connection->PacketHandler.PetActionBar.ActionSlots[0].SetPackedData(
+        WowPetCommand::ATTACK | (static_cast<uint32>(WowPetActionType::COMMAND) << 24));
+    Connection->PacketHandler.PetActionBar.ActionSlots[1].SetPackedData(
+        WowPetReactState::DEFENSIVE | (static_cast<uint32>(WowPetActionType::REACTION) << 24));
+    Connection->PacketHandler.PetActionBar.ActionSlots[2].SetPackedData(
+        16827u | (static_cast<uint32>(WowPetActionType::ENABLED) << 24));
+    Connection->PacketHandler.PetActionBar.SpellCooldownExpirySeconds.Add(16827u, FPlatformTime::Seconds() + 3.0);
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    const bool bExecuted = LuaVM.ExecuteString(
+        TEXT("PET_HAS_BAR = PetHasActionBar()\n")
+        TEXT("PET_ACTIONS_USABLE = GetPetActionsUsable()\n")
+        TEXT("local name, subtext, texture, isToken, isActive, autoCastAllowed, autoCastEnabled = GetPetActionInfo(2)\n")
+        TEXT("PET_ACTION_NAME = name\n")
+        TEXT("PET_ACTION_TEXTURE = texture\n")
+        TEXT("PET_ACTION_ACTIVE = isActive\n")
+        TEXT("PET_ACTION_TOKEN = isToken\n")
+        TEXT("PET_ATTACK_TEXTURE = GetPetActionTexture(1)\n")
+        TEXT("PET_ATTACK_SLOT_USABLE = GetPetActionSlotUsable(1)\n")
+        TEXT("PET_ATTACK_IS_ATTACK = IsPetAttackAction(1)\n")
+        TEXT("local start, duration, enabled = GetPetActionCooldown(3)\n")
+        TEXT("PET_COOLDOWN_DURATION = duration\n")
+        TEXT("PET_COOLDOWN_ENABLED = enabled\n"),
+        TEXT("LuaPetActionInfoReflectsPetBarState"));
+    TestTrue(TEXT("Pet action Lua helpers execute successfully"), bExecuted);
+
+    lua_State* L = LuaVM.GetState();
+    bool bHasBarIsBoolean = false;
+    bool bActionsUsableIsBoolean = false;
+    bool bActionActiveIsBoolean = false;
+    bool bActionTokenIsBoolean = false;
+    bool bAttackSlotUsableIsBoolean = false;
+    bool bAttackActionIsBoolean = false;
+    const bool bHasBar = WowTestUtils::GetLuaBooleanGlobal(L, "PET_HAS_BAR", bHasBarIsBoolean);
+    const bool bActionsUsable = WowTestUtils::GetLuaBooleanGlobal(L, "PET_ACTIONS_USABLE", bActionsUsableIsBoolean);
+    const bool bActionActive = WowTestUtils::GetLuaBooleanGlobal(L, "PET_ACTION_ACTIVE", bActionActiveIsBoolean);
+    const bool bActionToken = WowTestUtils::GetLuaBooleanGlobal(L, "PET_ACTION_TOKEN", bActionTokenIsBoolean);
+    const bool bAttackSlotUsable = WowTestUtils::GetLuaBooleanGlobal(L, "PET_ATTACK_SLOT_USABLE", bAttackSlotUsableIsBoolean);
+    const bool bAttackAction = WowTestUtils::GetLuaBooleanGlobal(L, "PET_ATTACK_IS_ATTACK", bAttackActionIsBoolean);
+
+    TestTrue(TEXT("PetHasActionBar returns true for populated pet state"), bHasBar && bHasBarIsBoolean);
+    TestTrue(TEXT("GetPetActionsUsable returns true for populated pet state"), bActionsUsable && bActionsUsableIsBoolean);
+    TestEqual(TEXT("GetPetActionInfo returns the reaction display name"), WowTestUtils::GetLuaStringGlobal(L, "PET_ACTION_NAME"), FString(TEXT("Defensive")));
+    TestTrue(TEXT("GetPetActionInfo marks the active reaction"), bActionActive && bActionActiveIsBoolean);
+    TestFalse(TEXT("GetPetActionInfo returns a file path, not a token"), bActionToken);
+    TestTrue(TEXT("GetPetActionTexture returns a non-empty icon path"), !WowTestUtils::GetLuaStringGlobal(L, "PET_ACTION_TEXTURE").IsEmpty());
+    TestTrue(TEXT("GetPetActionTexture works for command slots too"), !WowTestUtils::GetLuaStringGlobal(L, "PET_ATTACK_TEXTURE").IsEmpty());
+    TestTrue(TEXT("GetPetActionSlotUsable returns true for usable pet commands"), bAttackSlotUsable && bAttackSlotUsableIsBoolean);
+    TestTrue(TEXT("IsPetAttackAction recognizes the attack button"), bAttackAction && bAttackActionIsBoolean);
+    TestTrue(TEXT("GetPetActionCooldown returns a positive cooldown duration"), WowTestUtils::GetLuaNumberGlobal(L, "PET_COOLDOWN_DURATION") > 0.0);
+    TestEqual(TEXT("GetPetActionCooldown reports enabled=1"), WowTestUtils::GetLuaNumberGlobal(L, "PET_COOLDOWN_ENABLED"), 1.0);
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaCastPetActionQueuesPetPacket, "WowUnreal.UI.LuaCastPetActionQueuesPetPacket",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaCastPetActionQueuesPetPacket::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    constexpr uint64 TargetGuid = 0x2233445566778899ULL;
+    constexpr uint64 PetGuid = 0x0101010102020202ULL;
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, static_cast<int64>(TargetGuid));
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    Connection->PacketHandler.PetActionBar.PetGuid = PetGuid;
+    Connection->PacketHandler.PetActionBar.ActionSlots[0].SetPackedData(
+        WowPetCommand::ATTACK | (static_cast<uint32>(WowPetActionType::COMMAND) << 24));
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    const bool bExecuted = LuaVM.ExecuteString(TEXT("CastPetAction(1)"), TEXT("LuaCastPetActionQueuesPetPacket"));
+    TestTrue(TEXT("CastPetAction executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("CastPetAction queues a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("CastPetAction queues CMSG_PET_ACTION"), Opcode, static_cast<uint32>(WowOpcode::CMSG_PET_ACTION));
+        TestEqual(TEXT("CMSG_PET_ACTION payload has pet guid, packed slot, and target guid"), Payload.Num(), 20);
+        if (Payload.Num() == 20)
+        {
+            uint64 SentPetGuid = 0;
+            uint32 PackedAction = 0;
+            uint64 SentTargetGuid = 0;
+            FMemory::Memcpy(&SentPetGuid, Payload.GetData(), sizeof(SentPetGuid));
+            FMemory::Memcpy(&PackedAction, Payload.GetData() + 8, sizeof(PackedAction));
+            FMemory::Memcpy(&SentTargetGuid, Payload.GetData() + 12, sizeof(SentTargetGuid));
+            TestEqual(TEXT("CastPetAction preserves the pet guid"), SentPetGuid, PetGuid);
+            TestEqual(TEXT("CastPetAction preserves the packed slot data"), PackedAction,
+                WowPetCommand::ATTACK | (static_cast<uint32>(WowPetActionType::COMMAND) << 24));
+            TestEqual(TEXT("Attack commands preserve the current target"), SentTargetGuid, TargetGuid);
+        }
+    }
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaTogglePetAutocastQueuesAutocastPacket, "WowUnreal.UI.LuaTogglePetAutocastQueuesAutocastPacket",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaTogglePetAutocastQueuesAutocastPacket::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    constexpr uint64 PetGuid = 0x0A0B0C0D0E0F1011ULL;
+    constexpr uint32 SpellId = 16827u;
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    Connection->PacketHandler.PetActionBar.PetGuid = PetGuid;
+    Connection->PacketHandler.PetActionBar.ActionSlots[0].SetPackedData(
+        SpellId | (static_cast<uint32>(WowPetActionType::DISABLED) << 24));
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    const bool bExecuted = LuaVM.ExecuteString(TEXT("TogglePetAutocast(1)"), TEXT("LuaTogglePetAutocastQueuesAutocastPacket"));
+    TestTrue(TEXT("TogglePetAutocast executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("TogglePetAutocast queues a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("TogglePetAutocast queues CMSG_PET_SPELL_AUTOCAST"), Opcode, static_cast<uint32>(WowOpcode::CMSG_PET_SPELL_AUTOCAST));
+        TestEqual(TEXT("CMSG_PET_SPELL_AUTOCAST payload has pet guid, spell id, and enabled flag"), Payload.Num(), 13);
+        if (Payload.Num() == 13)
+        {
+            uint64 SentPetGuid = 0;
+            uint32 SentSpellId = 0;
+            uint8 bEnabled = 0;
+            FMemory::Memcpy(&SentPetGuid, Payload.GetData(), sizeof(SentPetGuid));
+            FMemory::Memcpy(&SentSpellId, Payload.GetData() + 8, sizeof(SentSpellId));
+            FMemory::Memcpy(&bEnabled, Payload.GetData() + 12, sizeof(bEnabled));
+            TestEqual(TEXT("TogglePetAutocast preserves the pet guid"), SentPetGuid, PetGuid);
+            TestEqual(TEXT("TogglePetAutocast preserves the spell id"), SentSpellId, SpellId);
+            TestEqual(TEXT("TogglePetAutocast enables autocast when it was disabled"), bEnabled, static_cast<uint8>(1));
+        }
+    }
+
+    const FWowPetActionSlot* UpdatedSlot = Connection->PacketHandler.PetActionBar.GetSlot(0);
+    TestTrue(TEXT("TogglePetAutocast updates local pet action state"), UpdatedSlot && UpdatedSlot->IsAutocastEnabled());
 
     WowTestUtils::ClearLuaContext(LuaVM);
     LuaVM.Shutdown();

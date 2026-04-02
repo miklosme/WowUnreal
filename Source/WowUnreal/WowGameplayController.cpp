@@ -311,6 +311,8 @@ void AWowGameplayController::BindEntityEvents()
 		this, &AWowGameplayController::OnInitialSpells);
 	ConnectionManager->PacketHandler.OnActionButtonsUpdated.AddUObject(
 		this, &AWowGameplayController::OnActionButtonsUpdated);
+	ConnectionManager->PacketHandler.OnPetBarUpdated.AddUObject(
+		this, &AWowGameplayController::OnPetBarUpdated);
 
 	// Bind emote events
 	ConnectionManager->PacketHandler.OnEmote.AddUObject(
@@ -610,6 +612,24 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 		if (Entity.IsUnit())
 		{
 			const FWowUnitEntity* UnitEntity = static_cast<const FWowUnitEntity*>(&Entity);
+			const uint64 CurrentPetGuid = UnitEntity->GetField64(UnitField::SUMMON);
+			if (CurrentPetGuid != LastKnownLocalPetGuid)
+			{
+				LastKnownLocalPetGuid = CurrentPetGuid;
+				FireUIEvent(TEXT("UNIT_PET"), {TEXT("player")});
+				FireUIEvent(TEXT("PET_UI_UPDATE"));
+
+				if (CurrentPetGuid != 0)
+				{
+					ConnectionManager->SendRequestPetInfo();
+				}
+				else
+				{
+					ConnectionManager->PacketHandler.PetActionBar.Clear();
+					OnPetBarUpdated(ConnectionManager->PacketHandler.PetActionBar);
+				}
+			}
+
 			uint32 UnitFlags = UnitEntity->GetUnitFlags();
 			bool bIsInCombat = (UnitFlags & 0x00080000) != 0; // UNIT_FLAG_IN_COMBAT
 
@@ -4360,6 +4380,11 @@ void AWowGameplayController::OnInitialSpells(const TArray<uint32>& SpellIds)
 {
 	UE_LOG(LogWowGameplay, Log, TEXT("Received initial spells: %d spells"), SpellIds.Num());
 
+	if (ConnectionManager)
+	{
+		ConnectionManager->SendRequestPetInfo();
+	}
+
 	// Fire spell book events
 	FireUIEvent(TEXT("SPELLS_CHANGED"));
 	FireUIEvent(TEXT("LEARNED_SPELL_IN_TAB"));
@@ -4380,6 +4405,31 @@ void AWowGameplayController::OnActionButtonsUpdated()
 		FireUIEvent(TEXT("ACTIONBAR_SLOT_CHANGED"), {FString::Printf(TEXT("%d"), SlotIndex + 1)});
 	}
 	FireUIEvent(TEXT("ACTIONBAR_UPDATE_STATE"));
+}
+
+void AWowGameplayController::OnPetBarUpdated(const FWowPetActionBarState& PetActionBar)
+{
+	UE_LOG(LogWowGameplay, Log, TEXT("Pet bar updated: pet=%llu hasBar=%d"),
+		PetActionBar.PetGuid, PetActionBar.HasActionBar() ? 1 : 0);
+
+	FireUIEvent(TEXT("UNIT_PET"), {TEXT("player")});
+	FireUIEvent(TEXT("PET_UI_UPDATE"));
+	FireUIEvent(TEXT("PET_BAR_UPDATE"));
+	FireUIEvent(TEXT("PET_BAR_UPDATE_USABLE"));
+	FireUIEvent(TEXT("PET_BAR_UPDATE_COOLDOWN"));
+	FireUIEvent(TEXT("ACTIONBAR_UPDATE_USABLE"));
+	FireUIEvent(TEXT("ACTIONBAR_UPDATE_COOLDOWN"));
+	FireUIEvent(TEXT("ACTIONBAR_UPDATE_STATE"));
+	FireUIEvent(TEXT("SPELL_UPDATE_USABLE"));
+
+	if (PetActionBar.HasActionBar())
+	{
+		FireUIEvent(TEXT("PET_BAR_SHOWGRID"));
+	}
+	else
+	{
+		FireUIEvent(TEXT("PET_BAR_HIDEGRID"));
+	}
 }
 
 void AWowGameplayController::SpawnSpellVisualEffect(uint64 CasterGuid, uint64 SpellTargetGuid, uint32 SpellId, bool bIsMissile)
