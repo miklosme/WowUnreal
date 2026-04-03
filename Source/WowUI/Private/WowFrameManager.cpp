@@ -1411,7 +1411,15 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		// WoW frames do NOT clip their layer content by default.
 		// Layer textures (portraits, borders, decorations) regularly extend
 		// beyond the frame bounds. Only clip if XML explicitly sets clipsChildren.
-		Container->SetClipping(EWidgetClipping::Inherit);
+		// ScrollFrames are the exception - they must clip to provide scrolling behavior.
+		if (Def.Type == EWowFrameType::ScrollFrame)
+		{
+			Container->SetClipping(EWidgetClipping::ClipToBounds);
+		}
+		else
+		{
+			Container->SetClipping(EWidgetClipping::Inherit);
+		}
 		Widget = Container;
 	}
 
@@ -2097,6 +2105,8 @@ void FWowFrameManager::SyncChildVisibility()
 		TEXT("PVPInfoTextString"),
 		TEXT("ReadyCheckListenerFrame"),
 		TEXT("ReadyCheckFrame"),
+		TEXT("GMChatFrame"),
+		TEXT("GMChatFrameEditBox"),
 	};
 	int32 ForceHiddenCount = 0;
 	for (const TCHAR* FrameName : ForceHideFrames)
@@ -2130,6 +2140,103 @@ void FWowFrameManager::SyncChildVisibility()
 			UE_LOG(LogWowFrame, Warning, TEXT("  VISIBLE: %-40s pos=(%.0f,%.0f) sz=(%.0f,%.0f) parent='%s'"),
 				*Pair.Value.Def.Name, Pos.X, Pos.Y, Sz.X, Sz.Y, *Pair.Value.Def.Parent);
 		}
+	}
+}
+
+void FWowFrameManager::SetCooldown(int64 Handle, double StartTime, float Duration)
+{
+	if (Duration <= 0.0f)
+	{
+		// Clear cooldown
+		CooldownStates.Remove(Handle);
+		if (TWeakObjectPtr<UImage>* OverlayPtr = CooldownOverlayWidgets.Find(Handle))
+		{
+			if (OverlayPtr->IsValid())
+			{
+				(*OverlayPtr)->SetVisibility(ESlateVisibility::Collapsed);
+			}
+		}
+		return;
+	}
+
+	FCooldownState& State = CooldownStates.FindOrAdd(Handle);
+	State.StartTime = StartTime;
+	State.Duration = Duration;
+
+	// Create overlay if needed
+	if (!CooldownOverlayWidgets.Contains(Handle))
+	{
+		const FFrameEntry* Entry = Frames.Find(Handle);
+		if (Entry && Entry->Widget.IsValid())
+		{
+			UCanvasPanel* Container = Cast<UCanvasPanel>(Entry->Widget.Get());
+			if (Container)
+			{
+				UImage* Overlay = NewObject<UImage>(Container);
+				FSlateBrush DarkBrush;
+				DarkBrush.TintColor = FLinearColor(0.0f, 0.0f, 0.0f, 0.6f);
+				Overlay->SetBrush(DarkBrush);
+				Overlay->SetColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, 0.6f));
+				UCanvasPanelSlot* Slot = Container->AddChildToCanvas(Overlay);
+				if (Slot)
+				{
+					// Fill parent
+					Slot->SetAnchors(FAnchors(0, 0, 1, 1));
+					Slot->SetOffsets(FMargin(0));
+				}
+				CooldownOverlayWidgets.Add(Handle, Overlay);
+			}
+		}
+	}
+
+	// Show overlay
+	if (TWeakObjectPtr<UImage>* OverlayPtr = CooldownOverlayWidgets.Find(Handle))
+	{
+		if (OverlayPtr->IsValid())
+		{
+			(*OverlayPtr)->SetVisibility(ESlateVisibility::HitTestInvisible);
+		}
+	}
+}
+
+void FWowFrameManager::TickCooldowns()
+{
+	const double Now = FPlatformTime::Seconds();
+	TArray<int64> Expired;
+
+	for (auto& [Handle, State] : CooldownStates)
+	{
+		double Elapsed = Now - State.StartTime;
+		if (Elapsed >= State.Duration)
+		{
+			// Cooldown expired — hide overlay
+			Expired.Add(Handle);
+			if (TWeakObjectPtr<UImage>* OverlayPtr = CooldownOverlayWidgets.Find(Handle))
+			{
+				if (OverlayPtr->IsValid())
+				{
+					(*OverlayPtr)->SetVisibility(ESlateVisibility::Collapsed);
+				}
+			}
+		}
+		else
+		{
+			// Update overlay alpha based on remaining time (fade out as cooldown ends)
+			float Remaining = State.Duration - static_cast<float>(Elapsed);
+			float Alpha = FMath::Clamp(Remaining / State.Duration, 0.0f, 1.0f) * 0.6f;
+			if (TWeakObjectPtr<UImage>* OverlayPtr = CooldownOverlayWidgets.Find(Handle))
+			{
+				if (OverlayPtr->IsValid())
+				{
+					(*OverlayPtr)->SetColorAndOpacity(FLinearColor(0.0f, 0.0f, 0.0f, Alpha));
+				}
+			}
+		}
+	}
+
+	for (int64 H : Expired)
+	{
+		CooldownStates.Remove(H);
 	}
 }
 
@@ -2401,6 +2508,98 @@ void FWowFrameManager::DispatchMouseUp(int64 Handle, const FString& Button)
 void FWowFrameManager::DispatchClick(int64 Handle, const FString& Button, bool bMouseDown)
 {
 	if (!EventSystem || Handle < 0) return;
+
+	const FFrameEntry* Entry = Frames.Find(Handle);
+
+	// Native secure action dispatch — emulates WoW's C++ SecureActionButton behavior.
+	// The FrameXML OnLoad for SecureActionButtonTemplate sets type="action" via Lua,
+	// but this often fails in our environment. So we also detect action buttons by
+	// name pattern (ActionButton1-12, MultiBarBottomLeftButton1-12, etc.) and by
+	// checking the Lua attribute as a fallback.
+	if (Entry && (Entry->Def.Type == EWowFrameType::Button || Entry->Def.Type == EWowFrameType::CheckButton))
+	{
+		int32 ActionSlot = -1;
+
+		// Method 1: Detect action buttons by name pattern
+		// ActionButton1-12 → slots 1-12 (page 1)
+		// MultiBarBottomLeftButton1-12 → slots 61-72
+		// MultiBarBottomRightButton1-12 → slots 49-60
+		// MultiBarRightButton1-12 → slots 25-36
+		// MultiBarLeftButton1-12 → slots 37-48
+		// BonusActionButton1-12 → slots 73-84
+		const FString& Name = Entry->Def.Name;
+		int32 ButtonNum = 0;
+
+		if (Name.StartsWith(TEXT("ActionButton")) && Name.Len() <= 14)
+		{
+			ButtonNum = FCString::Atoi(*Name.Mid(12));
+			if (ButtonNum >= 1 && ButtonNum <= 12) ActionSlot = ButtonNum;
+		}
+		else if (Name.StartsWith(TEXT("MultiBarBottomLeftButton")))
+		{
+			ButtonNum = FCString::Atoi(*Name.Mid(24));
+			if (ButtonNum >= 1 && ButtonNum <= 12) ActionSlot = 60 + ButtonNum;
+		}
+		else if (Name.StartsWith(TEXT("MultiBarBottomRightButton")))
+		{
+			ButtonNum = FCString::Atoi(*Name.Mid(25));
+			if (ButtonNum >= 1 && ButtonNum <= 12) ActionSlot = 48 + ButtonNum;
+		}
+		else if (Name.StartsWith(TEXT("MultiBarRightButton")))
+		{
+			ButtonNum = FCString::Atoi(*Name.Mid(19));
+			if (ButtonNum >= 1 && ButtonNum <= 12) ActionSlot = 24 + ButtonNum;
+		}
+		else if (Name.StartsWith(TEXT("MultiBarLeftButton")))
+		{
+			ButtonNum = FCString::Atoi(*Name.Mid(18));
+			if (ButtonNum >= 1 && ButtonNum <= 12) ActionSlot = 36 + ButtonNum;
+		}
+		else if (Name.StartsWith(TEXT("BonusActionButton")))
+		{
+			ButtonNum = FCString::Atoi(*Name.Mid(17));
+			if (ButtonNum >= 1 && ButtonNum <= 12) ActionSlot = 72 + ButtonNum;
+		}
+
+		// Method 2: Check Lua attribute (if OnLoad managed to set it)
+		if (ActionSlot < 0)
+		{
+			FString ActionType = EventSystem->GetFrameAttribute(Handle, TEXT("type"));
+			if (ActionType.Equals(TEXT("action"), ESearchCase::IgnoreCase))
+			{
+				FString ActionAttr = EventSystem->GetFrameAttribute(Handle, TEXT("action"));
+				if (!ActionAttr.IsEmpty())
+				{
+					ActionSlot = FCString::Atoi(*ActionAttr);
+				}
+				else
+				{
+					int32 FrameID = EventSystem->GetFrameID(Handle);
+					if (FrameID > 0) ActionSlot = FrameID;
+				}
+			}
+			else if (ActionType.Equals(TEXT("spell"), ESearchCase::IgnoreCase))
+			{
+				FString SpellAttr = EventSystem->GetFrameAttribute(Handle, TEXT("spell"));
+				if (!SpellAttr.IsEmpty())
+				{
+					int32 SpellId = FCString::Atoi(*SpellAttr);
+					if (SpellId > 0 && OnSecureSpellDispatch.IsBound())
+					{
+						OnSecureSpellDispatch.Execute(SpellId);
+					}
+				}
+			}
+		}
+
+		if (ActionSlot > 0 && OnSecureActionDispatch.IsBound())
+		{
+			OnSecureActionDispatch.Execute(ActionSlot - 1); // Convert to 0-based
+			UE_LOG(LogWowFrame, Log, TEXT("Secure action dispatch: slot %d (frame %s)"),
+				ActionSlot, *Entry->Def.Name);
+		}
+	}
+
 	EventSystem->RunFrameClickScript(Handle, TEXT("OnClick"), Button, bMouseDown);
 }
 
@@ -2412,4 +2611,546 @@ bool FWowFrameManager::DispatchReceiveDrag(int64 Handle)
 	}
 
 	return EventSystem->RunFrameScript(Handle, TEXT("OnReceiveDrag"));
+}
+
+// ── ScrollFrame Implementation ──────────────────────────────────────────────
+
+void FWowFrameManager::SetScrollChild(int64 ScrollFrameHandle, int64 ChildHandle)
+{
+	if (ScrollFrameHandle < 0 || ChildHandle < 0)
+		return;
+
+	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
+	const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
+
+	if (!ScrollFrameEntry || !ChildEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
+		return;
+
+	// Store the child relationship
+	ScrollChildHandles.Add(ScrollFrameHandle, ChildHandle);
+
+	// Ensure child is parented to the scroll frame (reparent if necessary)
+	UWidget* ScrollWidget = ScrollFrameEntry->Widget.Get();
+	UWidget* ChildWidget = ChildEntry->Widget.Get();
+
+	if (ScrollWidget && ChildWidget)
+	{
+		UCanvasPanel* ScrollCanvas = Cast<UCanvasPanel>(ScrollWidget);
+		if (ScrollCanvas && ChildWidget->GetParent() != ScrollCanvas)
+		{
+			// Remove from old parent if needed
+			if (UPanelWidget* OldParent = ChildWidget->GetParent())
+			{
+				OldParent->RemoveChild(ChildWidget);
+			}
+
+			// Add to scroll frame canvas
+			UCanvasPanelSlot* Slot = ScrollCanvas->AddChildToCanvas(ChildWidget);
+			if (Slot)
+			{
+				// Apply current scroll offset
+				float VerticalOffset = ScrollVerticalOffsets.FindRef(ScrollFrameHandle);
+				float HorizontalOffset = ScrollHorizontalOffsets.FindRef(ScrollFrameHandle);
+
+				FVector2D CurrentPos = Slot->GetPosition();
+				Slot->SetPosition(FVector2D(CurrentPos.X - HorizontalOffset * UIScale,
+											CurrentPos.Y - VerticalOffset * UIScale));
+			}
+		}
+	}
+
+	UE_LOG(LogWowFrame, Log, TEXT("SetScrollChild: frame %lld child %lld"), ScrollFrameHandle, ChildHandle);
+}
+
+int64 FWowFrameManager::GetScrollChild(int64 ScrollFrameHandle) const
+{
+	if (ScrollFrameHandle < 0)
+		return -1;
+
+	return ScrollChildHandles.FindRef(ScrollFrameHandle);
+}
+
+void FWowFrameManager::SetVerticalScroll(int64 ScrollFrameHandle, float Offset)
+{
+	if (ScrollFrameHandle < 0)
+		return;
+
+	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
+	if (!ScrollFrameEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
+		return;
+
+	// Clamp offset to valid range
+	Offset = FMath::Max(0.0f, Offset);
+
+	float MaxScroll = GetVerticalScrollRange(ScrollFrameHandle);
+	if (MaxScroll > 0.0f)
+	{
+		Offset = FMath::Min(Offset, MaxScroll);
+	}
+
+	float OldOffset = ScrollVerticalOffsets.FindRef(ScrollFrameHandle);
+	ScrollVerticalOffsets.Add(ScrollFrameHandle, Offset);
+
+	// Update child position if child exists
+	int64 ChildHandle = GetScrollChild(ScrollFrameHandle);
+	if (ChildHandle >= 0)
+	{
+		const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
+		if (ChildEntry && ChildEntry->Widget.IsValid())
+		{
+			UWidget* ChildWidget = ChildEntry->Widget.Get();
+			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(ChildWidget->Slot))
+			{
+				FVector2D CurrentPos = Slot->GetPosition();
+				// Adjust Y position by the change in scroll offset
+				float DeltaScroll = Offset - OldOffset;
+				Slot->SetPosition(FVector2D(CurrentPos.X, CurrentPos.Y - DeltaScroll * UIScale));
+			}
+		}
+	}
+
+	UE_LOG(LogWowFrame, Verbose, TEXT("SetVerticalScroll: frame %lld offset %.2f (was %.2f)"),
+		ScrollFrameHandle, Offset, OldOffset);
+}
+
+float FWowFrameManager::GetVerticalScroll(int64 ScrollFrameHandle) const
+{
+	if (ScrollFrameHandle < 0)
+		return 0.0f;
+
+	return ScrollVerticalOffsets.FindRef(ScrollFrameHandle);
+}
+
+void FWowFrameManager::SetHorizontalScroll(int64 ScrollFrameHandle, float Offset)
+{
+	if (ScrollFrameHandle < 0)
+		return;
+
+	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
+	if (!ScrollFrameEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
+		return;
+
+	// Clamp offset to valid range
+	Offset = FMath::Max(0.0f, Offset);
+
+	float MaxScroll = GetHorizontalScrollRange(ScrollFrameHandle);
+	if (MaxScroll > 0.0f)
+	{
+		Offset = FMath::Min(Offset, MaxScroll);
+	}
+
+	float OldOffset = ScrollHorizontalOffsets.FindRef(ScrollFrameHandle);
+	ScrollHorizontalOffsets.Add(ScrollFrameHandle, Offset);
+
+	// Update child position if child exists
+	int64 ChildHandle = GetScrollChild(ScrollFrameHandle);
+	if (ChildHandle >= 0)
+	{
+		const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
+		if (ChildEntry && ChildEntry->Widget.IsValid())
+		{
+			UWidget* ChildWidget = ChildEntry->Widget.Get();
+			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(ChildWidget->Slot))
+			{
+				FVector2D CurrentPos = Slot->GetPosition();
+				// Adjust X position by the change in scroll offset
+				float DeltaScroll = Offset - OldOffset;
+				Slot->SetPosition(FVector2D(CurrentPos.X - DeltaScroll * UIScale, CurrentPos.Y));
+			}
+		}
+	}
+
+	UE_LOG(LogWowFrame, Verbose, TEXT("SetHorizontalScroll: frame %lld offset %.2f (was %.2f)"),
+		ScrollFrameHandle, Offset, OldOffset);
+}
+
+float FWowFrameManager::GetHorizontalScroll(int64 ScrollFrameHandle) const
+{
+	if (ScrollFrameHandle < 0)
+		return 0.0f;
+
+	return ScrollHorizontalOffsets.FindRef(ScrollFrameHandle);
+}
+
+float FWowFrameManager::GetVerticalScrollRange(int64 ScrollFrameHandle) const
+{
+	if (ScrollFrameHandle < 0)
+		return 0.0f;
+
+	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
+	if (!ScrollFrameEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
+		return 0.0f;
+
+	int64 ChildHandle = GetScrollChild(ScrollFrameHandle);
+	if (ChildHandle < 0)
+		return 0.0f;
+
+	const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
+	if (!ChildEntry || !ChildEntry->Widget.IsValid() || !ScrollFrameEntry->Widget.IsValid())
+		return 0.0f;
+
+	// Get frame sizes in WoW coordinates (pre-scaling)
+	float ScrollFrameHeight = ScrollFrameEntry->Def.Height;
+	float ChildHeight = ChildEntry->Def.Height;
+
+	// If frame height is 0 (auto-sized), get actual widget size
+	if (ScrollFrameHeight <= 0.0f)
+	{
+		if (UCanvasPanelSlot* ScrollSlot = Cast<UCanvasPanelSlot>(ScrollFrameEntry->Widget->Slot))
+		{
+			ScrollFrameHeight = ScrollSlot->GetSize().Y / UIScale;
+		}
+	}
+
+	if (ChildHeight <= 0.0f)
+	{
+		if (UCanvasPanelSlot* ChildSlot = Cast<UCanvasPanelSlot>(ChildEntry->Widget->Slot))
+		{
+			ChildHeight = ChildSlot->GetSize().Y / UIScale;
+		}
+	}
+
+	// Maximum scroll is the difference between child height and frame height
+	return FMath::Max(0.0f, ChildHeight - ScrollFrameHeight);
+}
+
+float FWowFrameManager::GetHorizontalScrollRange(int64 ScrollFrameHandle) const
+{
+	if (ScrollFrameHandle < 0)
+		return 0.0f;
+
+	const FFrameEntry* ScrollFrameEntry = Frames.Find(ScrollFrameHandle);
+	if (!ScrollFrameEntry || ScrollFrameEntry->Def.Type != EWowFrameType::ScrollFrame)
+		return 0.0f;
+
+	int64 ChildHandle = GetScrollChild(ScrollFrameHandle);
+	if (ChildHandle < 0)
+		return 0.0f;
+
+	const FFrameEntry* ChildEntry = Frames.Find(ChildHandle);
+	if (!ChildEntry || !ChildEntry->Widget.IsValid() || !ScrollFrameEntry->Widget.IsValid())
+		return 0.0f;
+
+	// Get frame sizes in WoW coordinates (pre-scaling)
+	float ScrollFrameWidth = ScrollFrameEntry->Def.Width;
+	float ChildWidth = ChildEntry->Def.Width;
+
+	// If frame width is 0 (auto-sized), get actual widget size
+	if (ScrollFrameWidth <= 0.0f)
+	{
+		if (UCanvasPanelSlot* ScrollSlot = Cast<UCanvasPanelSlot>(ScrollFrameEntry->Widget->Slot))
+		{
+			ScrollFrameWidth = ScrollSlot->GetSize().X / UIScale;
+		}
+	}
+
+	if (ChildWidth <= 0.0f)
+	{
+		if (UCanvasPanelSlot* ChildSlot = Cast<UCanvasPanelSlot>(ChildEntry->Widget->Slot))
+		{
+			ChildWidth = ChildSlot->GetSize().X / UIScale;
+		}
+	}
+
+	// Maximum scroll is the difference between child width and frame width
+	return FMath::Max(0.0f, ChildWidth - ScrollFrameWidth);
+}
+
+// ── Tooltip Implementation ──────────────────────────────────────────────────
+
+void FWowFrameManager::TooltipSetOwner(int64 TooltipHandle, int64 OwnerHandle, const FString& AnchorType)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	State->OwnerHandle = OwnerHandle;
+	State->AnchorType = AnchorType;
+
+	// Position the tooltip relative to owner frame if valid
+	if (OwnerHandle > 0)
+	{
+		const FWowFrameDef* OwnerDef = GetFrameDef(OwnerHandle);
+		if (OwnerDef)
+		{
+			// Create anchor based on anchor type
+			TArray<FWowAnchor> NewAnchors;
+			FWowAnchor TooltipAnchor;
+
+			if (AnchorType == TEXT("ANCHOR_LEFT"))
+			{
+				TooltipAnchor.Point = EWowAnchorPoint::BOTTOMRIGHT;
+				TooltipAnchor.RelativePoint = EWowAnchorPoint::BOTTOMLEFT;
+			}
+			else if (AnchorType == TEXT("ANCHOR_RIGHT"))
+			{
+				TooltipAnchor.Point = EWowAnchorPoint::BOTTOMLEFT;
+				TooltipAnchor.RelativePoint = EWowAnchorPoint::BOTTOMRIGHT;
+			}
+			else if (AnchorType == TEXT("ANCHOR_TOP"))
+			{
+				TooltipAnchor.Point = EWowAnchorPoint::BOTTOM;
+				TooltipAnchor.RelativePoint = EWowAnchorPoint::TOP;
+			}
+			else if (AnchorType == TEXT("ANCHOR_BOTTOM"))
+			{
+				TooltipAnchor.Point = EWowAnchorPoint::TOP;
+				TooltipAnchor.RelativePoint = EWowAnchorPoint::BOTTOM;
+			}
+			else // ANCHOR_CURSOR or default
+			{
+				TooltipAnchor.Point = EWowAnchorPoint::BOTTOMLEFT;
+				TooltipAnchor.RelativePoint = EWowAnchorPoint::BOTTOMLEFT;
+				TooltipAnchor.OffsetX = 5.f;
+				TooltipAnchor.OffsetY = 5.f;
+			}
+
+			TooltipAnchor.RelativeTo = OwnerDef->Name;
+			NewAnchors.Add(TooltipAnchor);
+			SetFrameAnchors(TooltipHandle, NewAnchors);
+		}
+	}
+}
+
+void FWowFrameManager::TooltipAddLine(int64 TooltipHandle, const FString& Text, float R, float G, float B, bool bWrapText)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	FTooltipLine NewLine;
+	NewLine.Text = Text;
+	NewLine.Color = FLinearColor(R, G, B, 1.0f);
+	NewLine.bWrapText = bWrapText;
+	State->Lines.Add(NewLine);
+
+	TooltipUpdateDisplay(TooltipHandle);
+}
+
+void FWowFrameManager::TooltipAddDoubleLine(int64 TooltipHandle, const FString& LeftText, const FString& RightText,
+											 float LR, float LG, float LB, float RR, float RG, float RB)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	FTooltipDoubleLine NewLine;
+	NewLine.LeftText = LeftText;
+	NewLine.RightText = RightText;
+	NewLine.LeftColor = FLinearColor(LR, LG, LB, 1.0f);
+	NewLine.RightColor = FLinearColor(RR, RG, RB, 1.0f);
+	State->DoubleLines.Add(NewLine);
+
+	TooltipUpdateDisplay(TooltipHandle);
+}
+
+void FWowFrameManager::TooltipClearLines(int64 TooltipHandle)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	State->Lines.Empty();
+	State->DoubleLines.Empty();
+	TooltipUpdateDisplay(TooltipHandle);
+}
+
+int32 FWowFrameManager::TooltipNumLines(int64 TooltipHandle) const
+{
+	const FTooltipState* State = GetTooltipState(TooltipHandle);
+	return State ? State->GetTotalLines() : 0;
+}
+
+void FWowFrameManager::TooltipSetText(int64 TooltipHandle, const FString& Text)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	// SetText replaces line 1 or creates it
+	State->Lines.Empty();
+	State->DoubleLines.Empty();
+
+	FTooltipLine NewLine;
+	NewLine.Text = Text;
+	NewLine.Color = FLinearColor::White;
+	State->Lines.Add(NewLine);
+
+	TooltipUpdateDisplay(TooltipHandle);
+}
+
+void FWowFrameManager::TooltipAppendText(int64 TooltipHandle, const FString& Text)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	if (State->Lines.Num() > 0)
+	{
+		// Append to the last line
+		State->Lines.Last().Text += Text;
+	}
+	else
+	{
+		// Create new line if none exist
+		FTooltipLine NewLine;
+		NewLine.Text = Text;
+		NewLine.Color = FLinearColor::White;
+		State->Lines.Add(NewLine);
+	}
+
+	TooltipUpdateDisplay(TooltipHandle);
+}
+
+void FWowFrameManager::TooltipUpdateDisplay(int64 TooltipHandle)
+{
+	const FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	const FWowFrameDef* TooltipDef = GetFrameDef(TooltipHandle);
+	if (!TooltipDef) return;
+
+	// Update FontString widgets with tooltip lines
+	int32 LineIndex = 0;
+
+	// Process regular lines
+	for (const FTooltipLine& Line : State->Lines)
+	{
+		LineIndex++;
+
+		// Find the FontString widget for this line
+		FString LeftFontStringName = FString::Printf(TEXT("GameTooltipTextLeft%d"), LineIndex);
+		UTextBlock* LeftTextBlock = GetNamedFontString(LeftFontStringName);
+
+		if (LeftTextBlock)
+		{
+			LeftTextBlock->SetText(FText::FromString(Line.Text));
+			LeftTextBlock->SetColorAndOpacity(FSlateColor(Line.Color));
+			LeftTextBlock->SetVisibility(ESlateVisibility::Visible);
+		}
+	}
+
+	// Process double lines
+	for (const FTooltipDoubleLine& DoubleLine : State->DoubleLines)
+	{
+		LineIndex++;
+
+		// Left side
+		FString LeftFontStringName = FString::Printf(TEXT("GameTooltipTextLeft%d"), LineIndex);
+		UTextBlock* LeftTextBlock = GetNamedFontString(LeftFontStringName);
+		if (LeftTextBlock)
+		{
+			LeftTextBlock->SetText(FText::FromString(DoubleLine.LeftText));
+			LeftTextBlock->SetColorAndOpacity(FSlateColor(DoubleLine.LeftColor));
+			LeftTextBlock->SetVisibility(ESlateVisibility::Visible);
+		}
+
+		// Right side
+		FString RightFontStringName = FString::Printf(TEXT("GameTooltipTextRight%d"), LineIndex);
+		UTextBlock* RightTextBlock = GetNamedFontString(RightFontStringName);
+		if (RightTextBlock)
+		{
+			RightTextBlock->SetText(FText::FromString(DoubleLine.RightText));
+			RightTextBlock->SetColorAndOpacity(FSlateColor(DoubleLine.RightColor));
+			RightTextBlock->SetVisibility(ESlateVisibility::Visible);
+		}
+	}
+
+	// Hide unused FontString widgets
+	for (int32 HideIndex = LineIndex + 1; HideIndex <= 30; HideIndex++) // WoW usually has up to 30 tooltip lines
+	{
+		FString LeftFontStringName = FString::Printf(TEXT("GameTooltipTextLeft%d"), HideIndex);
+		UTextBlock* LeftTextBlock = GetNamedFontString(LeftFontStringName);
+		if (LeftTextBlock)
+		{
+			LeftTextBlock->SetVisibility(ESlateVisibility::Collapsed);
+		}
+
+		FString RightFontStringName = FString::Printf(TEXT("GameTooltipTextRight%d"), HideIndex);
+		UTextBlock* RightTextBlock = GetNamedFontString(RightFontStringName);
+		if (RightTextBlock)
+		{
+			RightTextBlock->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+
+	// Calculate and set tooltip size based on content
+	float TooltipWidth = State->MinimumWidth;
+	float TooltipHeight = 0.f;
+	const float LineHeight = 13.f; // Approximate WoW tooltip line height
+	const float Padding = 16.f; // Padding around tooltip content
+
+	// Calculate width based on text content
+	for (const FTooltipLine& Line : State->Lines)
+	{
+		// Estimate text width (this is a simplification)
+		float EstimatedWidth = Line.Text.Len() * 7.f; // Rough estimate
+		TooltipWidth = FMath::Max(TooltipWidth, EstimatedWidth);
+	}
+
+	for (const FTooltipDoubleLine& DoubleLine : State->DoubleLines)
+	{
+		float EstimatedWidth = (DoubleLine.LeftText.Len() + DoubleLine.RightText.Len()) * 7.f;
+		TooltipWidth = FMath::Max(TooltipWidth, EstimatedWidth);
+	}
+
+	TooltipHeight = (State->GetTotalLines() * LineHeight) + Padding;
+	TooltipWidth += Padding;
+
+	// Set the tooltip frame size
+	SetFrameSize(TooltipHandle, TooltipWidth, TooltipHeight);
+}
+
+void FWowFrameManager::TooltipSetItem(int64 TooltipHandle, const FString& ItemLink)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	State->ItemLink = ItemLink;
+	State->SpellId = 0; // Clear other contexts
+	State->UnitToken.Empty();
+
+	// TODO: Parse item link and populate tooltip with item data
+	// For now, just add a placeholder line
+	TooltipClearLines(TooltipHandle);
+	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Item: %s"), *ItemLink), 1.0f, 1.0f, 1.0f, false);
+}
+
+void FWowFrameManager::TooltipSetSpell(int64 TooltipHandle, int32 SpellId)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	State->SpellId = SpellId;
+	State->ItemLink.Empty(); // Clear other contexts
+	State->UnitToken.Empty();
+
+	// TODO: Lookup spell data and populate tooltip
+	// For now, just add a placeholder line
+	TooltipClearLines(TooltipHandle);
+	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Spell ID: %d"), SpellId), 1.0f, 1.0f, 1.0f, false);
+}
+
+void FWowFrameManager::TooltipSetUnit(int64 TooltipHandle, const FString& UnitToken)
+{
+	FTooltipState* State = GetTooltipState(TooltipHandle);
+	if (!State) return;
+
+	State->UnitToken = UnitToken;
+	State->ItemLink.Empty(); // Clear other contexts
+	State->SpellId = 0;
+
+	// TODO: Lookup unit data and populate tooltip
+	// For now, just add a placeholder line
+	TooltipClearLines(TooltipHandle);
+	TooltipAddLine(TooltipHandle, FString::Printf(TEXT("Unit: %s"), *UnitToken), 1.0f, 1.0f, 1.0f, false);
+}
+
+FTooltipState* FWowFrameManager::GetTooltipState(int64 TooltipHandle)
+{
+	// Ensure the tooltip state exists
+	if (!TooltipStates.Contains(TooltipHandle))
+	{
+		TooltipStates.Add(TooltipHandle, FTooltipState());
+	}
+	return &TooltipStates[TooltipHandle];
+}
+
+const FTooltipState* FWowFrameManager::GetTooltipState(int64 TooltipHandle) const
+{
+	return TooltipStates.Find(TooltipHandle);
 }

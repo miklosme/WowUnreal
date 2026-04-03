@@ -7,6 +7,7 @@
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
+#include "Components/Slider.h"
 #include "Components/CanvasPanel.h"
 #include "Slate/WidgetTransform.h"
 #include "Components/CanvasPanelSlot.h"
@@ -2600,7 +2601,21 @@ static int LF_SetText(lua_State* L)
 	lua_pushstring(L, Text);
 	lua_setfield(L, 1, "__text");
 
-	// Update UMG widget
+	// Check if this is a tooltip frame
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		int64 Handle = GetFrameHandle(L, 1);
+		const FWowFrameDef* FrameDef = Ctx->FrameManager->GetFrameDef(Handle);
+		if (FrameDef && FrameDef->Type == EWowFrameType::GameTooltip)
+		{
+			// This is a tooltip - use tooltip SetText
+			Ctx->FrameManager->TooltipSetText(Handle, UTF8_TO_TCHAR(Text));
+			return 0;
+		}
+	}
+
+	// Update UMG widget for other frame types
 	if (UTextBlock* TextBlock = GetTextBlockWidgetForTable(L, 1))
 	{
 		FText TextContent = FText::FromString(UTF8_TO_TCHAR(Text));
@@ -2752,14 +2767,24 @@ static int LF_SetValue(lua_State* L)
 			float Percent = (Range > 0.0f) ? (Value - MinValue) / Range : 0.0f;
 			float ClampedPercent = FMath::Clamp(Percent, 0.0f, 1.0f);
 
-			UE_LOG(LogWowLuaFrame, Log, TEXT("SetValue called: Value=%.1f, Min=%.1f, Max=%.1f, Range=%.1f, Percent=%.3f, ClampedPercent=%.3f"),
-				   Value, MinValue, MaxValue, Range, Percent, ClampedPercent);
-
 			ProgressBar->SetPercent(ClampedPercent);
 		}
 		else
 		{
-			UE_LOG(LogWowLuaFrame, Warning, TEXT("SetValue called but no ProgressBar found for Handle=%lld"), Handle);
+			// Try Slider widget (Sliders also use SetValue/GetValue)
+			USlider* Slider = Ctx->FrameManager->GetSliderWidget(Handle);
+			if (Slider)
+			{
+				lua_getfield(L, 1, "__minValue");
+				float MinValue = lua_isnil(L, -1) ? 0.0f : static_cast<float>(lua_tonumber(L, -1));
+				lua_pop(L, 1);
+				lua_getfield(L, 1, "__maxValue");
+				float MaxValue = lua_isnil(L, -1) ? 1.0f : static_cast<float>(lua_tonumber(L, -1));
+				lua_pop(L, 1);
+				float Range = MaxValue - MinValue;
+				float Normalized = (Range > 0.0f) ? (Value - MinValue) / Range : 0.0f;
+				Slider->SetValue(FMath::Clamp(Normalized, 0.0f, 1.0f));
+			}
 		}
 	}
 	else
@@ -2903,12 +2928,137 @@ static int LF_SetMultiLine(lua_State* L) { return 0; }
 static int LF_SetFontObject(lua_State* L) { return 0; }
 
 // ScrollFrame methods
-static int LF_SetScrollChild(lua_State* L) { return 0; }
-static int LF_GetScrollChild(lua_State* L) { lua_pushnil(L); return 1; }
-static int LF_SetVerticalScroll(lua_State* L) { return 0; }
-static int LF_GetVerticalScroll(lua_State* L) { lua_pushnumber(L, 0); return 1; }
-static int LF_SetHorizontalScroll(lua_State* L) { return 0; }
-static int LF_GetHorizontalScroll(lua_State* L) { lua_pushnumber(L, 0); return 1; }
+static int LF_SetScrollChild(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+	if (ScrollFrameHandle < 0) return 0;
+
+	// Check if second parameter is a frame table or nil
+	if (lua_isnil(L, 2))
+	{
+		// Clear scroll child - for now, just log
+		UE_LOG(LogTemp, Log, TEXT("SetScrollChild: clearing child for frame %lld"), ScrollFrameHandle);
+		return 0;
+	}
+
+	int64 ChildHandle = GetOptionalFrameHandle(L, 2);
+	if (ChildHandle < 0) return 0;
+
+	Ctx->FrameManager->SetScrollChild(ScrollFrameHandle, ChildHandle);
+	UE_LOG(LogTemp, Log, TEXT("ScrollFrame API: SetScrollChild called for frames %lld -> %lld"),
+		ScrollFrameHandle, ChildHandle);
+	return 0;
+}
+
+static int LF_GetScrollChild(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager || !Ctx->EventSystem)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+
+	int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+	if (ScrollFrameHandle < 0)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+
+	int64 ChildHandle = Ctx->FrameManager->GetScrollChild(ScrollFrameHandle);
+	if (ChildHandle < 0)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+
+	// Push the child's Lua frame table (stored as global by name)
+	const FString ChildName = Ctx->FrameManager->GetFrameName(ChildHandle);
+	if (!ChildName.IsEmpty())
+	{
+		FTCHARToUTF8 UTF8Name(*ChildName);
+		lua_getglobal(L, UTF8Name.Get());
+	}
+	else
+	{
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+static int LF_SetVerticalScroll(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+	if (ScrollFrameHandle < 0) return 0;
+
+	float Offset = static_cast<float>(luaL_checknumber(L, 2));
+	Ctx->FrameManager->SetVerticalScroll(ScrollFrameHandle, Offset);
+	UE_LOG(LogTemp, Log, TEXT("ScrollFrame API: SetVerticalScroll called for frame %lld offset %.2f"),
+		ScrollFrameHandle, Offset);
+	return 0;
+}
+
+static int LF_GetVerticalScroll(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager)
+	{
+		lua_pushnumber(L, 0);
+		return 1;
+	}
+
+	int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+	if (ScrollFrameHandle < 0)
+	{
+		lua_pushnumber(L, 0);
+		return 1;
+	}
+
+	float Offset = Ctx->FrameManager->GetVerticalScroll(ScrollFrameHandle);
+	lua_pushnumber(L, Offset);
+	return 1;
+}
+
+static int LF_SetHorizontalScroll(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+	if (ScrollFrameHandle < 0) return 0;
+
+	float Offset = static_cast<float>(luaL_checknumber(L, 2));
+	Ctx->FrameManager->SetHorizontalScroll(ScrollFrameHandle, Offset);
+	return 0;
+}
+
+static int LF_GetHorizontalScroll(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager)
+	{
+		lua_pushnumber(L, 0);
+		return 1;
+	}
+
+	int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+	if (ScrollFrameHandle < 0)
+	{
+		lua_pushnumber(L, 0);
+		return 1;
+	}
+
+	float Offset = Ctx->FrameManager->GetHorizontalScroll(ScrollFrameHandle);
+	lua_pushnumber(L, Offset);
+	return 1;
+}
 
 // Cooldown methods
 static int LF_SetCooldown(lua_State* L)
@@ -2923,13 +3073,13 @@ static int LF_SetCooldown(lua_State* L)
 	lua_pushnumber(L, Duration);
 	lua_setfield(L, 1, "__cooldownDuration");
 
-	// Calculate remaining time
-	// TODO: Get current game time instead of using system time
-	float CurrentTime = FPlatformTime::Seconds();
-	float Remaining = (StartTime + Duration) - CurrentTime;
-
-	lua_pushnumber(L, FMath::Max(0.0f, Remaining));
-	lua_setfield(L, 1, "__cooldownRemaining");
+	// Update visual cooldown overlay
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		int64 Handle = GetFrameHandle(L);
+		Ctx->FrameManager->SetCooldown(Handle, static_cast<double>(StartTime), Duration);
+	}
 
 	return 0;
 }
@@ -3077,6 +3227,216 @@ static int LF_AddMessage(lua_State* L)
 }
 
 // (FontString API functions defined above near LF_CreateFontString)
+
+// ── Tooltip Functions ─────────────────────────────────────────────────────────────
+
+// tooltip:SetOwner(owner, anchor)
+static int LF_TooltipSetOwner(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	int64 OwnerHandle = GetOptionalFrameHandle(L, 2);
+	const char* AnchorType = luaL_optstring(L, 3, "ANCHOR_CURSOR");
+
+	Ctx->FrameManager->TooltipSetOwner(TooltipHandle, OwnerHandle, UTF8_TO_TCHAR(AnchorType));
+	return 0;
+}
+
+// tooltip:AddLine(text, r, g, b, wrap)
+static int LF_TooltipAddLine(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const char* Text = luaL_checkstring(L, 2);
+	float R = static_cast<float>(luaL_optnumber(L, 3, 1.0));
+	float G = static_cast<float>(luaL_optnumber(L, 4, 1.0));
+	float B = static_cast<float>(luaL_optnumber(L, 5, 1.0));
+	bool bWrap = lua_toboolean(L, 6);
+
+	Ctx->FrameManager->TooltipAddLine(TooltipHandle, UTF8_TO_TCHAR(Text), R, G, B, bWrap);
+	return 0;
+}
+
+// tooltip:AddDoubleLine(leftText, rightText, lr, lg, lb, rr, rg, rb)
+static int LF_TooltipAddDoubleLine(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const char* LeftText = luaL_checkstring(L, 2);
+	const char* RightText = luaL_checkstring(L, 3);
+	float LR = static_cast<float>(luaL_optnumber(L, 4, 1.0));
+	float LG = static_cast<float>(luaL_optnumber(L, 5, 1.0));
+	float LB = static_cast<float>(luaL_optnumber(L, 6, 1.0));
+	float RR = static_cast<float>(luaL_optnumber(L, 7, 1.0));
+	float RG = static_cast<float>(luaL_optnumber(L, 8, 1.0));
+	float RB = static_cast<float>(luaL_optnumber(L, 9, 1.0));
+
+	Ctx->FrameManager->TooltipAddDoubleLine(TooltipHandle, UTF8_TO_TCHAR(LeftText), UTF8_TO_TCHAR(RightText),
+											LR, LG, LB, RR, RG, RB);
+	return 0;
+}
+
+// tooltip:ClearLines()
+static int LF_TooltipClearLines(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	Ctx->FrameManager->TooltipClearLines(TooltipHandle);
+	return 0;
+}
+
+// tooltip:NumLines()
+static int LF_TooltipNumLines(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager)
+	{
+		lua_pushnumber(L, 0);
+		return 1;
+	}
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	int32 LineCount = Ctx->FrameManager->TooltipNumLines(TooltipHandle);
+	lua_pushnumber(L, LineCount);
+	return 1;
+}
+
+// tooltip:SetText(text)
+static int LF_TooltipSetText(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const char* Text = luaL_checkstring(L, 2);
+	Ctx->FrameManager->TooltipSetText(TooltipHandle, UTF8_TO_TCHAR(Text));
+	return 0;
+}
+
+// tooltip:AppendText(text)
+static int LF_TooltipAppendText(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const char* Text = luaL_checkstring(L, 2);
+	Ctx->FrameManager->TooltipAppendText(TooltipHandle, UTF8_TO_TCHAR(Text));
+	return 0;
+}
+
+// tooltip:GetItem() -- returns item link for currently displayed item
+static int LF_TooltipGetItem(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const FTooltipState* State = Ctx->FrameManager->GetTooltipState(TooltipHandle);
+	if (State && !State->ItemLink.IsEmpty())
+	{
+		lua_pushstring(L, TCHAR_TO_UTF8(*State->ItemLink));
+	}
+	else
+	{
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+// tooltip:GetSpell() -- returns spell ID for currently displayed spell
+static int LF_TooltipGetSpell(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const FTooltipState* State = Ctx->FrameManager->GetTooltipState(TooltipHandle);
+	if (State && State->SpellId > 0)
+	{
+		lua_pushnumber(L, State->SpellId);
+	}
+	else
+	{
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+// tooltip:GetUnit() -- returns unit token for currently displayed unit
+static int LF_TooltipGetUnit(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const FTooltipState* State = Ctx->FrameManager->GetTooltipState(TooltipHandle);
+	if (State && !State->UnitToken.IsEmpty())
+	{
+		lua_pushstring(L, TCHAR_TO_UTF8(*State->UnitToken));
+	}
+	else
+	{
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+// tooltip:SetItem(itemLink) -- sets item context for tooltip
+static int LF_TooltipSetItem(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const char* ItemLink = luaL_checkstring(L, 2);
+	Ctx->FrameManager->TooltipSetItem(TooltipHandle, UTF8_TO_TCHAR(ItemLink));
+	return 0;
+}
+
+// tooltip:SetSpell(spellId) -- sets spell context for tooltip
+static int LF_TooltipSetSpell(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	int32 SpellId = static_cast<int32>(luaL_checknumber(L, 2));
+	Ctx->FrameManager->TooltipSetSpell(TooltipHandle, SpellId);
+	return 0;
+}
+
+// tooltip:SetUnit(unitToken) -- sets unit context for tooltip
+static int LF_TooltipSetUnit(lua_State* L)
+{
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (!Ctx || !Ctx->FrameManager) return 0;
+
+	int64 TooltipHandle = GetFrameHandle(L, 1);
+	const char* UnitToken = luaL_checkstring(L, 2);
+	Ctx->FrameManager->TooltipSetUnit(TooltipHandle, UTF8_TO_TCHAR(UnitToken));
+	return 0;
+}
 
 // ── Metatable Setup ──────────────────────────────────────────────────────────────
 
@@ -3345,8 +3705,44 @@ static const luaL_Reg FrameMethods[] =
 	{"SetTimeVisible", [](lua_State* L) -> int { return 0; }},
 	{"SetInsertMode", [](lua_State* L) -> int { return 0; }},
 	{"Clear", [](lua_State* L) -> int { return 0; }},
-	{"GetVerticalScrollRange", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
-	{"GetHorizontalScrollRange", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"GetVerticalScrollRange", [](lua_State* L) -> int {
+		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+		if (!Ctx || !Ctx->FrameManager)
+		{
+			lua_pushnumber(L, 0);
+			return 1;
+		}
+
+		int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+		if (ScrollFrameHandle < 0)
+		{
+			lua_pushnumber(L, 0);
+			return 1;
+		}
+
+		float Range = Ctx->FrameManager->GetVerticalScrollRange(ScrollFrameHandle);
+		lua_pushnumber(L, Range);
+		return 1;
+	}},
+	{"GetHorizontalScrollRange", [](lua_State* L) -> int {
+		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+		if (!Ctx || !Ctx->FrameManager)
+		{
+			lua_pushnumber(L, 0);
+			return 1;
+		}
+
+		int64 ScrollFrameHandle = GetFrameHandle(L, 1);
+		if (ScrollFrameHandle < 0)
+		{
+			lua_pushnumber(L, 0);
+			return 1;
+		}
+
+		float Range = Ctx->FrameManager->GetHorizontalScrollRange(ScrollFrameHandle);
+		lua_pushnumber(L, Range);
+		return 1;
+	}},
 	{"SetScrollRange", [](lua_State* L) -> int { return 0; }},
 	{"GetNumMessages", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
 	{"GetNumLinesDisplayed", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
@@ -3364,7 +3760,23 @@ static const luaL_Reg FrameMethods[] =
 	{"SetModelScale", [](lua_State* L) -> int { return 0; }},
 	{"SetPosition", [](lua_State* L) -> int { return 0; }},
 	{"SetFacing", [](lua_State* L) -> int { return 0; }},
-	{"SetUnit", [](lua_State* L) -> int { return 0; }},
+	{"SetUnit", [](lua_State* L) -> int {
+		// Check if this is a tooltip frame
+		FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+		if (Ctx && Ctx->FrameManager)
+		{
+			int64 Handle = GetFrameHandle(L, 1);
+			const FWowFrameDef* FrameDef = Ctx->FrameManager->GetFrameDef(Handle);
+			if (FrameDef && FrameDef->Type == EWowFrameType::GameTooltip)
+			{
+				const char* UnitToken = luaL_checkstring(L, 2);
+				Ctx->FrameManager->TooltipSetUnit(Handle, UTF8_TO_TCHAR(UnitToken));
+				return 0;
+			}
+		}
+		// For non-tooltip frames (Model frames, etc.), do nothing for now
+		return 0;
+	}},
 	{"SetCreature", [](lua_State* L) -> int { return 0; }},
 	{"SetCamera", [](lua_State* L) -> int { return 0; }},
 	{"RefreshUnit", [](lua_State* L) -> int { return 0; }},
@@ -3383,22 +3795,26 @@ static const luaL_Reg FrameMethods[] =
 	{"SetStaticArrowTexture", [](lua_State* L) -> int { return 0; }},
 
 	// Tooltip methods
-	{"SetOwner", [](lua_State* L) -> int { return 0; }},
+	{"SetOwner", LF_TooltipSetOwner},
 	{"SetUnitBuff", [](lua_State* L) -> int { return 0; }},
 	{"SetUnitDebuff", [](lua_State* L) -> int { return 0; }},
 	{"SetUnitAura", [](lua_State* L) -> int { return 0; }},
-	{"SetInventoryItem", [](lua_State* L) -> int { return 0; }},
-	{"SetBagItem", [](lua_State* L) -> int { return 0; }},
+	{"SetInventoryItem", LF_TooltipSetItem}, // For now, use same as SetItem
+	{"SetBagItem", LF_TooltipSetItem}, // For now, use same as SetItem
 	{"SetAction", [](lua_State* L) -> int { return 0; }},
-	{"SetSpell", [](lua_State* L) -> int { return 0; }},
+	{"SetSpell", LF_TooltipSetSpell},
 	{"SetSpellByID", [](lua_State* L) -> int { return 0; }},
 	{"SetHyperlink", [](lua_State* L) -> int { return 0; }},
-	{"AddLine", [](lua_State* L) -> int { return 0; }},
-	{"AddDoubleLine", [](lua_State* L) -> int { return 0; }},
-	{"ClearLines", [](lua_State* L) -> int { return 0; }},
-	{"NumLines", [](lua_State* L) -> int { lua_pushnumber(L, 0); return 1; }},
+	{"AddLine", LF_TooltipAddLine},
+	{"AddDoubleLine", LF_TooltipAddDoubleLine},
+	{"ClearLines", LF_TooltipClearLines},
+	{"NumLines", LF_TooltipNumLines},
 	{"SetMinimumWidth", [](lua_State* L) -> int { return 0; }},
-	{"AppendText", [](lua_State* L) -> int { return 0; }},
+	{"AppendText", LF_TooltipAppendText},
+	{"GetItem", LF_TooltipGetItem},
+	{"GetSpell", LF_TooltipGetSpell},
+	{"GetUnit", LF_TooltipGetUnit},
+	{"SetItem", LF_TooltipSetItem},
 	{"GetAnchorType", [](lua_State* L) -> int { lua_pushstring(L, "ANCHOR_NONE"); return 1; }},
 	{"FadeOut", [](lua_State* L) -> int { return 0; }},
 

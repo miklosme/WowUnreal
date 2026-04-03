@@ -17,12 +17,61 @@ class FMpqManager;
 class FWowAssetCache;
 class UTexture2D;
 
+DECLARE_DELEGATE_OneParam(FOnSecureActionDispatch, int32 /*ActionSlot (0-based)*/);
+DECLARE_DELEGATE_OneParam(FOnSecureSpellDispatch, int32 /*SpellId*/);
+
+/** Tooltip state structures */
+struct FTooltipLine
+{
+	FString Text;
+	FLinearColor Color = FLinearColor::White;
+	bool bWrapText = false;
+};
+
+struct FTooltipDoubleLine
+{
+	FString LeftText;
+	FString RightText;
+	FLinearColor LeftColor = FLinearColor::White;
+	FLinearColor RightColor = FLinearColor::White;
+};
+
+struct FTooltipState
+{
+	TArray<FTooltipLine> Lines;
+	TArray<FTooltipDoubleLine> DoubleLines;
+	int64 OwnerHandle = -1;
+	FString AnchorType = TEXT("ANCHOR_NONE");
+	FString ItemLink;
+	int32 SpellId = 0;
+	FString UnitToken;
+	float MinimumWidth = 0.f;
+
+	void Clear()
+	{
+		Lines.Empty();
+		DoubleLines.Empty();
+		OwnerHandle = -1;
+		AnchorType = TEXT("ANCHOR_NONE");
+		ItemLink.Empty();
+		SpellId = 0;
+		UnitToken.Empty();
+		MinimumWidth = 0.f;
+	}
+
+	int32 GetTotalLines() const { return Lines.Num() + DoubleLines.Num(); }
+};
+
 /**
  * Manages WoW UI frames, mapping them to UMG widgets.
  */
 class WOWUI_API FWowFrameManager
 {
 public:
+	/** Fired when a SecureActionButton with type="action" is clicked. Slot is 0-based. */
+	FOnSecureActionDispatch OnSecureActionDispatch;
+	/** Fired when a SecureActionButton with type="spell" is clicked. */
+	FOnSecureSpellDispatch OnSecureSpellDispatch;
 	FWowFrameManager();
 
 	/** Initialize with a root canvas panel to add widgets to */
@@ -161,6 +210,20 @@ public:
 	 *  Returns true if an EditBox was focused and received the event. */
 	bool DispatchEditBoxEscapePressed();
 
+	/** ScrollFrame API */
+	void SetScrollChild(int64 ScrollFrameHandle, int64 ChildHandle);
+	int64 GetScrollChild(int64 ScrollFrameHandle) const;
+	void SetVerticalScroll(int64 ScrollFrameHandle, float Offset);
+	float GetVerticalScroll(int64 ScrollFrameHandle) const;
+	void SetHorizontalScroll(int64 ScrollFrameHandle, float Offset);
+	float GetHorizontalScroll(int64 ScrollFrameHandle) const;
+	float GetVerticalScrollRange(int64 ScrollFrameHandle) const;
+	float GetHorizontalScrollRange(int64 ScrollFrameHandle) const;
+
+	/** Cooldown API */
+	void SetCooldown(int64 Handle, double StartTime, float Duration);
+	void TickCooldowns();
+
 	/** Set the UI scale factor (typically calculated from viewport size vs WoW's base resolution) */
 	void SetUIScale(float InScale) { UIScale = InScale; }
 
@@ -186,9 +249,26 @@ private:
 	/** Last-known value for each Slider, used to detect changes for OnValueChanged dispatch */
 	TMap<int64, float> SliderLastValue;
 
+	/** ScrollFrame state tracking */
+	TMap<int64, float> ScrollVerticalOffsets;
+	TMap<int64, float> ScrollHorizontalOffsets;
+	TMap<int64, int64> ScrollChildHandles;
+
+	/** Cooldown state per frame */
+	struct FCooldownState
+	{
+		double StartTime = 0.0;
+		float Duration = 0.0f;
+	};
+	TMap<int64, FCooldownState> CooldownStates;
+	TMap<int64, TWeakObjectPtr<UImage>> CooldownOverlayWidgets;
+
 	TMap<int64, FFrameEntry> Frames;
 	TMap<FString, int64> NameToHandle;
 	TMap<FString, FWowFrameDef> Templates;
+
+	/** Tooltip state storage */
+	TMap<int64, FTooltipState> TooltipStates;
 
 	FWowEventSystem* EventSystem = nullptr;
 	FWowFontManager* FontManager = nullptr;
@@ -236,6 +316,22 @@ public:
 		const TWeakObjectPtr<UProgressBar>* Found = StatusBarWidgets.Find(Handle);
 		return (Found && Found->IsValid()) ? Found->Get() : nullptr;
 	}
+
+	/** Tooltip methods for Lua API */
+	void TooltipSetOwner(int64 TooltipHandle, int64 OwnerHandle, const FString& AnchorType);
+	void TooltipAddLine(int64 TooltipHandle, const FString& Text, float R, float G, float B, bool bWrapText);
+	void TooltipAddDoubleLine(int64 TooltipHandle, const FString& LeftText, const FString& RightText,
+							  float LR, float LG, float LB, float RR, float RG, float RB);
+	void TooltipClearLines(int64 TooltipHandle);
+	int32 TooltipNumLines(int64 TooltipHandle) const;
+	void TooltipSetText(int64 TooltipHandle, const FString& Text);
+	void TooltipAppendText(int64 TooltipHandle, const FString& Text);
+	void TooltipSetItem(int64 TooltipHandle, const FString& ItemLink);
+	void TooltipSetSpell(int64 TooltipHandle, int32 SpellId);
+	void TooltipSetUnit(int64 TooltipHandle, const FString& UnitToken);
+	void TooltipUpdateDisplay(int64 TooltipHandle);
+	FTooltipState* GetTooltipState(int64 TooltipHandle);
+	const FTooltipState* GetTooltipState(int64 TooltipHandle) const;
 
 private:
 
