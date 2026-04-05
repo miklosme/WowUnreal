@@ -169,6 +169,10 @@ private:
     float AuraUpdateTimer = 0.0f;
     float AuraUpdateInterval = 0.5f;
 
+    // Delayed health/mana event firing (to ensure bars update after login)
+    FTimerHandle DelayedHealthUpdateTimer;
+    bool bDelayedHealthUpdateFired = false;
+
     // Server position sync
     void OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation);
     void OnEntityUpdated(const FWowEntity& Entity);
@@ -308,6 +312,7 @@ private:
     bool bIsAutoAttacking = false;
     uint64 AutoAttackTargetGuid = 0;
     bool bWasInCombat = false;
+    bool bPlayerHealthInitialized = false;
 
     // Spell casting
     bool bIsCasting = false;
@@ -320,6 +325,7 @@ private:
     void OnSpellGo(uint64 CasterGuid, uint32 SpellId, uint32 CastFlags);
     void OnSpellFailure(uint64 CasterGuid, uint32 SpellId, uint8 FailureReason);
     void OnAttackerStateUpdate(uint64 AttackerGuid, uint64 VictimGuid, uint32 HitInfo, uint32 Damage);
+    void OnServerAttackStart(uint64 AttackerGuid, uint64 VictimGuid);
     void OnServerAttackStop(uint64 AttackerGuid, uint64 VictimGuid);
     void OnChatMessage(uint8 Type, uint32 Language, uint64 SenderGuid, const FString& SenderName, const FString& Message, const FString& Channel);
     void OnEmote(uint64 EntityGuid, uint32 EmoteId);
@@ -332,6 +338,9 @@ private:
 
     /** Map emote ID to animation ID */
     EWowAnimId GetAnimationForEmoteId(uint32 EmoteId);
+
+    /** Map stand state to animation ID */
+    EWowAnimId GetAnimationIdForStandState(uint8 StandState);
 
     // Party/Group event handlers
     void OnGroupUpdated();

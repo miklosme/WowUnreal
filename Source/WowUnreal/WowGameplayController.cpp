@@ -171,10 +171,20 @@ void AWowGameplayController::BeginPlay()
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		UIManager = GI->GetSubsystem<UWowUIManager>();
-		if (UIManager)
+		if (UIManager && UIManager->GetFrameManager())
 		{
-			// Don't clear the root canvas — LoginController sets it up for FrameXML rendering.
-			// The Lua UI frames need the canvas to exist for widget creation.
+			// Bind native secure action dispatch — emulates WoW's C++ action button handling
+			UIManager->GetFrameManager()->OnSecureActionDispatch.BindLambda([this](int32 ActionSlot)
+			{
+				CastSpellFromSlot(ActionSlot);
+			});
+			UIManager->GetFrameManager()->OnSecureSpellDispatch.BindLambda([this](int32 SpellId)
+			{
+				if (ConnectionManager)
+				{
+					ConnectionManager->SendCastSpell(SpellId, static_cast<int64>(TargetGuid));
+				}
+			});
 		}
 	}
 
@@ -301,6 +311,8 @@ void AWowGameplayController::BindEntityEvents()
 		this, &AWowGameplayController::OnSpellFailure);
 	ConnectionManager->PacketHandler.OnAttackerStateUpdate.AddUObject(
 		this, &AWowGameplayController::OnAttackerStateUpdate);
+	ConnectionManager->PacketHandler.OnAttackStart.AddUObject(
+		this, &AWowGameplayController::OnServerAttackStart);
 	ConnectionManager->PacketHandler.OnAttackStop.AddUObject(
 		this, &AWowGameplayController::OnServerAttackStop);
 	ConnectionManager->PacketHandler.OnChatMessage.AddUObject(
@@ -509,6 +521,39 @@ void AWowGameplayController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, 
 		}
 		FireUIEvent(TEXT("ACTIONBAR_UPDATE_STATE"));
 	}
+
+	// Re-fire unit frame events — entity health/mana data arrives after UI loads
+	FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
+	FireUIEvent(TEXT("PLAYER_FLAGS_CHANGED"));
+	FireUIEvent(TEXT("UPDATE_SHAPESHIFT_FORM"));
+
+	// Schedule delayed health/mana events to ensure bars get updated with real data
+	// after the UI has had time to initialize and StatusBar widgets are created
+	if (!bDelayedHealthUpdateFired)
+	{
+		GetWorldTimerManager().SetTimer(DelayedHealthUpdateTimer, [this]()
+		{
+			UE_LOG(LogWowGameplay, Log, TEXT("Firing delayed health/mana events for status bar updates"));
+			FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
+			if (TargetGuid != 0)
+			{
+				FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("target")});
+				FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("target")});
+				FireUIEvent(TEXT("UNIT_MANA"), {TEXT("target")});
+				FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("target")});
+				FireUIEvent(TEXT("UNIT_POWER"), {TEXT("target")});
+			}
+			bDelayedHealthUpdateFired = true;
+		}, 3.0f, false); // Fire once after 3 seconds
+	}
 }
 
 void AWowGameplayController::ApplyDeferredSpawn()
@@ -534,6 +579,15 @@ void AWowGameplayController::ApplyDeferredSpawn()
 		}
 		FireUIEvent(TEXT("ACTIONBAR_UPDATE_STATE"));
 	}
+
+	// Re-fire unit frame events — entity health/mana data arrives after UI loads
+	FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
+	FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
+	FireUIEvent(TEXT("PLAYER_FLAGS_CHANGED"));
+	FireUIEvent(TEXT("UPDATE_SHAPESHIFT_FORM"));
 }
 
 void AWowGameplayController::ApplyDeferredSpawn_Internal(const FVector& SpawnPos, float Orientation)
@@ -596,6 +650,26 @@ void AWowGameplayController::OnEntityUpdated(const FWowEntity& Entity)
 	// Fire UI events for health/mana changes
 	if (Entity.Guid == LocalGuid)
 	{
+		// Keep re-firing all unit events on every entity update until MaxHealth is valid.
+		// Entity fields arrive across multiple SMSG_UPDATE_OBJECT packets; health/mana
+		// fields may not be present in the first update.
+		if (!bPlayerHealthInitialized)
+		{
+			FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
+			FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
+			if (Entity.GetMaxHealth() > 0)
+			{
+				bPlayerHealthInitialized = true;
+				FireUIEvent(TEXT("UNIT_LEVEL"), {TEXT("player")});
+				FireUIEvent(TEXT("PLAYER_FLAGS_CHANGED"));
+				UE_LOG(LogWowGameplay, Log, TEXT("Player health initialized (MaxHP=%d HP=%d)"),
+					Entity.GetMaxHealth(), Entity.GetHealth());
+			}
+		}
+
 		if (HealthChanged)
 		{
 			FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
@@ -814,6 +888,9 @@ void AWowGameplayController::Tick(float DeltaTime)
 
 		// Poll EditBox/Slider for value changes and dispatch Lua events
 		UIManager->GetFrameManager()->TickWidgetEvents();
+
+		// Update cooldown overlay animations
+		UIManager->GetFrameManager()->TickCooldowns();
 	}
 
 	// Update tooltip manager
@@ -1810,6 +1887,20 @@ void AWowGameplayController::StopAutoAttack()
 	UE_LOG(LogWowGameplay, Log, TEXT("Stopped auto-attack"));
 }
 
+void AWowGameplayController::OnServerAttackStart(uint64 AttackerGuid, uint64 VictimGuid)
+{
+	// Server confirms attack started — sync local state
+	if (ConnectionManager && AttackerGuid == ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid)
+	{
+		if (!bIsAutoAttacking)
+		{
+			bIsAutoAttacking = true;
+			AutoAttackTargetGuid = VictimGuid;
+			UE_LOG(LogWowGameplay, Log, TEXT("Server confirmed auto-attack on %llu"), VictimGuid);
+		}
+	}
+}
+
 void AWowGameplayController::OnServerAttackStop(uint64 AttackerGuid, uint64 VictimGuid)
 {
 	// Server tells us to stop attacking (target died, out of range, etc.)
@@ -2303,12 +2394,18 @@ void AWowGameplayController::UpdateEntityAnimations()
 	if (!ConnectionManager) return;
 
 	// Update animations for all spawned entity actors based on their movement state
+	// Note: Local player animation is handled by UpdatePlayerAnimations()
+	const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+
 	for (auto& Pair : SpawnedEntityActors)
 	{
 		uint64 Guid = Pair.Key;
 		AActor* Actor = Pair.Value;
 
 		if (!Actor || !IsValid(Actor)) continue;
+
+		// Skip local player — handled by UpdatePlayerAnimations()
+		if (Guid == LocalGuid) continue;
 
 		// Skip dead entities (corpses) — keep their death animation
 		if (DeadEntityGuids.Contains(Guid)) continue;
@@ -2364,6 +2461,20 @@ void AWowGameplayController::UpdateEntityAnimations()
 		if (CurrentAnimState == EWowAnimState::Casting || CurrentAnimState == EWowAnimState::Channeling)
 		{
 			continue;
+		}
+
+		// Check for stand state-based animations (sit, kneel, sleep) that override movement
+		if (!bIsOnSpline && AnimMovement.MoveFlags == 0) // Only for non-moving entities
+		{
+			EWowAnimId StandStateAnim = GetAnimationIdForStandState(StandState);
+			if (StandStateAnim != EWowAnimId::Stand) // Non-default stand state
+			{
+				// Play the stand state animation (sit, kneel, sleep, etc.)
+				if (AnimController->PlayAnimationById(StandStateAnim, true))
+				{
+					continue; // Skip regular movement-based animation update
+				}
+			}
 		}
 
 		bool bEntityInCombat = false;
@@ -3760,11 +3871,15 @@ void AWowGameplayController::OnAttackerStateUpdate(uint64 AttackerGuid, uint64 V
 		}
 	}
 
-	// Check if our auto-attack target died (simplified check)
+	// Check if our auto-attack target died — stop auto-attack
 	if (bIsAutoAttacking && VictimGuid == AutoAttackTargetGuid)
 	{
-		// In a real implementation, we'd check if target health reached 0
-		// For now, we'll keep auto-attacking until manually stopped
+		const FWowEntity* VictimEntity = ConnectionManager->PacketHandler.EntityManager.Find(VictimGuid);
+		if (VictimEntity && VictimEntity->GetMaxHealth() > 0 && VictimEntity->GetHealth() <= 0)
+		{
+			StopAutoAttack();
+			UE_LOG(LogWowGameplay, Log, TEXT("Auto-attack target %llu died, stopping attack"), VictimGuid);
+		}
 	}
 
 	// Fire combat log event
@@ -3920,6 +4035,31 @@ EWowAnimId AWowGameplayController::GetAnimationForEmoteId(uint32 EmoteId)
 				return static_cast<EWowAnimId>(EmoteId);
 			}
 			return EWowAnimId::Stand; // Fallback
+	}
+}
+
+EWowAnimId AWowGameplayController::GetAnimationIdForStandState(uint8 StandState)
+{
+	// Map WoW stand states to animation IDs
+	// Reference: WowStandState enum in WowEntity.h
+	switch (StandState)
+	{
+		case WowStandState::STAND:
+			return EWowAnimId::Stand;
+		case WowStandState::SIT:
+		case WowStandState::SIT_CHAIR:
+		case WowStandState::SIT_LOW:
+		case WowStandState::SIT_MED:
+		case WowStandState::SIT_HIGH:
+			return EWowAnimId::SitGround; // Use SitGround for all sit variants
+		case WowStandState::SLEEP:
+			return EWowAnimId::Sleep;
+		case WowStandState::KNEEL:
+			return EWowAnimId::Kneel;
+		case WowStandState::DEAD:
+			return EWowAnimId::Dead;
+		default:
+			return EWowAnimId::Stand; // Fallback to stand
 	}
 }
 

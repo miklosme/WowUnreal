@@ -292,14 +292,18 @@ void FWowFrameManager::SetFrameSize(int64 Handle, float W, float H)
 	FFrameEntry* Entry = Frames.Find(Handle);
 	if (!Entry) return;
 
+	if (Entry->Def.Name.Contains(TEXT("MainMenu")))
+	{
+		UE_LOG(LogWowFrame, Warning, TEXT("SetFrameSize %s: %.0fx%.0f -> %.0fx%.0f (anchors=%d)"),
+			*Entry->Def.Name, Entry->Def.Width, Entry->Def.Height, W, H, Entry->Def.Anchors.Num());
+	}
+
 	Entry->Def.Width = W;
 	Entry->Def.Height = H;
 
-	// Clear cached frame rect since size changed
-	if (!Entry->Def.Name.IsEmpty())
-	{
-		FrameRects.Remove(Entry->Def.Name);
-	}
+	// Clear cached frame rect for this frame and ALL descendants.
+	// When a parent moves/resizes, all child absolute positions become stale.
+	InvalidateFrameRectsRecursive(Handle);
 
 	if (Entry->Widget.IsValid())
 	{
@@ -316,11 +320,8 @@ void FWowFrameManager::SetFrameAnchors(int64 Handle, const TArray<FWowAnchor>& N
 	Entry->Def.Anchors = NewAnchors;
 	Entry->Def.bSetAllPoints = false;
 
-	// Clear cached frame rect since position will change
-	if (!Entry->Def.Name.IsEmpty())
-	{
-		FrameRects.Remove(Entry->Def.Name);
-	}
+	// Clear cached frame rect for this frame and ALL descendants.
+	InvalidateFrameRectsRecursive(Handle);
 
 	if (Entry->Widget.IsValid())
 	{
@@ -656,6 +657,27 @@ FVector2D FWowFrameManager::GetAnchorPointOffset(EWowAnchorPoint Point, float Wi
 	}
 }
 
+/** Recursively invalidate cached FrameRects for a frame and all its children */
+void FWowFrameManager::InvalidateFrameRectsRecursive(int64 Handle)
+{
+	const FFrameEntry* Entry = Frames.Find(Handle);
+	if (!Entry) return;
+
+	if (!Entry->Def.Name.IsEmpty())
+	{
+		FrameRects.Remove(Entry->Def.Name);
+	}
+
+	// Invalidate all children
+	for (const auto& Pair : Frames)
+	{
+		if (Pair.Value.ParentHandle == Handle)
+		{
+			InvalidateFrameRectsRecursive(Pair.Key);
+		}
+	}
+}
+
 /** Get the frame rect for a named frame, or UIParent default */
 FWowFrameManager::FFrameRect FWowFrameManager::GetFrameRect(const FString& FrameName)
 {
@@ -777,6 +799,14 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 			Slot->SetSize(FVector2D(FrameWidth * UIScale, FrameHeight * UIScale));
 			FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, FrameWidth, FrameHeight));
 		}
+		else if (CanvasOwnerRect.W > 0.f && CanvasOwnerRect.H > 0.f)
+		{
+			// No explicit size but parent has size - use parent size to avoid 100x30 default
+			Slot->SetPosition(FVector2D(0.0f, 0.0f));
+			Slot->SetSize(FVector2D(CanvasOwnerRect.W * UIScale, CanvasOwnerRect.H * UIScale));
+			FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, CanvasOwnerRect.W, CanvasOwnerRect.H));
+			UE_LOG(LogWowFrame, Log, TEXT("  %s: No explicit size, using parent size %.1fx%.1f"), *Def.Name, CanvasOwnerRect.W, CanvasOwnerRect.H);
+		}
 		else
 		{
 			Slot->SetAutoSize(true);
@@ -797,13 +827,21 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 
 	FVector2D FrameAnchorOffset = GetAnchorPointOffset(Anchor.Point, FrameWidth, FrameHeight);
 
-	// WoW offset Y is inverted: positive Y = UP in WoW, but DOWN in canvas
+	// Calculate frame position in absolute WoW coordinates
+	// WoW convention: positive OffsetY = UP (toward smaller Y values)
 	float AbsX = ParentAnchorPos.X + Anchor.OffsetX - FrameAnchorOffset.X;
 	float AbsY = ParentAnchorPos.Y - Anchor.OffsetY - FrameAnchorOffset.Y;
 
 	// Convert absolute position to relative (within parent canvas)
 	float RelX = AbsX - CanvasOffX;
 	float RelY = AbsY - CanvasOffY;
+
+	// Sanity check: ensure calculated position is reasonable for the viewport
+	if (RelY > 1500.0f || RelY < -200.0f)
+	{
+		UE_LOG(LogWowFrame, Warning, TEXT("Frame %s calculated unusual Y position %.1f (AbsY=%.1f, CanvasOffY=%.1f, ParentAnchor=%.1f, FrameAnchor=%.1f)"),
+			*Def.Name, RelY, AbsY, CanvasOffY, ParentAnchorPos.Y, FrameAnchorOffset.Y);
+	}
 
 	// Debug log for key frames
 	if (Def.Name.Contains(TEXT("Party")) || Def.Name.Contains(TEXT("Target")) || Def.Name.Contains(TEXT("Pet"))
@@ -833,7 +871,8 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 
 		Slot->SetAnchors(FAnchors(0.0f, 0.0f));
 		Slot->SetAlignment(FVector2D(0.0f, 0.0f));
-		Slot->SetPosition(FVector2D(RelX * UIScale, RelY * UIScale));
+		FVector2D FinalPosition(RelX * UIScale, RelY * UIScale);
+		Slot->SetPosition(FinalPosition);
 		Slot->SetSize(FVector2D(StretchWidth * UIScale, StretchHeight * UIScale));
 
 		// Store ABSOLUTE rect for other frames to anchor to
@@ -844,19 +883,29 @@ void FWowFrameManager::ApplyAnchors(UWidget* Widget, const FWowFrameDef& Def)
 		// Single anchor positioning
 		Slot->SetAnchors(FAnchors(0.0f, 0.0f));
 		Slot->SetAlignment(FVector2D(0.0f, 0.0f));
-		Slot->SetPosition(FVector2D(RelX * UIScale, RelY * UIScale));
+		FVector2D FinalPosition(RelX * UIScale, RelY * UIScale);
+		Slot->SetPosition(FinalPosition);
 
 		if (FrameWidth > 0.f && FrameHeight > 0.f)
 		{
 			Slot->SetSize(FVector2D(FrameWidth * UIScale, FrameHeight * UIScale));
+			// Store ABSOLUTE rect for other frames to anchor to
+			FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, FrameWidth, FrameHeight));
+		}
+		else if (CanvasOwnerRect.W > 0.f && CanvasOwnerRect.H > 0.f)
+		{
+			// No explicit size but parent has size - use parent size to avoid 100x30 default
+			Slot->SetSize(FVector2D(CanvasOwnerRect.W * UIScale, CanvasOwnerRect.H * UIScale));
+			// Store ABSOLUTE rect for other frames to anchor to
+			FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, CanvasOwnerRect.W, CanvasOwnerRect.H));
+			UE_LOG(LogWowFrame, Log, TEXT("  %s: Single anchor, no explicit size, using parent size %.1fx%.1f"), *Def.Name, CanvasOwnerRect.W, CanvasOwnerRect.H);
 		}
 		else
 		{
 			Slot->SetAutoSize(true);
+			// Store ABSOLUTE rect for other frames to anchor to (use zero size for auto-sized frames)
+			FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, 0.f, 0.f));
 		}
-
-		// Store ABSOLUTE rect for other frames to anchor to
-		FrameRects.Add(Def.Name, FFrameRect(AbsX, AbsY, FrameWidth, FrameHeight));
 	}
 }
 
@@ -1615,8 +1664,15 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 		// Remove the default UE grey background/border
 		FSlateBrush EmptyBrush;
 		EmptyBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
+
+		// Create solid fill brush so the bar is actually visible
+		FSlateBrush FillBrush;
+		FillBrush.DrawAs = ESlateBrushDrawType::Box;
+		FillBrush.SetResourceObject(nullptr); // solid color brush
+
 		FProgressBarStyle BarStyle;
 		BarStyle.SetBackgroundImage(EmptyBrush);
+		BarStyle.SetFillImage(FillBrush); // Set the fill brush to solid
 		Bar->SetWidgetStyle(BarStyle);
 		Bar->SetFillColorAndOpacity(FLinearColor::Green); // default, Lua will override
 		Bar->SetPercent(0.0f);
@@ -2353,6 +2409,18 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
 		UE_LOG(LogWowFrame, Log, TEXT("HitTest: screen=(%.0f,%.0f) wow=(%.1f,%.1f) -> %s [%lld] z=%d"),
 			ScreenX, ScreenY, WowX, WowY,
 			HitEntry ? *HitEntry->Def.Name : TEXT("?"), BestHandle, BestZOrder);
+	}
+	else
+	{
+		// Log miss for debugging click issues
+		if (true)
+		{
+			// Check if ActionButton1 rect exists and log it
+			const FFrameRect* AB1 = FrameRects.Find(TEXT("ActionButton1"));
+			UE_LOG(LogWowFrame, Warning, TEXT("HitTest MISS: screen=(%.0f,%.0f) wow=(%.1f,%.1f) AB1rect=%s"),
+				ScreenX, ScreenY, WowX, WowY,
+				AB1 ? *FString::Printf(TEXT("(%.0f,%.0f,%.0f,%.0f)"), AB1->X, AB1->Y, AB1->W, AB1->H) : TEXT("NOT CACHED"));
+		}
 	}
 
 	return BestHandle;

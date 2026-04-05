@@ -2806,7 +2806,31 @@ static int LF_GetValue(lua_State* L)
 	return 1;
 }
 
-static int LF_SetStatusBarTexture(lua_State* L) { return 0; }
+static int LF_SetStatusBarTexture(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	// Even if no texture is specified, ensure the bar has a solid fill brush
+	FWowLuaContext* Ctx = WowLuaApi::GetContext(L);
+	if (Ctx && Ctx->FrameManager)
+	{
+		int64 Handle = GetFrameHandle(L);
+		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
+		if (ProgressBar)
+		{
+			// Ensure the progress bar has a solid fill brush
+			FProgressBarStyle BarStyle = ProgressBar->GetWidgetStyle();
+			FSlateBrush FillBrush = BarStyle.FillImage;
+			if (FillBrush.DrawAs == ESlateBrushDrawType::NoDrawType)
+			{
+				FillBrush.DrawAs = ESlateBrushDrawType::Box;
+				FillBrush.SetResourceObject(nullptr); // solid color brush
+				BarStyle.SetFillImage(FillBrush);
+				ProgressBar->SetWidgetStyle(BarStyle);
+			}
+		}
+	}
+	return 0;
+}
 static int LF_SetStatusBarColor(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
@@ -2829,6 +2853,17 @@ static int LF_SetStatusBarColor(lua_State* L)
 		UProgressBar* ProgressBar = Ctx->FrameManager->GetStatusBarWidget(Handle);
 		if (ProgressBar)
 		{
+			// Ensure the progress bar has a solid fill brush
+			FProgressBarStyle BarStyle = ProgressBar->GetWidgetStyle();
+			FSlateBrush FillBrush = BarStyle.FillImage;
+			if (FillBrush.DrawAs == ESlateBrushDrawType::NoDrawType)
+			{
+				FillBrush.DrawAs = ESlateBrushDrawType::Box;
+				FillBrush.SetResourceObject(nullptr); // solid color brush
+				BarStyle.SetFillImage(FillBrush);
+				ProgressBar->SetWidgetStyle(BarStyle);
+			}
+
 			FLinearColor Color(R, G, B, A);
 			ProgressBar->SetFillColorAndOpacity(Color);
 		}
