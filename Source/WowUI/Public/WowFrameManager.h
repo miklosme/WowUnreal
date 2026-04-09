@@ -182,6 +182,9 @@ public:
 	 *  before their parent's OnLoad script hid the parent) */
 	void SyncChildVisibility();
 
+	/** Recursively invalidate cached FrameRects for a frame and all descendants */
+	void InvalidateFrameRectsRecursive(int64 Handle);
+
 	/** Find the topmost interactive frame under a screen position (pixels).
 	 *  Returns frame handle or -1 if no interactive frame found. */
 	int64 HitTestFrames(float ScreenX, float ScreenY) const;

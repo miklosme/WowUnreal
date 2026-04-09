@@ -394,10 +394,9 @@ FM2Data FM2Parser::Parse(const TArray<uint8>& InData, const TArray<uint8>& SkinD
             AnimData.AnimationId = AnimSeq.AnimationId;
             AnimData.SubAnimationId = AnimSeq.SubAnimationId;
             AnimData.Duration = AnimSeq.Length;
-            // Looping animations: Stand, Walk, Run, Swim, etc. Non-looping: Attack, Cast, Death, Wound
+            // Use M2 flag (0x20) for looping, with fallback for essential animations
             AnimData.bIsLooping = (AnimSeq.Flags & 0x20) != 0 ||
-                AnimSeq.AnimationId == 0 || AnimSeq.AnimationId == 4 || AnimSeq.AnimationId == 5 ||
-                AnimSeq.AnimationId == 39 || AnimSeq.AnimationId == 40; // Stand, Walk, Run, SwimIdle, Swim
+                AnimSeq.AnimationId == 0 || AnimSeq.AnimationId == 4 || AnimSeq.AnimationId == 5; // Stand, Walk, Run
             AnimData.MoveSpeed = AnimSeq.MoveSpeed;
             AnimData.BoneTracks.SetNum(Header.nBones);
 

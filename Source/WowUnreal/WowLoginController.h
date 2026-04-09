@@ -70,6 +70,10 @@ private:
 
     /** Finalize world entry: teleport pawn, hide loading screen, enable input */
     void FinalizeWorldEntry();
+    bool TrySnapPawnToGround(APawn* Pawn, bool bLogFailure);
+    void SuspendPawnUntilGroundReady(APawn* Pawn);
+    void RestorePawnGameplayMovement(APawn* Pawn);
+    void TryFinalizeGroundSnap();
 
     void ShowLoginScreen();
     void ShowRealmSelectScreen(const TArray<FWowRealmInfo>& Realms);
@@ -98,6 +102,7 @@ private:
     FVector PendingSpawnPosition = FVector::ZeroVector;
     float PendingSpawnOrientation = 0.0f;
     bool bHasPendingSpawn = false;
+    bool bPendingGroundSnap = false;
 
     /** Character creation state */
     bool bCharCreateSent = false;

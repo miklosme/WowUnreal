@@ -64,6 +64,12 @@ public:
 	/** Run a click-style handler with a string button arg and a real Lua boolean for `down`. */
 	bool RunFrameClickScript(int64 Handle, const FString& ScriptName, const FString& Button, bool bMouseDown);
 
+	/** Read a frame's Lua attribute (__attr_<name>) as a string. Returns empty if not set. */
+	FString GetFrameAttribute(int64 Handle, const FString& AttrName) const;
+
+	/** Read a frame's __id field as an integer. Returns 0 if not set. */
+	int32 GetFrameID(int64 Handle) const;
+
 	/** Map a server opcode to a WoW event name */
 	static FString OpcodeToEvent(uint16 Opcode);
 

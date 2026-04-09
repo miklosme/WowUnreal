@@ -1509,8 +1509,7 @@ UWidget* FWowFrameManager::CreateWidgetForFrame(const FWowFrameDef& Def, int64 H
 			Button->SetStyle(TransparentStyle);
 			Button->SetBackgroundColor(FLinearColor::Transparent);
 			// HitTestInvisible — clicks are routed via our custom HitTestFrames(),
-			// not UMG's Slate hit-testing.  This prevents the transparent UButton
-			// from consuming mouse events before the PlayerController sees them.
+			// not UMG's Slate hit-testing.
 			AddFillChild(Button, -100, ESlateVisibility::HitTestInvisible);
 			ButtonWidgets.Add(Handle, Button);
 
@@ -2179,6 +2178,22 @@ void FWowFrameManager::SyncChildVisibility()
 		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: force-hid %d frames (FadingFrame pattern)"), ForceHiddenCount);
 	}
 
+	// Hide Flash textures on action buttons — these start visible but should be hidden
+	// until the FrameXML combat flash animation activates them
+	int32 FlashHiddenCount = 0;
+	for (auto& TexPair : NamedTextureWidgets)
+	{
+		if (TexPair.Key.Contains(TEXT("Flash")) && TexPair.Value.IsValid())
+		{
+			TexPair.Value->SetVisibility(ESlateVisibility::Collapsed);
+			FlashHiddenCount++;
+		}
+	}
+	if (FlashHiddenCount > 0)
+	{
+		UE_LOG(LogWowFrame, Log, TEXT("SyncChildVisibility: hid %d Flash textures"), FlashHiddenCount);
+	}
+
 	// Dump all visible frames with their positions for debugging
 	UE_LOG(LogWowFrame, Warning, TEXT("=== VISIBLE FRAMES (post-sync) ==="));
 	for (const auto& Pair : Frames)
@@ -2361,39 +2376,119 @@ void FWowFrameManager::DebugDumpLayout() const
 
 int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
 {
-	// Convert viewport pixels to WoW coordinates using the RAW viewport scale
-	// (not UIScale, which includes DPI adjustment for UMG positioning).
-	// GetMousePosition() returns logical viewport coords; dividing by
-	// RawViewportScale gives WoW coords that match our FrameRects.
-	float WowX = ScreenX / RawViewportScale;
-	float WowY = ScreenY / RawViewportScale;
+	// Convert screen position to absolute Slate coordinates for hit testing.
+	// GetMousePosition() returns viewport coordinates. We need to convert to the same
+	// coordinate space that Slate uses for widget geometry.
+	// Use the viewport's local-to-absolute transform if available.
+	const float DesignX = ScreenX / RawViewportScale * UIScale;
+	const float DesignY = ScreenY / RawViewportScale * UIScale;
 
-	// Find the topmost interactive frame under the cursor.
-	// Walk all frames and pick the one with highest z-order that contains the point.
+	// Also keep raw screen coords for fallback WoW-coord based testing
+	const float WowX = ScreenX / RawViewportScale;
+	const float WowY = ScreenY / RawViewportScale;
+
 	int64 BestHandle = -1;
 	int32 BestZOrder = -999999;
 
 	for (const auto& Pair : Frames)
 	{
 		const FFrameEntry& Entry = Pair.Value;
+
+		// Debug: check why ActionButton1 might be skipped
+		if (Entry.Def.Name == TEXT("ActionButton1"))
+		{
+			static bool bLoggedSkip = false;
+			if (!bLoggedSkip)
+			{
+				bLoggedSkip = true;
+				UE_LOG(LogWowFrame, Warning,
+					TEXT("HitTest AB1 check: widget=%d vis=%d mouseEnabled=%d slot=%d"),
+					Entry.Widget.IsValid() ? 1 : 0,
+					Entry.Widget.IsValid() ? (int)Entry.Widget->GetVisibility() : -1,
+					Entry.bMouseEnabled ? 1 : 0,
+					Entry.Widget.IsValid() ? (Cast<UCanvasPanelSlot>(Entry.Widget->Slot) != nullptr ? 1 : 0) : -1);
+			}
+		}
+
 		if (!Entry.Widget.IsValid()) continue;
 		if (Entry.Widget->GetVisibility() == ESlateVisibility::Collapsed) continue;
+		if (!Entry.bMouseEnabled) continue;
 
-		if (!Entry.bMouseEnabled)
+		// Calculate absolute UMG design-pixel position by walking up the parent slot chain
+		float AbsX = 0, AbsY = 0, W = 0, H = 0;
+
+		// Walk the UMG widget → slot → parent chain to get absolute position
+		UWidget* Current = Entry.Widget.Get();
+		float AccumX = 0, AccumY = 0;
+		bool bValidChain = false;
+
+		// Get this widget's own slot size
+		UCanvasPanelSlot* MySlot = Cast<UCanvasPanelSlot>(Current->Slot);
+		if (!MySlot) continue;
+		FVector2D MySize = MySlot->GetSize();
+		if (MySize.X <= 0 || MySize.Y <= 0) continue;
+
+		W = MySize.X;
+		H = MySize.Y;
+
+		// Accumulate positions up the parent chain
+		UWidget* Walker = Current;
+		int32 Depth = 0;
+		while (Walker && Depth < 20)
 		{
+			UCanvasPanelSlot* WSlot = Cast<UCanvasPanelSlot>(Walker->Slot);
+			if (WSlot)
+			{
+				FVector2D WPos = WSlot->GetPosition();
+				AccumX += WPos.X;
+				AccumY += WPos.Y;
+			}
+
+			// Walk to parent: the slot's owning panel → its slot → etc.
+			UWidget* ParentWidget = Walker->GetParent();
+			if (!ParentWidget) break;
+
+			// If the parent is the root canvas, stop
+			if (ParentWidget == RootCanvas.Get())
+			{
+				bValidChain = true;
+				break;
+			}
+			Walker = ParentWidget;
+			Depth++;
+		}
+
+		if (!bValidChain)
+		{
+			// Debug: log why the chain failed for action buttons
+			if (Entry.Def.Name.StartsWith(TEXT("ActionButton1")) && Entry.Def.Name.Len() <= 14)
+			{
+				UE_LOG(LogWowFrame, Warning, TEXT("HitTest: %s parent chain FAILED at depth %d, walker=%s"),
+					*Entry.Def.Name, Depth, Walker ? *Walker->GetName() : TEXT("null"));
+			}
 			continue;
 		}
 
-		// Look up cached frame rect (absolute WoW coords)
-		const FFrameRect* Rect = FrameRects.Find(Entry.Def.Name);
-		if (!Rect) continue;
-		if (Rect->W <= 0.f || Rect->H <= 0.f) continue;
+		AbsX = AccumX;
+		AbsY = AccumY;
 
-		// Point-in-rect test
-		if (WowX >= Rect->X && WowX <= Rect->X + Rect->W &&
-			WowY >= Rect->Y && WowY <= Rect->Y + Rect->H)
+		// One-time log for ActionButton1 to debug coordinates
+		if (Entry.Def.Name == TEXT("ActionButton1"))
 		{
-			// Z-order = strata * 1000 + frame level
+			static bool bLoggedAB1 = false;
+			if (!bLoggedAB1)
+			{
+				bLoggedAB1 = true;
+				UE_LOG(LogWowFrame, Warning,
+					TEXT("HitTest AB1 computed: absDesign=(%.0f,%.0f) sz=(%.0f,%.0f) depth=%d valid=%d UIScale=%.3f RawScale=%.3f"),
+					AbsX, AbsY, W, H, Depth, bValidChain, UIScale, RawViewportScale);
+			}
+		}
+
+		// Point-in-rect test in UMG design pixel space
+		if (DesignX >= AbsX && DesignX <= AbsX + W &&
+			DesignY >= AbsY && DesignY <= AbsY + H)
+		{
 			int32 ZOrder = static_cast<int32>(Entry.Def.Strata) * 1000 + Entry.Def.FrameLevel;
 			if (ZOrder > BestZOrder)
 			{
@@ -2403,23 +2498,47 @@ int64 FWowFrameManager::HitTestFrames(float ScreenX, float ScreenY) const
 		}
 	}
 
+	// Fallback: if design-pixel walk missed, try cached FrameRects in WoW coordinates.
+	// This handles frames whose parent chain walk fails but have valid cached rects.
+	if (BestHandle < 0)
+	{
+		for (const auto& Pair : Frames)
+		{
+			const FFrameEntry& Entry = Pair.Value;
+			if (!Entry.Widget.IsValid()) continue;
+			if (Entry.Widget->GetVisibility() == ESlateVisibility::Collapsed) continue;
+			if (!Entry.bMouseEnabled) continue;
+
+			const FFrameRect* Rect = FrameRects.Find(Entry.Def.Name);
+			if (!Rect || Rect->W <= 0 || Rect->H <= 0) continue;
+
+			if (WowX >= Rect->X && WowX <= Rect->X + Rect->W &&
+				WowY >= Rect->Y && WowY <= Rect->Y + Rect->H)
+			{
+				int32 ZOrder = static_cast<int32>(Entry.Def.Strata) * 1000 + Entry.Def.FrameLevel;
+				if (ZOrder > BestZOrder)
+				{
+					BestZOrder = ZOrder;
+					BestHandle = Pair.Key;
+				}
+			}
+		}
+	}
+
 	if (BestHandle >= 0)
 	{
 		const FFrameEntry* HitEntry = Frames.Find(BestHandle);
-		UE_LOG(LogWowFrame, Log, TEXT("HitTest: screen=(%.0f,%.0f) wow=(%.1f,%.1f) -> %s [%lld] z=%d"),
-			ScreenX, ScreenY, WowX, WowY,
+		UE_LOG(LogWowFrame, Log, TEXT("HitTest: screen=(%.0f,%.0f) design=(%.1f,%.1f) wow=(%.1f,%.1f) -> %s [%lld] z=%d"),
+			ScreenX, ScreenY, DesignX, DesignY, WowX, WowY,
 			HitEntry ? *HitEntry->Def.Name : TEXT("?"), BestHandle, BestZOrder);
 	}
 	else
 	{
-		// Log miss for debugging click issues
+		// Log miss with design coordinates for debugging
 		if (true)
 		{
-			// Check if ActionButton1 rect exists and log it
-			const FFrameRect* AB1 = FrameRects.Find(TEXT("ActionButton1"));
-			UE_LOG(LogWowFrame, Warning, TEXT("HitTest MISS: screen=(%.0f,%.0f) wow=(%.1f,%.1f) AB1rect=%s"),
-				ScreenX, ScreenY, WowX, WowY,
-				AB1 ? *FString::Printf(TEXT("(%.0f,%.0f,%.0f,%.0f)"), AB1->X, AB1->Y, AB1->W, AB1->H) : TEXT("NOT CACHED"));
+			UE_LOG(LogWowFrame, Warning, TEXT("HitTest MISS: screen=(%.0f,%.0f) design=(%.1f,%.1f)"),
+				ScreenX, ScreenY, DesignX, DesignY);
 		}
 	}
 

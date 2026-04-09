@@ -2,6 +2,7 @@
 #include "WowConnectionManager.h"
 #include "WowPacketHandler.h"
 #include "WowEntity.h"
+#include "WowUpdateFields.h"
 #include "WowOpcodes.h"
 #include "WowPlayerCharacter.h"
 #include "WowUIManager.h"
@@ -891,6 +892,69 @@ void AWowGameplayController::Tick(float DeltaTime)
 
 		// Update cooldown overlay animations
 		UIManager->GetFrameManager()->TickCooldowns();
+
+		// Delayed re-fire of health/mana events — entity data may arrive after UI initializes.
+		// Fire once, 5 seconds after first entity data arrives.
+		if (!bDelayedHealthUpdateFired && ConnectionManager &&
+			ConnectionManager->PacketHandler.EntityManager.Num() > 0)
+		{
+			static float DelayAccumulator = 0.0f;
+			DelayAccumulator += DeltaTime;
+			if (DelayAccumulator > 5.0f)
+			{
+				bDelayedHealthUpdateFired = true;
+				UE_LOG(LogWowGameplay, Log, TEXT("Firing delayed health/mana re-init (entities=%d)"),
+					ConnectionManager->PacketHandler.EntityManager.Num());
+				FireUIEvent(TEXT("UNIT_HEALTH"), {TEXT("player")});
+				FireUIEvent(TEXT("UNIT_MAXHEALTH"), {TEXT("player")});
+				FireUIEvent(TEXT("UNIT_MANA"), {TEXT("player")});
+				FireUIEvent(TEXT("UNIT_MAXMANA"), {TEXT("player")});
+				FireUIEvent(TEXT("UNIT_POWER"), {TEXT("player")});
+				FireUIEvent(TEXT("UNIT_LEVEL"), {TEXT("player")});
+				FireUIEvent(TEXT("PLAYER_FLAGS_CHANGED"));
+
+				// Direct C++ health bar update — bypass FrameXML Lua in case it doesn't call SetValue
+				if (UIManager && UIManager->GetFrameManager())
+				{
+					FWowEntity* PlayerEntity = ConnectionManager->PacketHandler.EntityManager.Find(
+						ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid);
+					if (PlayerEntity)
+					{
+						int32 HP = PlayerEntity->GetHealth();
+						int32 MaxHP = PlayerEntity->GetMaxHealth();
+						auto* FM = UIManager->GetFrameManager();
+
+						// Update PlayerFrameHealthBar directly
+						int64 HBHandle = FM->FindFrame(TEXT("PlayerFrameHealthBar"));
+						UProgressBar* HB = HBHandle >= 0 ? FM->GetStatusBarWidget(HBHandle) : nullptr;
+						if (HB && MaxHP > 0)
+						{
+							HB->SetPercent(static_cast<float>(HP) / static_cast<float>(MaxHP));
+							HB->SetFillColorAndOpacity(FLinearColor(0.0f, 1.0f, 0.0f)); // Green
+							UE_LOG(LogWowGameplay, Log, TEXT("Direct health bar update: %d/%d = %.1f%%"),
+								HP, MaxHP, 100.0f * HP / MaxHP);
+						}
+
+						// Update PlayerFrameManaBar directly
+						if (PlayerEntity->IsUnit())
+						{
+							const FWowUnitEntity* UnitEnt = static_cast<const FWowUnitEntity*>(PlayerEntity);
+							int32 Power = UnitEnt->GetPower(0);
+							int32 MaxPower = UnitEnt->GetMaxPower(0);
+							int64 MBHandle = FM->FindFrame(TEXT("PlayerFrameManaBar"));
+							UProgressBar* MB = MBHandle >= 0 ? FM->GetStatusBarWidget(MBHandle) : nullptr;
+							if (MB && MaxPower > 0)
+							{
+								MB->SetPercent(static_cast<float>(Power) / static_cast<float>(MaxPower));
+								MB->SetFillColorAndOpacity(FLinearColor(0.0f, 0.0f, 1.0f)); // Blue
+								UE_LOG(LogWowGameplay, Log, TEXT("Direct mana bar update: %d/%d = %.1f%%"),
+									Power, MaxPower, 100.0f * Power / MaxPower);
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Update tooltip manager
@@ -2373,7 +2437,9 @@ void AWowGameplayController::SetupLocalPlayerCharacterModel(const FWowEntity& En
 
 void AWowGameplayController::UpdatePlayerAnimations()
 {
-	// Update local player animation based on character movement
+	if (!ConnectionManager) return;
+
+	// Update local player animation based on character movement and stand state
 	if (AWowPlayerCharacter* PlayerChar = Cast<AWowPlayerCharacter>(GetPawn()))
 	{
 		// If the player has an animation controller, update it
@@ -2383,6 +2449,14 @@ void AWowGameplayController::UpdatePlayerAnimations()
 			// The casting animation will be explicitly set/unset in spell handlers
 			if (!bIsCasting)
 			{
+				// Get local player entity data to check stand state
+				const uint64 LocalGuid = ConnectionManager->PacketHandler.EntityManager.LocalPlayerGuid;
+				const FWowEntity* LocalEntity = ConnectionManager->PacketHandler.EntityManager.Find(LocalGuid);
+
+				// For now, let's skip stand state checking for the local player
+				// since the core issue seems to be that AnimationID 0 is not the correct Stand animation
+				// in the character's M2 file. We'll handle this differently.
+
 				AnimController->UpdateLocalPlayerState(PlayerChar);
 			}
 		}

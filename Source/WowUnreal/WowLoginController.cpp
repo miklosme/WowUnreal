@@ -454,6 +454,10 @@ void AWowLoginController::Tick(float DeltaTime)
     {
         UpdateLoadingProgress();
     }
+    else if (bPendingGroundSnap)
+    {
+        TryFinalizeGroundSnap();
+    }
 }
 
 // ShowLoadingScreen() removed — use ShowLoadingScreen(uint32 MapId) instead
@@ -504,6 +508,7 @@ void AWowLoginController::FinalizeWorldEntry()
 {
     bWaitingForInitialLoad = false;
     bHasPendingSpawn = false;
+    bPendingGroundSnap = false;
 
     // Remove loading screen
     if (LoadingWidget.IsValid() && GEngine && GEngine->GameViewport)
@@ -523,45 +528,20 @@ void AWowLoginController::FinalizeWorldEntry()
 
         if (APawn* Pawn = GPC->GetPawn())
         {
-            // Snap to ground: trace downward from high above to find terrain surface
-            FVector PawnPos = Pawn->GetActorLocation();
-            FVector TraceStart = FVector(PawnPos.X, PawnPos.Y, 500000.0f);  // From way above
-            FVector TraceEnd = FVector(PawnPos.X, PawnPos.Y, -500000.0f);   // To way below
-
-            FHitResult Hit;
-            FCollisionQueryParams QueryParams;
-            QueryParams.AddIgnoredActor(Pawn);
-            QueryParams.bTraceComplex = true; // Use complex collision (mesh geometry)
-
-            UWorld* World = GetWorld();
-            if (World && World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+            Pawn->SetActorHiddenInGame(false);
+            if (!TrySnapPawnToGround(Pawn, true))
             {
-                // Place pawn's capsule bottom on the ground surface
-                // ACharacter origin is at capsule center, so offset by half-height
-                float CapsuleHalfHeight = 88.0f;
-                if (ACharacter* Char = Cast<ACharacter>(Pawn))
-                {
-                    CapsuleHalfHeight = Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
-                }
-                FVector GroundPos = Hit.ImpactPoint + FVector(0, 0, CapsuleHalfHeight + 2.0f);
-                Pawn->SetActorLocation(GroundPos, false, nullptr, ETeleportType::TeleportPhysics);
-                UE_LOG(LogWowLogin, Log, TEXT("Snapped to ground: server Z=%.0f → ground Z=%.0f (hit actor: %s)"),
-                    PawnPos.Z, GroundPos.Z, *Hit.GetActor()->GetName());
+                const FVector PawnPos = Pawn->GetActorLocation();
+                const FVector FallbackPos(PawnPos.X, PawnPos.Y, FMath::Max(PawnPos.Z + 500.0f, 5000.0f));
+                Pawn->SetActorLocation(FallbackPos, false, nullptr, ETeleportType::TeleportPhysics);
+                SuspendPawnUntilGroundReady(Pawn);
+                bPendingGroundSnap = true;
+                UE_LOG(LogWowLogin, Warning, TEXT("Ground trace unavailable at (%.0f, %.0f) — holding pawn at fallback Z=%.0f until terrain collision is ready"),
+                    PawnPos.X, PawnPos.Y, FallbackPos.Z);
             }
             else
             {
-                // No ground found — place 500cm above the server Z as fallback
-                FVector FallbackPos = FVector(PawnPos.X, PawnPos.Y, FMath::Max(PawnPos.Z + 500.0f, 5000.0f));
-                Pawn->SetActorLocation(FallbackPos, false, nullptr, ETeleportType::TeleportPhysics);
-                UE_LOG(LogWowLogin, Warning, TEXT("No ground found at (%.0f, %.0f) — using fallback Z=%.0f"),
-                    PawnPos.X, PawnPos.Y, FallbackPos.Z);
-            }
-
-            Pawn->SetActorHiddenInGame(false);
-            Pawn->SetActorEnableCollision(true);
-            if (ACharacter* Char = Cast<ACharacter>(Pawn))
-            {
-                Char->GetCharacterMovement()->GravityScale = 1.0f;
+                RestorePawnGameplayMovement(Pawn);
             }
 
             UE_LOG(LogWowLogin, Log, TEXT("Player revealed at (%.0f, %.0f, %.0f)"),
@@ -582,6 +562,107 @@ void AWowLoginController::FinalizeWorldEntry()
     }
 
     UE_LOG(LogWowLogin, Log, TEXT("World entry complete — player is in the world"));
+}
+
+bool AWowLoginController::TrySnapPawnToGround(APawn* Pawn, bool bLogFailure)
+{
+    if (!Pawn)
+    {
+        return false;
+    }
+
+    const FVector PawnPos = Pawn->GetActorLocation();
+    const FVector TraceStart(PawnPos.X, PawnPos.Y, 500000.0f);
+    const FVector TraceEnd(PawnPos.X, PawnPos.Y, -500000.0f);
+
+    FHitResult Hit;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(Pawn);
+    QueryParams.bTraceComplex = true;
+
+    UWorld* World = GetWorld();
+    if (!World || !World->LineTraceSingleByChannel(Hit, TraceStart, TraceEnd, ECC_WorldStatic, QueryParams))
+    {
+        if (bLogFailure)
+        {
+            UE_LOG(LogWowLogin, Warning, TEXT("No ground found at (%.0f, %.0f)"), PawnPos.X, PawnPos.Y);
+        }
+        return false;
+    }
+
+    float CapsuleHalfHeight = 88.0f;
+    if (ACharacter* Char = Cast<ACharacter>(Pawn))
+    {
+        CapsuleHalfHeight = Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+    }
+
+    const FVector GroundPos = Hit.ImpactPoint + FVector(0, 0, CapsuleHalfHeight + 2.0f);
+    Pawn->SetActorLocation(GroundPos, false, nullptr, ETeleportType::TeleportPhysics);
+    UE_LOG(LogWowLogin, Log, TEXT("Snapped to ground: server Z=%.0f → ground Z=%.0f (hit actor: %s)"),
+        PawnPos.Z, GroundPos.Z, Hit.GetActor() ? *Hit.GetActor()->GetName() : TEXT("<none>"));
+    return true;
+}
+
+void AWowLoginController::SuspendPawnUntilGroundReady(APawn* Pawn)
+{
+    if (!Pawn)
+    {
+        return;
+    }
+
+    Pawn->SetActorEnableCollision(false);
+    if (ACharacter* Char = Cast<ACharacter>(Pawn))
+    {
+        if (UCharacterMovementComponent* Movement = Char->GetCharacterMovement())
+        {
+            Movement->GravityScale = 0.0f;
+            Movement->Velocity = FVector::ZeroVector;
+            Movement->SetMovementMode(MOVE_Flying);
+        }
+    }
+}
+
+void AWowLoginController::RestorePawnGameplayMovement(APawn* Pawn)
+{
+    if (!Pawn)
+    {
+        return;
+    }
+
+    Pawn->SetActorEnableCollision(true);
+    if (ACharacter* Char = Cast<ACharacter>(Pawn))
+    {
+        if (UCharacterMovementComponent* Movement = Char->GetCharacterMovement())
+        {
+            Movement->GravityScale = 1.0f;
+            Movement->Velocity = FVector::ZeroVector;
+            Movement->SetMovementMode(MOVE_Walking);
+        }
+    }
+}
+
+void AWowLoginController::TryFinalizeGroundSnap()
+{
+    if (!bPendingGroundSnap)
+    {
+        return;
+    }
+
+    if (WorldManager && WorldManager->GetLoadedTileCount() <= 0)
+    {
+        return;
+    }
+
+    AWowGameplayController* GPC = Cast<AWowGameplayController>(UGameplayStatics::GetPlayerController(this, 0));
+    APawn* Pawn = GPC ? GPC->GetPawn() : nullptr;
+    if (!Pawn || !TrySnapPawnToGround(Pawn, false))
+    {
+        return;
+    }
+
+    RestorePawnGameplayMovement(Pawn);
+    bPendingGroundSnap = false;
+    UE_LOG(LogWowLogin, Log, TEXT("Completed deferred ground snap after terrain collision became available"));
 }
 
 void AWowLoginController::HandleExpansionChanged(uint8 ExpansionIndex)

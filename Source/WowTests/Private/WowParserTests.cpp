@@ -705,6 +705,191 @@ bool FLuaInventoryPickupFlowsQueueEquipAndUnequipPackets::RunTest(const FString&
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaSplitContainerItemQueuesSplitPacket, "WowUnreal.UI.LuaSplitContainerItemQueuesSplitPacket",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaSplitContainerItemQueuesSplitPacket::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    FWowEntityManager& EM = Connection->PacketHandler.EntityManager;
+    constexpr uint64 PlayerGuid = 0x5555666677778888ULL;
+    constexpr uint64 StackItemGuid = 0x1111222233334444ULL;
+
+    FWowEntity& PlayerBase = EM.GetOrCreate(PlayerGuid);
+    PlayerBase.SetField(ObjectField::TYPE, WowTypeMask::UNIT | WowTypeMask::PLAYER);
+    EM.PromoteToTyped(PlayerGuid, PlayerBase.GetField(ObjectField::TYPE));
+    FWowPlayerEntity* Player = EM.FindPlayer(PlayerGuid);
+    TestNotNull(TEXT("Typed player entity created"), Player);
+    if (!Player)
+    {
+        return false;
+    }
+    EM.LocalPlayerGuid = PlayerGuid;
+
+    FWowEntity& StackItemBase = EM.GetOrCreate(StackItemGuid);
+    StackItemBase.SetField(ObjectField::TYPE, WowTypeMask::ITEM);
+    StackItemBase.SetField(ObjectField::ENTRY, 6948);
+    StackItemBase.SetField(ItemField::STACK_COUNT, 5);
+    EM.PromoteToTyped(StackItemGuid, StackItemBase.GetField(ObjectField::TYPE));
+    if (FWowItemEntity* StackItem = EM.FindItem(StackItemGuid))
+    {
+        StackItem->Entry = StackItem->GetField(ObjectField::ENTRY);
+    }
+
+    WowTestUtils::SetGuidField64(*Player, PlayerField::PACK_SLOT_START, StackItemGuid);
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    Context.EntityManager = &EM;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    const bool bExecuted = LuaVM.ExecuteString(
+        TEXT("SplitContainerItem(0, 1, 2)\n")
+        TEXT("CURSOR_AFTER_SPLIT = CursorHasItem()\n")
+        TEXT("PickupContainerItem(0, 2)\n"),
+        TEXT("LuaSplitContainerItemQueuesSplitPacket"));
+    TestTrue(TEXT("SplitContainerItem flow executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("SplitContainerItem queues a client packet when the split stack is placed"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("Split flow queues CMSG_SPLIT_ITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_SPLIT_ITEM));
+        TestEqual(TEXT("Split payload stores source bag, source slot, destination bag, destination slot, and count"), Payload.Num(), 8);
+        if (Payload.Num() == 8)
+        {
+            TestEqual(TEXT("Backpack source bag normalizes to 255"), Payload[0], static_cast<uint8>(255));
+            TestEqual(TEXT("Source slot is zero-based"), Payload[1], static_cast<uint8>(0));
+            TestEqual(TEXT("Backpack destination bag normalizes to 255"), Payload[2], static_cast<uint8>(255));
+            TestEqual(TEXT("Destination slot is zero-based"), Payload[3], static_cast<uint8>(1));
+
+            uint32 Count = 0;
+            FMemory::Memcpy(&Count, Payload.GetData() + 4, sizeof(Count));
+            TestEqual(TEXT("Split count is preserved"), Count, static_cast<uint32>(2));
+        }
+    }
+
+    bool bIsBoolean = false;
+    const bool bCursorAfterSplit = WowTestUtils::GetLuaBooleanGlobal(LuaVM.GetState(), "CURSOR_AFTER_SPLIT", bIsBoolean);
+    TestTrue(TEXT("SplitContainerItem places an item payload on the cursor"), bCursorAfterSplit && bIsBoolean);
+    TestFalse(TEXT("Placing the split stack clears the cursor payload"), Connection->HasCursorItemPayload());
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLuaDeleteCursorItemQueuesDestroyItem, "WowUnreal.UI.LuaDeleteCursorItemQueuesDestroyItem",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FLuaDeleteCursorItemQueuesDestroyItem::RunTest(const FString& Parameters)
+{
+    UWowConnectionManager* Connection = NewObject<UWowConnectionManager>();
+    TestNotNull(TEXT("Connection manager created"), Connection);
+    if (!Connection)
+    {
+        return false;
+    }
+
+    TSharedPtr<FWowWorldSocket> WorldSocket = WowTestUtils::AttachTestWorldSocket(*Connection, 0);
+    TestTrue(TEXT("Test world socket attached"), WorldSocket.IsValid());
+    if (!WorldSocket.IsValid())
+    {
+        return false;
+    }
+
+    FWowEntityManager& EM = Connection->PacketHandler.EntityManager;
+    constexpr uint64 PlayerGuid = 0x9999AAAABBBBCCCCULL;
+    constexpr uint64 BagItemGuid = 0xDDDDEEEEFFFF0001ULL;
+
+    FWowEntity& PlayerBase = EM.GetOrCreate(PlayerGuid);
+    PlayerBase.SetField(ObjectField::TYPE, WowTypeMask::UNIT | WowTypeMask::PLAYER);
+    EM.PromoteToTyped(PlayerGuid, PlayerBase.GetField(ObjectField::TYPE));
+    FWowPlayerEntity* Player = EM.FindPlayer(PlayerGuid);
+    TestNotNull(TEXT("Typed player entity created"), Player);
+    if (!Player)
+    {
+        return false;
+    }
+    EM.LocalPlayerGuid = PlayerGuid;
+
+    FWowEntity& BagItemBase = EM.GetOrCreate(BagItemGuid);
+    BagItemBase.SetField(ObjectField::TYPE, WowTypeMask::ITEM);
+    BagItemBase.SetField(ObjectField::ENTRY, 5976);
+    BagItemBase.SetField(ItemField::STACK_COUNT, 1);
+    EM.PromoteToTyped(BagItemGuid, BagItemBase.GetField(ObjectField::TYPE));
+    if (FWowItemEntity* BagItem = EM.FindItem(BagItemGuid))
+    {
+        BagItem->Entry = BagItem->GetField(ObjectField::ENTRY);
+    }
+
+    WowTestUtils::SetGuidField64(*Player, PlayerField::PACK_SLOT_START, BagItemGuid);
+
+    FWowLuaVM LuaVM;
+    TestTrue(TEXT("Lua VM initializes"), LuaVM.Initialize());
+    if (!LuaVM.IsInitialized())
+    {
+        return false;
+    }
+
+    FWowLuaContext Context;
+    Context.ConnectionManager = Connection;
+    Context.EntityManager = &EM;
+    WowTestUtils::SetLuaContext(LuaVM, Context);
+
+    const bool bExecuted = LuaVM.ExecuteString(
+        TEXT("PickupContainerItem(0, 1)\n")
+        TEXT("CURSOR_BEFORE_DELETE = CursorHasItem()\n")
+        TEXT("DeleteCursorItem()\n"),
+        TEXT("LuaDeleteCursorItemQueuesDestroyItem"));
+    TestTrue(TEXT("DeleteCursorItem flow executes successfully"), bExecuted);
+
+    uint32 Opcode = 0;
+    TArray<uint8> Payload;
+    const bool bDequeued = WowTestUtils::DequeueClientPacket(*WorldSocket, Opcode, Payload);
+    TestTrue(TEXT("DeleteCursorItem queues a client packet"), bDequeued);
+    if (bDequeued)
+    {
+        TestEqual(TEXT("Delete cursor flow queues CMSG_DESTROYITEM"), Opcode, static_cast<uint32>(WowOpcode::CMSG_DESTROYITEM));
+        TestEqual(TEXT("Destroy payload stores bag, slot, count, and flags"), Payload.Num(), 6);
+        if (Payload.Num() == 6)
+        {
+            TestEqual(TEXT("Backpack bag normalizes to 255"), Payload[0], static_cast<uint8>(255));
+            TestEqual(TEXT("Source slot is zero-based"), Payload[1], static_cast<uint8>(0));
+            TestEqual(TEXT("Full-item delete uses count 0"), Payload[2], static_cast<uint8>(0));
+        }
+    }
+
+    bool bIsBoolean = false;
+    const bool bCursorBeforeDelete = WowTestUtils::GetLuaBooleanGlobal(LuaVM.GetState(), "CURSOR_BEFORE_DELETE", bIsBoolean);
+    TestTrue(TEXT("PickupContainerItem places an item payload on the cursor before deletion"), bCursorBeforeDelete && bIsBoolean);
+    TestFalse(TEXT("DeleteCursorItem clears the cursor payload"), Connection->HasCursorItemPayload());
+
+    WowTestUtils::ClearLuaContext(LuaVM);
+    LuaVM.Shutdown();
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FActionInvocationRoutesAutoAttack, "WowUnreal.UI.ActionInvocationRoutesAutoAttack",
     EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FActionInvocationRoutesAutoAttack::RunTest(const FString& Parameters)

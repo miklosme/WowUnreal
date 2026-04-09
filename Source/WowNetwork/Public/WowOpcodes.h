@@ -116,6 +116,7 @@ namespace WowOpcode
     inline constexpr uint16 CMSG_AUTOSTORE_BAG_ITEM      = 0x010B;
     inline constexpr uint16 CMSG_SWAP_ITEM               = 0x010C;
     inline constexpr uint16 CMSG_SWAP_INV_ITEM           = 0x010D;
+    inline constexpr uint16 CMSG_SPLIT_ITEM              = 0x010E;
     inline constexpr uint16 CMSG_AUTOSTORE_LOOT_ITEM     = 0x0108;
     inline constexpr uint16 CMSG_DESTROYITEM             = 0x0111;
     inline constexpr uint16 SMSG_INVENTORY_CHANGE_FAILURE = 0x0112;

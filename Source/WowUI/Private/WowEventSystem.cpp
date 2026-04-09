@@ -770,6 +770,52 @@ bool FWowEventSystem::RunFrameClickScript(int64 Handle, const FString& ScriptNam
 #endif
 }
 
+FString FWowEventSystem::GetFrameAttribute(int64 Handle, const FString& AttrName) const
+{
+#if HAS_LUA
+	if (!LuaVM) return FString();
+	lua_State* L = LuaVM->GetState();
+	if (!L) return FString();
+
+	const int32* FrameRef = FrameObjectRefs.Find(Handle);
+	if (!FrameRef) return FString();
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
+	FString Key = FString::Printf(TEXT("__attr_%s"), *AttrName);
+	FTCHARToUTF8 UTF8Key(*Key);
+	lua_getfield(L, -1, UTF8Key.Get());
+	FString Result;
+	if (lua_isstring(L, -1))
+	{
+		Result = UTF8_TO_TCHAR(lua_tostring(L, -1));
+	}
+	lua_pop(L, 2); // pop value and table
+	return Result;
+#else
+	return FString();
+#endif
+}
+
+int32 FWowEventSystem::GetFrameID(int64 Handle) const
+{
+#if HAS_LUA
+	if (!LuaVM) return 0;
+	lua_State* L = LuaVM->GetState();
+	if (!L) return 0;
+
+	const int32* FrameRef = FrameObjectRefs.Find(Handle);
+	if (!FrameRef) return 0;
+
+	lua_rawgeti(L, LUA_REGISTRYINDEX, *FrameRef);
+	lua_getfield(L, -1, "__id");
+	int32 Result = lua_isnumber(L, -1) ? static_cast<int32>(lua_tonumber(L, -1)) : 0;
+	lua_pop(L, 2);
+	return Result;
+#else
+	return 0;
+#endif
+}
+
 // Helper: given "PlayerFrameHealthBar" and parent "PlayerFrame", return "healthBar"
 static FString GetChildFieldKey(const FString& ChildName, const FString& ParentName)
 {

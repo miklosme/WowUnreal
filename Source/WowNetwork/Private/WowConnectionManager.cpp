@@ -472,7 +472,7 @@ void UWowConnectionManager::PickupActionCursor(int32 SlotIndex)
     CursorPayload.SourceActionSlot = SlotIndex;
 }
 
-void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink)
+void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink, uint32 SplitCount)
 {
     CursorPayload.Type = ECursorPayloadType::Item;
     CursorPayload.PrimaryId = ItemId;
@@ -483,6 +483,7 @@ void UWowConnectionManager::PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlo
     CursorPayload.bFromInventorySlot = false;
     CursorPayload.ActionType = 0;
     CursorPayload.SourceActionSlot = -1;
+    CursorPayload.SplitCount = SplitCount;
 }
 
 void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink)
@@ -496,6 +497,7 @@ void UWowConnectionManager::PickupInventoryItemCursor(uint8 InventorySlot, int32
     CursorPayload.bFromInventorySlot = true;
     CursorPayload.ActionType = 0;
     CursorPayload.SourceActionSlot = -1;
+    CursorPayload.SplitCount = 0;
 }
 
 void UWowConnectionManager::ClearCursorPayload()
@@ -590,6 +592,72 @@ bool UWowConnectionManager::PlaceCursorIntoActionSlot(int32 SlotIndex)
     return true;
 }
 
+bool UWowConnectionManager::PlaceCursorIntoContainerSlot(uint8 DestinationBag, uint8 DestinationSlot)
+{
+    if (CursorPayload.Type != ECursorPayloadType::Item)
+    {
+        return false;
+    }
+
+    if (CursorPayload.SplitCount > 0 && !CursorPayload.bFromInventorySlot)
+    {
+        SendSplitItem(CursorPayload.SourceBag, CursorPayload.SourceSlot, DestinationBag, DestinationSlot, CursorPayload.SplitCount);
+        ClearCursorPayload();
+        return true;
+    }
+
+    const bool bStored = AutoStoreCursorItem(DestinationBag);
+    return bStored;
+}
+
+bool UWowConnectionManager::PlaceCursorIntoFirstFreeContainerSlot(uint8 DestinationBag)
+{
+    if (CursorPayload.Type != ECursorPayloadType::Item)
+    {
+        return false;
+    }
+
+    const FWowPlayerEntity* Player = PacketHandler.EntityManager.GetLocalPlayer();
+    if (!Player)
+    {
+        return false;
+    }
+
+    if (DestinationBag == 255)
+    {
+        for (uint8 SlotIndex = 0; SlotIndex < 16; ++SlotIndex)
+        {
+            if (Player->GetBackpackItemGuid(SlotIndex) == 0)
+            {
+                return PlaceCursorIntoContainerSlot(255, SlotIndex);
+            }
+        }
+        return false;
+    }
+
+    const uint64 BagGuid = Player->GetBagGuid(DestinationBag);
+    if (BagGuid == 0)
+    {
+        return false;
+    }
+
+    const FWowContainerEntity* Container = PacketHandler.EntityManager.FindContainer(BagGuid);
+    if (!Container)
+    {
+        return false;
+    }
+
+    for (int32 SlotIndex = 0; SlotIndex < Container->GetNumSlots(); ++SlotIndex)
+    {
+        if (Container->GetItemGuidAtSlot(SlotIndex) == 0)
+        {
+            return PlaceCursorIntoContainerSlot(DestinationBag, static_cast<uint8>(SlotIndex));
+        }
+    }
+
+    return false;
+}
+
 bool UWowConnectionManager::AutoEquipCursorItem()
 {
     if (CursorPayload.Type != ECursorPayloadType::Item || CursorPayload.bFromInventorySlot)
@@ -617,6 +685,24 @@ bool UWowConnectionManager::AutoStoreCursorItem(uint8 DestinationBag)
     }
 
     SendAutoStoreBagItem(CursorPayload.SourceBag, CursorPayload.SourceSlot, DestinationBag);
+    ClearCursorPayload();
+    return true;
+}
+
+bool UWowConnectionManager::DeleteCursorItem()
+{
+    if (CursorPayload.Type != ECursorPayloadType::Item)
+    {
+        return false;
+    }
+
+    const uint8 SourceBag = CursorPayload.bFromInventorySlot ? 255 : CursorPayload.SourceBag;
+    const uint8 SourceSlot = CursorPayload.bFromInventorySlot ? CursorPayload.SourceInventorySlot : CursorPayload.SourceSlot;
+    const uint8 Count = CursorPayload.SplitCount > 0
+        ? static_cast<uint8>(FMath::Min<uint32>(CursorPayload.SplitCount, 255u))
+        : static_cast<uint8>(0);
+
+    SendDestroyItem(SourceBag, SourceSlot, Count);
     ClearCursorPayload();
     return true;
 }
@@ -858,6 +944,46 @@ void UWowConnectionManager::SendAutoStoreBagItem(uint8 SourceBag, uint8 SourceSl
     WorldSocket->SendPacket(WowOpcode::CMSG_AUTOSTORE_BAG_ITEM, Data);
     UE_LOG(LogWowNet, Log, TEXT("Auto store item from bag=%u slot=%u into bag=%u"),
         SourceBag, SourceSlot, DestinationBag);
+}
+
+void UWowConnectionManager::SendSplitItem(uint8 SourceBag, uint8 SourceSlot, uint8 DestinationBag, uint8 DestinationSlot, uint32 Count)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame)
+    {
+        return;
+    }
+
+    TArray<uint8> Data;
+    Data.Reserve(8);
+    Data.Add(SourceBag);
+    Data.Add(SourceSlot);
+    Data.Add(DestinationBag);
+    Data.Add(DestinationSlot);
+    Data.Append(reinterpret_cast<const uint8*>(&Count), sizeof(Count));
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_SPLIT_ITEM, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Split item from bag=%u slot=%u into bag=%u slot=%u count=%u"),
+        SourceBag, SourceSlot, DestinationBag, DestinationSlot, Count);
+}
+
+void UWowConnectionManager::SendDestroyItem(uint8 Bag, uint8 Slot, uint8 Count)
+{
+    if (!WorldSocket.IsValid() || State != EWowSessionState::WorldInGame)
+    {
+        return;
+    }
+
+    TArray<uint8> Data;
+    Data.Reserve(6);
+    Data.Add(Bag);
+    Data.Add(Slot);
+    Data.Add(Count);
+    Data.Add(0);
+    Data.Add(0);
+    Data.Add(0);
+
+    WorldSocket->SendPacket(WowOpcode::CMSG_DESTROYITEM, Data);
+    UE_LOG(LogWowNet, Log, TEXT("Destroy item bag=%u slot=%u count=%u"), Bag, Slot, Count);
 }
 
 void UWowConnectionManager::SendInitiateTrade(int64 TargetGuidToTrade)

@@ -31,6 +31,7 @@ echo "Launching game..."
     "$PROJECT_DIR/WowUnreal.uproject" \
     -game -log -windowed -resx=1280 -resy=720 \
     "-wowdata=$WOW_DATA" \
+    -autologin \
     2>/dev/null &
 
 GAME_PID=$!

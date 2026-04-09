@@ -636,7 +636,9 @@ EVisibility SWowPartyFrame::GetMemberVisibility() const
 
 EVisibility SWowPartyFrame::GetRaidControlsVisibility() const
 {
-    return CurrentGroupInfo.IsRaidGroup() ? EVisibility::Visible : EVisibility::Collapsed;
+    // Raid controls (marks, ready check) are collapsed by default to keep the frame compact.
+    // FrameXML handles raid utility panel display.
+    return EVisibility::Collapsed;
 }
 
 EVisibility SWowPartyFrame::GetReadyCheckStartVisibility() const
@@ -697,9 +699,7 @@ FText SWowPartyFrame::GetFrameStatusText() const
 
     if (CurrentGroupInfo.IsRaidGroup())
     {
-        return FText::FromString(CanLocalPlayerControlRaid()
-            ? TEXT("Marks and ready check enabled")
-            : TEXT("Viewing raid state"));
+        return FText::GetEmpty(); // Don't show any status for raids
     }
 
     return FText::GetEmpty();

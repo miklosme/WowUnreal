@@ -181,8 +181,9 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
         if (UBodySetup* BodySetup = SM->GetBodySetup())
         {
             BodySetup->CollisionTraceFlag = CTF_UseComplexAsSimple;
-            // Skip CreatePhysicsMeshes — line traces work with complex-as-simple
-            // without cooked physics data, and cooking 6400 meshes freezes the game
+            // Runtime-built terrain needs cooked physics data for line traces and walking.
+            // Tiles load incrementally, so building per-tile physics here is acceptable.
+            BodySetup->CreatePhysicsMeshes();
         }
 
         // Create UStaticMeshComponent and set materials on the component
@@ -196,6 +197,7 @@ void AWowTerrainTile::BuildFromAdtData(const FAdtData& Data, int32 TX, int32 TY,
             MeshComp->SetMaterial(s, SectionMaterials[s]);
         }
         MeshComp->RegisterComponent();
+        MeshComp->RecreatePhysicsState();
         MeshComp->SetCastShadow(false);
         MeshComp->SetCollisionObjectType(ECC_WorldStatic);
 

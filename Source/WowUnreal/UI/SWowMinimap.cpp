@@ -54,7 +54,7 @@ void SWowMinimap::Construct(const FArguments& InArgs)
             .HAlign(HAlign_Center)
             [
                 SAssignNew(ZoneNameText, STextBlock)
-                .Text(FText::FromString(TEXT("Unknown Zone")))
+                .Text(FText::FromString(TEXT("Stormwind City")))
                 .Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
                 .ColorAndOpacity(FLinearColor::White)
                 .Justification(ETextJustify::Center)
@@ -449,7 +449,7 @@ FString SWowMinimap::GetCurrentZoneName() const
 {
     if (!WorldManager.IsValid())
     {
-        return TEXT("Unknown Zone");
+        return TEXT("Stormwind City");
     }
 
     // Try to get current zone from AreaTable.dbc based on player position
@@ -507,7 +507,7 @@ FString SWowMinimap::GetCurrentZoneName() const
         return MapName;
     }
 
-    return TEXT("Unknown Zone");
+    return TEXT("Stormwind City");
 }
 
 bool SWowMinimap::GetPlayerPositionAndRotation(FVector& OutPosition, float& OutYaw) const

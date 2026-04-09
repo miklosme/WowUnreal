@@ -70,7 +70,7 @@ public:
     /** Cursor payload helpers for spell/action pickup flows */
     void PickupSpellCursor(int32 SpellId, const FString& BookType = TEXT("spell"));
     void PickupActionCursor(int32 SlotIndex);
-    void PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink = TEXT(""));
+    void PickupBagItemCursor(uint8 SourceBag, uint8 SourceSlot, int32 ItemId, const FString& ItemLink = TEXT(""), uint32 SplitCount = 0);
     void PickupInventoryItemCursor(uint8 InventorySlot, int32 ItemId, const FString& ItemLink = TEXT(""));
     void ClearCursorPayload();
     bool HasCursorPayload() const;
@@ -78,8 +78,11 @@ public:
     bool HasCursorItemPayload() const;
     bool GetCursorInfo(FString& OutType, int32& OutId, FString& OutDetail) const;
     bool PlaceCursorIntoActionSlot(int32 SlotIndex);
+    bool PlaceCursorIntoContainerSlot(uint8 DestinationBag, uint8 DestinationSlot);
+    bool PlaceCursorIntoFirstFreeContainerSlot(uint8 DestinationBag);
     bool AutoEquipCursorItem();
     bool AutoStoreCursorItem(uint8 DestinationBag = 255);
+    bool DeleteCursorItem();
 
     /** Resolve the action assigned to a slot into a concrete gameplay invocation. */
     static FWowActionInvocation ResolveActionInvocation(uint32 PackedAction, int64 TargetGuid);
@@ -113,6 +116,12 @@ public:
 
     /** Auto-store an equipped or bag item into the requested destination bag. */
     void SendAutoStoreBagItem(uint8 SourceBag, uint8 SourceSlot, uint8 DestinationBag = 255);
+
+    /** Split an item stack into a specific destination slot. */
+    void SendSplitItem(uint8 SourceBag, uint8 SourceSlot, uint8 DestinationBag, uint8 DestinationSlot, uint32 Count);
+
+    /** Destroy an item or reduce a stack count. */
+    void SendDestroyItem(uint8 Bag, uint8 Slot, uint8 Count = 0);
 
     /** Start a player trade with the target player */
     UFUNCTION(BlueprintCallable) void SendInitiateTrade(int64 TargetGuid);
@@ -243,6 +252,7 @@ private:
         uint8 SourceSlot = 0;
         uint8 SourceInventorySlot = 0;
         bool bFromInventorySlot = false;
+        uint32 SplitCount = 0;
     };
 
     EWowSessionState State = EWowSessionState::Disconnected;

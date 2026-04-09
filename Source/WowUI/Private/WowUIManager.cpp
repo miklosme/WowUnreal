@@ -303,12 +303,17 @@ void UWowUIManager::LoadUI(FMpqManager* Mpq, FWowAssetCache* AssetCache)
 	EventSystem->FireEvent(TEXT("PLAYER_LOGIN"));
 	EventSystem->FireEvent(TEXT("PLAYER_ENTERING_WORLD"));
 
+	// Second visibility pass — catches addon frames (GMChatUI etc.) created after first SyncChildVisibility
+	if (FrameManager)
+	{
+		FrameManager->SyncChildVisibility();
+	}
+
 	bUILoaded = true;
 
 	UE_LOG(LogWowUIManager, Log, TEXT("WoW UI loaded successfully (%d frames total)"),
 		FrameManager ? FrameManager->GetFrameCount() : 0);
 
-	// Post-load: sync visibility (hide children of parents that got hidden by OnLoad)
 	if (FrameManager)
 	{
 		FrameManager->DebugDumpLayout();
