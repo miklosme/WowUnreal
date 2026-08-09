@@ -1,4 +1,6 @@
-#!/bin/bash
-# Quick launcher for WowWorld (full game with terrain + server connection)
-# Usage: ./Scripts/run_world.sh [build]
-exec "$(dirname "$0")/run_map.sh" WowWorld "$@"
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+exec "${SCRIPT_DIR}/run_game.sh" "$@"

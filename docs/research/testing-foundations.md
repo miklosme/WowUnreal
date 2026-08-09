@@ -10,7 +10,7 @@ This note records the testing facilities that exist in the current checkout and 
 - A useful working classification is 12 in-memory unit tests, 41 in-memory component tests, and 13 real-data integration tests. The boundary between “unit” and “component” is descriptive, not encoded in Unreal metadata.
 - The 13 data integration tests silently return success with a warning when their MPQ helper cannot find the original author's expected directories. The helper does not consume `-wowdata` or `WOW_DATA`, so an apparently green run can omit every real-data check.
 - [`PacketHandlerTest.cpp`](../../Source/WowTests/PacketHandlerTest.cpp) is an ad-hoc compiled probe, not one of the 66 tests: it is not registered with Unreal Automation, contains no assertions, and emits no structured result.
-- The repository also contains runtime scenes, timed screenshot hooks, shell launchers, and a server-backed `-testscene=network` smoke harness. These are valuable raw materials, but the checked-in scripts are macOS- and author-specific and most observations are logs or screenshots without a machine-enforced oracle.
+- The repository also contains runtime scenes, timed screenshot hooks, shell launchers, and a server-backed `-testscene=network` smoke harness. These are valuable raw materials. At the research baseline the launchers were macOS- and author-specific, and most observations remain logs or screenshots without a machine-enforced oracle.
 - There is currently no checked-in Linux command that runs the `WowUnreal.*` automation namespace unattended, exports a machine-readable report, and returns a trustworthy pass/fail status.
 
 Epic's [Unreal Engine 5.8 Automation Test Framework](https://dev.epicgames.com/documentation/unreal-engine/automation-test-framework-in-unreal-engine) distinguishes API-level unit tests, system-level feature tests, fast smoke tests, content-stress tests, and screenshot comparisons. It also cautions that this framework relies on engine systems and is not ideal for pure unit testing. Those terms should not be collapsed into the project's historical use of “test scene” or “smoke test.”
@@ -125,18 +125,25 @@ It should be classified as a useful **server-backed integration smoke harness**,
 
 ## Legacy macOS launch and verification scripts
 
-The original scripts encode useful knowledge about scenes and diagnostic logs, but they are not reproducible Linux automated tests.
+This section records the state found during the testing inventory. The macOS
+launchers have since been replaced by the Linux entry points documented in
+[Build and launch commands](../setup/launching.md). The new launchers remove the
+hardcoded paths, fixed sleeps, process killing, and informational log greps, but
+they intentionally do not claim to be automated tests.
 
-| Files | What they currently do | Why the result is not autonomous/reproducible |
+The original scripts encoded useful knowledge about scenes and diagnostic logs,
+but were not reproducible Linux automated tests.
+
+| Files | Baseline behavior | Why the result was not autonomous/reproducible |
 |---|---|---|
-| [`build.sh`](../../build.sh) | Builds the editor. | Hardcodes `/Users/clancey/Projects/WowUnreal`, `/Users/Shared/Epic Games/UE_5.7`, Mac target/platform, and destructive clean paths. |
-| [`run_game.sh`](../../run_game.sh), [`run_map.sh`](../../run_map.sh) | Launch the game or a named map. | Hardcoded author paths/Mac binaries; process killing and manual lifetime; the root map launcher does not supply the configured WoW-data path. |
-| [`run_terrain.sh`](../../run_terrain.sh), [`run_test.sh`](../../run_test.sh) | Sleep for a fixed interval, grep a macOS log, optionally request a screenshot, then leave the game running. | Fixed sleeps race asynchronous loading; stderr is discarded; grep output is informational and generally does not drive failure status; errors are filtered; screenshots have no visual oracle. |
-| [`Scripts/run_map.sh`](../../Scripts/run_map.sh), [`Scripts/run_model_viewer.sh`](../../Scripts/run_model_viewer.sh) | Launch a map, wait, show selected logs, and check screenshot existence. | Same author/Mac paths and fixed-delay/log-oracle problems; macOS `stat -f` and `~/Library/Logs` assumptions. |
-| [`Scripts/run_character_test.sh`](../../Scripts/run_character_test.sh), [`Scripts/run_mob_test.sh`](../../Scripts/run_mob_test.sh), [`Scripts/run_world.sh`](../../Scripts/run_world.sh) | Thin wrappers around `Scripts/run_map.sh`. | Inherit all limitations of that launcher. |
+| [`build.sh`](../../build.sh) | Built the editor. | Hardcoded `/Users/clancey/Projects/WowUnreal`, `/Users/Shared/Epic Games/UE_5.7`, Mac target/platform, and destructive clean paths. |
+| [`run_game.sh`](../../run_game.sh), [`run_map.sh`](../../run_map.sh) | Launched the game or a named map. | Hardcoded author paths/Mac binaries; process killing and manual lifetime; the root map launcher did not supply the configured WoW-data path. |
+| [`run_terrain.sh`](../../run_terrain.sh), [`run_test.sh`](../../run_test.sh) | Slept for a fixed interval, grepped a macOS log, optionally requested a screenshot, then left the game running. | Fixed sleeps raced asynchronous loading; stderr was discarded; grep output was informational and generally did not drive failure status; errors were filtered; screenshots had no visual oracle. |
+| [`Scripts/run_map.sh`](../../Scripts/run_map.sh), [`Scripts/run_model_viewer.sh`](../../Scripts/run_model_viewer.sh) | Launched a map, waited, showed selected logs, and checked screenshot existence. | Same author/Mac paths and fixed-delay/log-oracle problems; macOS `stat -f` and `~/Library/Logs` assumptions. |
+| [`Scripts/run_character_test.sh`](../../Scripts/run_character_test.sh), [`Scripts/run_mob_test.sh`](../../Scripts/run_mob_test.sh), [`Scripts/run_world.sh`](../../Scripts/run_world.sh) | Were thin wrappers around `Scripts/run_map.sh`. | Inherited all limitations of that launcher. |
 | [`test_implementation.sh`](../../test_implementation.sh) | Greps source for body-armor symbol names and prints a historical summary. | Prints checkmarks unconditionally, has no `set -e` or behavioral assertions, and can report a persuasive-looking success even when a grep fails. |
 
-No checked-in script invokes `Automation RunTests WowUnreal`, uses `-ReportExportPath`, or turns Unreal's structured results into a reliable shell exit status. Epic documents both command-line selection and JSON/HTML report export in [Run Automation Tests in Unreal Engine 5.8](https://dev.epicgames.com/documentation/unreal-engine/run-automation-tests-in-unreal-engine). That capability is available, but its exact use and process-result handling for this project remain design work.
+No checked-in script invokes `Automation RunTests WowUnreal`, uses `-ReportExportPath`, or turns Unreal's structured results into a reliable shell exit status. The portable runtime launcher returns the editor process status, but that alone is not an automation-test result. Epic documents both command-line selection and JSON/HTML report export in [Run Automation Tests in Unreal Engine 5.8](https://dev.epicgames.com/documentation/unreal-engine/run-automation-tests-in-unreal-engine). That capability is available, but its exact use and process-result handling for this project remain design work.
 
 The existing [development setup guide](../setup/development.md) already distinguishes build, Unreal automation, offline runtime, server entry, and visual screenshot evidence. The next design should preserve that separation while making the outcomes executable and machine-verifiable.
 

@@ -7,11 +7,12 @@ WowUnreal is a work-in-progress reimplementation of the World of Warcraft: Wrath
 This fork is being made reproducible on Linux before feature development continues.
 
 - The project metadata targets Unreal Engine 5.8, and the `WowUnrealEditor` Linux Development target builds successfully with the installed UE 5.8.1 baseline.
-- The existing shell scripts are legacy macOS scripts and still contain paths from the original author's machine.
+- The checked-in build and runtime launchers support Linux using `UE_ROOT`, `WOW_DATA`, and repository-relative paths.
 - StormLib, Lua 5.1.5, and pugixml sources are vendored. Generate the ignored `libstorm.a` and `liblua.a` outputs with the checked-in Linux dependency bootstrap before the first project build.
 - Windows is not currently a supported build target because the third-party build rules only select Unix static archives.
 
-Until those items are resolved, treat this as source under migration rather than a clean-clone runnable release.
+The Linux editor setup and AzerothCore-backed gameplay path have been validated,
+but the client itself remains incomplete.
 
 ## Required inputs
 
@@ -38,7 +39,7 @@ WowUnreal/
 │   ├── WowUI/           Lua, FrameXML, and UI widgets
 │   ├── WowUnreal/       Game shell and gameplay controllers
 │   └── WowWorld/        Terrain, world objects, sky, water, and audio
-├── Scripts/             Legacy launchers and editor utilities
+├── Scripts/             Linux build, launch, and dependency utilities
 ├── docs/                Setup, specifications, notes, and research
 └── WowUnreal.uproject
 ```

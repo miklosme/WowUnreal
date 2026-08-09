@@ -42,7 +42,14 @@ Scripts/bootstrap_linux_dependencies.sh --check
 
 ## Build the editor target
 
-After generating both static archives, build the verified Linux editor target with:
+After generating both static archives, build the verified Linux editor target with
+the repository launcher:
+
+```bash
+./build.sh
+```
+
+This validates the vendored archives and invokes the equivalent Unreal command:
 
 ```bash
 "${UE_ROOT}/Engine/Build/BatchFiles/Linux/Build.sh" \
@@ -51,7 +58,9 @@ After generating both static archives, build the verified Linux editor target wi
   -WaitMutex
 ```
 
-The root `build.sh` and `run_*.sh` files are legacy macOS automation. They are not the Linux setup path until replaced.
+Use `./build.sh clean` to ask UnrealBuildTool to clean this target before rebuilding.
+The script does not remove `Binaries/` or `Intermediate/` itself. Continue with the
+[launch guide](launching.md) after a successful build.
 
 ## Verification levels
 

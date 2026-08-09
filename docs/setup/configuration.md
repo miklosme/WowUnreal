@@ -6,7 +6,6 @@ These are cleanup targets in the current source, not setup instructions:
 
 | Area | Current assumption | Intended replacement |
 |---|---|---|
-| Root and `Scripts/` launchers | Creator-specific absolute macOS project, UE 5.7, and WoW data paths | One Linux launcher driven by `UE_ROOT`, the repository location, and `-wowdata="${WOW_DATA}"` |
 | [`AWowWorldManager`](../../Source/WowWorld/Private/WowWorldManager.cpp) | Falls back to the creator's WoW `Data/` directory | Require an explicit value or a documented project/user setting |
 | [`WowParserTests`](../../Source/WowTests/Private/WowParserTests.cpp) | Probes common home-directory locations and the creator's path | Read one optional test-data setting and skip data-dependent tests clearly when absent |
 | [`FMpqManager`](../../Source/WowData/Private/Mpq/MpqManager.cpp) and cinematic lookup | Archive and cinematic paths explicitly use `enUS` | Either keep `enUS` as an explicit supported constraint or add locale discovery/configuration |
@@ -21,6 +20,16 @@ The workstation's shell configuration defines `WOW_DATA` as the absolute path
 to the supported WoW `Data/` directory. Pass its value explicitly with
 `-wowdata="${WOW_DATA}"`. The shell performs this expansion; the application
 does not currently discover `WOW_DATA` directly.
+
+The checked-in Linux launcher performs this forwarding automatically:
+
+```bash
+./run_game.sh
+```
+
+It requires `WOW_DATA`, validates the core and `enUS` locale archives, and adds
+the expanded `-wowdata` argument. Direct Unreal invocations still need the
+argument shown above.
 
 `Config/DefaultEngine.ini` currently exposes `WowDataPath`, but `AWowWorldManager` does not consume that setting. When the command-line argument is absent, the source falls back to a creator-specific macOS path. Removing that fallback and defining a single configuration precedence order is pending cleanup work.
 

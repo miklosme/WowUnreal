@@ -10,6 +10,7 @@ This directory is the canonical home for WowUnreal documentation. `README.md`, `
 - [WoW 3.3.5a game data](setup/game-data.md)
 - [AzerothCore server options](setup/server.md)
 - [Runtime configuration](setup/configuration.md)
+- [Build and launch commands](setup/launching.md)
 
 ## Engineering reference
 
