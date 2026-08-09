@@ -16,6 +16,7 @@ This directory is the canonical home for WowUnreal documentation. `README.md`, `
 - [Client and subsystem specifications](specs/README.md)
 - [Implementation notes](implementation-notes/README.md)
 - [External dependencies and WoW development tools](research/external-dependencies-and-tools.md)
+- [Testing foundations](research/testing-foundations.md)
 
 ## Project process
 
