@@ -99,6 +99,8 @@ private:
 
     /** Loading state */
     bool bWaitingForInitialLoad = false;
+    bool bWorldMapConfigured = false;
+    bool bWorldSystemsInitialized = false;
     FVector PendingSpawnPosition = FVector::ZeroVector;
     float PendingSpawnOrientation = 0.0f;
     bool bHasPendingSpawn = false;

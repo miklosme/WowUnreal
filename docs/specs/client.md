@@ -16,7 +16,9 @@ The intended product is a playable World of Warcraft 3.3.5a (Wrath of the Lich K
 
 This client does **not** ship any Blizzard assets. It reads directly from an existing World of Warcraft 3.3.5a installation's MPQ data files at runtime. All textures, models, terrain, audio, UI XML/Lua, and database files (DBC) are loaded from the original game data.
 
-Supply the data path at runtime with `-wowdata="/absolute/path/to/Data"`. See [game-data setup](../setup/game-data.md).
+Supply the configured data path at runtime with `-wowdata="${WOW_DATA}"`. The
+shell expands the globally configured `WOW_DATA` value before starting the
+application. See [game-data setup](../setup/game-data.md).
 
 The MPQ archive chain loaded (in priority order):
 ```
@@ -25,7 +27,7 @@ expansion.MPQ → common-2.MPQ → common.MPQ → base MPQs
 + locale-specific: enUS/patch-enUS-3.MPQ → ... → enUS/locale-enUS.MPQ
 ```
 
-Users must supply their own copy of the WoW 3.3.5a client data. The current reliable configuration surface is the `-wowdata="<path>"` launch argument.
+Users must supply their own copy of the WoW 3.3.5a client data. The current reliable configuration surface is the `-wowdata="${WOW_DATA}"` launch argument; WowUnreal does not yet read the environment variable without that argument.
 
 ---
 

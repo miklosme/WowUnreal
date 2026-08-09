@@ -1,10 +1,10 @@
 #include "WowAudioManager.h"
 #include "Mpq/MpqManager.h"
 #include "Formats/Dbc/DbcStore.h"
+#include "Audio.h"
 #include "Components/AudioComponent.h"
-#include "Sound/SoundWave.h"
+#include "Sound/SoundWaveProcedural.h"
 #include "Kismet/GameplayStatics.h"
-#include "Memory/SharedBuffer.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowAudio, Log, All);
 
@@ -228,69 +228,51 @@ USoundWave* AWowAudioManager::LoadSoundFromMpq(const FString& FilePath)
 
     if (RawData.Num() == 0) return nullptr;
 
-    // Create USoundWave from raw audio data
-    USoundWave* SoundWave = NewObject<USoundWave>();
-    SoundWave->AddToRoot(); // Prevent GC
-
     // Detect format from file extension
     bool bIsWav = FilePath.EndsWith(TEXT(".wav"), ESearchCase::IgnoreCase);
 
-    if (bIsWav)
+    if (!bIsWav)
     {
-        // WAV: parse header for PCM data
-        if (RawData.Num() < 44) return nullptr;
-
-        // WAV header parsing
-        const uint8* D = RawData.GetData();
-        uint16 NumChannels = *reinterpret_cast<const uint16*>(D + 22);
-        uint32 SampleRate = *reinterpret_cast<const uint32*>(D + 24);
-        uint16 BitsPerSample = *reinterpret_cast<const uint16*>(D + 34);
-
-        // Find 'data' chunk
-        int32 DataOffset = 12;
-        int32 DataSize = 0;
-        while (DataOffset + 8 < RawData.Num())
-        {
-            uint32 ChunkId = *reinterpret_cast<const uint32*>(D + DataOffset);
-            uint32 ChunkSize = *reinterpret_cast<const uint32*>(D + DataOffset + 4);
-            if (ChunkId == 0x61746164) // 'data'
-            {
-                DataOffset += 8;
-                DataSize = FMath::Min(static_cast<int32>(ChunkSize), RawData.Num() - DataOffset);
-                break;
-            }
-            DataOffset += 8 + ChunkSize;
-        }
-
-        if (DataSize == 0) return nullptr;
-
-        SoundWave->SetSampleRate(SampleRate);
-        SoundWave->NumChannels = NumChannels;
-        SoundWave->Duration = static_cast<float>(DataSize) / (SampleRate * NumChannels * (BitsPerSample / 8));
-
-        // Copy PCM data directly into sound wave's runtime buffer
-        SoundWave->RawPCMDataSize = DataSize;
-        SoundWave->RawPCMData = static_cast<uint8*>(FMemory::Malloc(DataSize));
-        FMemory::Memcpy(SoundWave->RawPCMData, D + DataOffset, DataSize);
+        // UE 5.8 cannot construct a playable compressed sound merely by
+        // attaching MP3 bytes to a transient USoundWave. Keep this disabled
+        // until the runtime importer supplies decoded PCM.
+        UE_LOG(LogWowAudio, Warning, TEXT("Unsupported runtime audio format: %s (MP3 decoding not implemented)"), *FilePath);
+        return nullptr;
     }
-    else
+
+    FWaveModInfo WaveInfo;
+    FString WaveError;
+    if (!WaveInfo.ReadWaveInfo(RawData.GetData(), RawData.Num(), &WaveError))
     {
-        // MP3: store raw compressed data for UE to decode
-        FSharedBuffer SharedBuf = FSharedBuffer::Clone(RawData.GetData(), RawData.Num());
-
-#if 0
-        // TODO: UE 5.7 removed USoundWave::RawData - need to find correct API for setting raw compressed audio data
-        // Original code: SoundWave->RawData.UpdatePayload(SharedBuf);
-        // Attempted: SoundWave->SetImportedSoundWaveData() - doesn't exist
-        UE_LOG(LogWowAudio, Warning, TEXT("MP3 loading disabled - UE 5.7 API change needed for compressed audio"));
-#endif
-
-        SoundWave->SetSampleRate(44100);
-        SoundWave->NumChannels = 2;
-        SoundWave->Duration = 60.0f; // Estimate — corrected on decode
-        SoundWave->SoundGroup = ESoundGroup::SOUNDGROUP_Music;
-        SoundWave->bProcedural = false;
+        UE_LOG(LogWowAudio, Warning, TEXT("Invalid WAV %s: %s"), *FilePath, *WaveError);
+        return nullptr;
     }
+
+    const uint16 FormatTag = WaveInfo.pFormatTag ? *WaveInfo.pFormatTag : 0;
+    const uint16 BitsPerSample = WaveInfo.pBitsPerSample ? *WaveInfo.pBitsPerSample : 0;
+    const uint16 NumChannels = WaveInfo.pChannels ? *WaveInfo.pChannels : 0;
+    const uint32 SampleRate = WaveInfo.pSamplesPerSec ? *WaveInfo.pSamplesPerSec : 0;
+    const uint32 AverageBytesPerSecond = WaveInfo.pAvgBytesPerSec ? *WaveInfo.pAvgBytesPerSec : 0;
+    if (FormatTag != FWaveModInfo::WAVE_INFO_FORMAT_PCM || BitsPerSample != 16 ||
+        NumChannels == 0 || SampleRate == 0 || AverageBytesPerSecond == 0 ||
+        !WaveInfo.SampleDataStart || WaveInfo.SampleDataSize == 0)
+    {
+        UE_LOG(LogWowAudio, Warning,
+            TEXT("Unsupported WAV %s (format=%u bits=%u channels=%u rate=%u)"),
+            *FilePath, FormatTag, BitsPerSample, NumChannels, SampleRate);
+        return nullptr;
+    }
+
+    // Transient PCM must use the procedural path. A regular USoundWave is an
+    // asset-backed object; UE 5.8 tries to build its streamed platform data on
+    // the audio thread and asserts in CacheInheritedLoadingBehavior().
+    USoundWaveProcedural* SoundWave = NewObject<USoundWaveProcedural>(this);
+    SoundWave->SetSampleRate(SampleRate);
+    SoundWave->NumChannels = NumChannels;
+    SoundWave->Duration = static_cast<float>(WaveInfo.SampleDataSize) /
+        static_cast<float>(AverageBytesPerSecond);
+    SoundWave->bCanProcessAsync = true;
+    SoundWave->QueueAudio(WaveInfo.SampleDataStart, static_cast<int32>(WaveInfo.SampleDataSize));
 
     SoundCache.Add(FilePath, SoundWave);
     UE_LOG(LogWowAudio, Log, TEXT("Loaded sound: %s (%d bytes)"), *FilePath, RawData.Num());

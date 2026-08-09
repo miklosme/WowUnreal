@@ -178,7 +178,14 @@ void AWowLoginController::OnStateChanged(EWowSessionState NewState)
         }
         ClearCurrentScreen();
         ShowLoadingScreen(0);
-        InitializeWorldSystems();
+        if (bWorldMapConfigured)
+        {
+            InitializeWorldSystems();
+        }
+        else
+        {
+            UE_LOG(LogWowLogin, Log, TEXT("Waiting for LOGIN_VERIFY_WORLD before initializing terrain"));
+        }
         break;
     default:
         break;
@@ -278,8 +285,12 @@ void AWowLoginController::OnCharCreateResult(uint8 ResultCode)
 
 void AWowLoginController::InitializeWorldSystems()
 {
+    if (bWorldSystemsInitialized) return;
+
     UWorld* World = GetWorld();
     if (!World) return;
+
+    bWorldSystemsInitialized = true;
 
     // 1. Enable terrain streaming on the WorldManager (loads WDT/WDL)
     if (WorldManager)
@@ -382,6 +393,9 @@ void AWowLoginController::HandleRealmSelected(int32 Index)
 void AWowLoginController::HandleCharacterSelected(int64 Guid)
 {
     SetStatusText(TEXT("Entering world..."));
+
+    bWorldMapConfigured = false;
+    bWorldSystemsInitialized = false;
 
     // Show loading screen (we don't know the map yet, so use 0)
     ShowLoadingScreen(0);
@@ -789,6 +803,10 @@ void AWowLoginController::ShowCharacterSelectScreen(const TArray<FWowCharacterIn
         {
             FActorSpawnParameters PreviewParams;
             PreviewParams.Name = FName(TEXT("WowCharacterPreview"));
+            // Destroy() is deferred until the end of the frame. Returning from
+            // character creation can therefore leave the previous preview name
+            // occupied briefly; let Unreal generate a unique replacement name.
+            PreviewParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
             CharacterPreview = World->SpawnActor<AWowCharacterPreview>(
                 AWowCharacterPreview::StaticClass(),
                 FVector::ZeroVector, FRotator::ZeroRotator, PreviewParams);
@@ -988,8 +1006,34 @@ void AWowLoginController::ShowLoadingScreen(uint32 MapId)
 
 void AWowLoginController::OnLoginVerifyWorld(uint32 MapId, float X, float Y, float Z, float Orientation)
 {
+    // Map.dbc internal names are the directory names used by WDT/ADT paths
+    // (for example, 1 -> Kalimdor). Multicast delegate invocation order is not
+    // guaranteed, so WorldInGame may have arrived before this callback.
+    if (WorldManager)
+    {
+        if (const FMapDbcEntry* MapEntry = FDbcStore::Get().Maps().GetById(MapId);
+            MapEntry && !MapEntry->InternalName.IsEmpty())
+        {
+            WorldManager->MapName = MapEntry->InternalName;
+            bWorldMapConfigured = true;
+            UE_LOG(LogWowLogin, Log, TEXT("Configured world map %u -> %s"), MapId, *WorldManager->MapName);
+        }
+        else
+        {
+            UE_LOG(LogWowLogin, Error, TEXT("Cannot configure terrain: Map.dbc has no internal name for map %u"), MapId);
+        }
+    }
+
+    // Whichever callback runs second is responsible for initialization. This
+    // guarantees the map name is configured before EnableTerrainStreaming().
+    if (bWorldMapConfigured && ConnectionManager &&
+        ConnectionManager->GetState() == EWowSessionState::WorldInGame)
+    {
+        InitializeWorldSystems();
+    }
+
     // Update loading screen background image if we have one (don't recreate the widget)
-    if (LoadingScreenWidget.IsValid() && WorldManager && WorldManager->GetMpqManager() && MapId > 0)
+    if (LoadingScreenWidget.IsValid() && WorldManager && WorldManager->GetMpqManager())
     {
         // Try to load map-specific loading screen image
         // (the widget is already showing from ShowLoadingScreen(0))
