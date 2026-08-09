@@ -8,7 +8,7 @@ This note answers one narrow setup question: what must exist outside this reposi
 
 The minimum client-side stack is:
 
-1. Unreal Engine **5.8.1**, the fork's selected migration target.
+1. Unreal Engine **5.8.1**, the fork's selected development baseline.
 2. The platform compiler/toolchain bundled with or supported by UE 5.8.1.
 3. CMake plus a C/C++ build tool to produce the two static archives that this repository expects but does not commit: `libstorm.a` and `liblua.a`.
 4. A user-supplied, complete **enUS World of Warcraft 3.3.5a build 12340 `Data/` tree**.
@@ -19,7 +19,7 @@ That is sufficient for offline maps, model viewers, and most data-driven tests. 
 
 | Dependency | Why it is required now | Installation boundary |
 |---|---|---|
-| Unreal Engine 5.8.1 | The fork selected UE 5.8.1 as its new baseline. [`WowUnreal.uproject`](../../WowUnreal.uproject) and the target files still identify 5.7 until the migration is implemented and verified. | Use Epic's precompiled Linux installed build or build the 5.8.1 engine source. See [Unreal Engine setup](../setup/unreal-engine.md). |
+| Unreal Engine 5.8.1 | The project association and target defaults identify UE 5.8; the installed 5.8.1 patch release is the tested baseline. The Linux Development editor target builds successfully with it. | Use Epic's precompiled Linux installed build or build the 5.8.1 engine source. See [Unreal Engine setup](../setup/unreal-engine.md). |
 | UE-supported compiler and SDK | This is a native C++ Unreal project. Epic's 5.8 requirements name Ubuntu 22.04/Rocky Linux 8 and clang 20.1.8 as the supported development baseline ([Epic Linux requirements](https://dev.epicgames.com/documentation/unreal-engine/linux-development-requirements-for-unreal-engine?lang=en-US)). | The precompiled UE 5.8.1 Linux archive bundles Epic's v26 clang 20.1.8 toolchain and .NET SDK. An IDE is optional. |
 | CMake and a native build tool | [`WowData.Build.cs`](../../Source/WowData/WowData.Build.cs) expects `Source/ThirdParty/StormLib/build/libstorm.a`. StormLib source is vendored, but the archive is absent. The vendored upstream build is CMake-based; upstream also documents CMake builds ([StormLib repository](https://github.com/ladislav-zezula/StormLib)). | Host installation, used once initially and whenever the vendored dependency or toolchain changes. No second StormLib clone is needed. |
 | C compiler, `make`, `ar`, and `ranlib` | [`WowUI.Build.cs`](../../Source/WowUI/WowUI.Build.cs) expects `Source/ThirdParty/lua/liblua.a`. Lua 5.1.5 source and its Makefile are vendored, but the archive is absent. Building only the `a` target avoids the readline/ncurses dependencies of the standalone Lua executable. | Host toolchain. No separate Lua repository is needed. |
@@ -81,7 +81,7 @@ Blender is useful only when investigating exported geometry/materials, most conv
 
 ## Reproducibility gaps to close in the setup plan
 
-1. Complete and verify the UE 5.8.1/Linux migration. Generate per-platform third-party library paths before advertising Windows support.
+1. Complete runtime editor/map validation under UE 5.8.1. Generate per-platform third-party library paths before advertising Windows support.
 2. Replace all creator-specific defaults with command-line/config/environment discovery. In particular, [`WowWorldManager.cpp`](../../Source/WowWorld/Private/WowWorldManager.cpp) still falls back to the original author's macOS data path.
 3. Add a non-secret sample connection configuration and keep real credentials under `Saved/`/Git ignore.
 4. Record a tested AzerothCore commit and the exact server route. Document account creation, realm address, ports, health checks, and teardown without baking test credentials into source.

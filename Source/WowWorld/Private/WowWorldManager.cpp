@@ -414,10 +414,15 @@ void AWowWorldManager::BeginPlay()
         return;
     }
 
+    const bool bFixedTerrainTestScene =
+        TestScene.Equals(TEXT("terrain"), ESearchCase::IgnoreCase) ||
+        TestScene.Equals(TEXT("wmo"), ESearchCase::IgnoreCase);
+
     // If streaming is disabled at startup (e.g. login scene), skip all terrain
-    // loading. The LoginController will enable streaming and call LoadInitialTerrain()
-    // when the player enters the world.
-    if (!bStreamingEnabled)
+    // loading. Terrain/WMO test scenes still load their fixed initial grid, then
+    // leave streaming disabled below. The LoginController enables streaming when
+    // the player enters the world from the real login scene.
+    if (!bStreamingEnabled && !bFixedTerrainTestScene)
     {
         UE_LOG(LogWowWorld, Log, TEXT("Terrain loading deferred (bStreamingEnabled=false, login scene)"));
         return;

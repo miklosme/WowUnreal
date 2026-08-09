@@ -2,7 +2,7 @@
 #include "WowOpcodes.h"
 #include "WowUpdateFields.h"
 #include "WowWardenHandler.h"
-#include "Compression.h"
+#include "Misc/Compression.h"
 #include "Formats/Dbc/DbcStore.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWowPacket, Log, All);

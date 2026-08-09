@@ -1,6 +1,6 @@
 # Unreal Engine 5.8.1 on Linux
 
-The fork's target development baseline is the precompiled Unreal Engine 5.8.1 Linux installed build. The project metadata still declares 5.7 until the engine migration is completed; avoid resaving project assets before that migration lands.
+The fork's target development baseline is the precompiled Unreal Engine 5.8.1 Linux installed build. Project and target metadata use the UE 5.8 build defaults and include order. Avoid bulk-resaving project assets until the first complete build and editor validation succeeds.
 
 ## Requirements
 

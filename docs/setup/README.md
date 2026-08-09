@@ -1,6 +1,6 @@
 # Setup
 
-WowUnreal is currently undergoing a Linux and Unreal Engine 5.8.1 migration. The repository is not yet a one-command clean-clone build.
+WowUnreal has a verified Unreal Engine 5.8.1 Linux editor build. Runtime data configuration and clean-clone automation are still being completed.
 
 Follow the setup documents in this order:
 

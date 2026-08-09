@@ -34,4 +34,4 @@ Specifications are not status reports. A checked box or implementation claim mus
 - Runtime scripting: Lua 5.1.5
 - Game data: user-supplied original MPQs, currently `enUS`
 - Target server: AzerothCore 3.3.5a
-- Fork engine target: Unreal Engine 5.8.1 after migration
+- Fork engine target: Unreal Engine 5.8.1

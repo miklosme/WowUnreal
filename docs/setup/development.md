@@ -40,9 +40,9 @@ The script requires `UE_ROOT`, discovers the matching x86_64 Linux toolchain, us
 Scripts/bootstrap_linux_dependencies.sh --check
 ```
 
-## Build command after the engine migration
+## Build the editor target
 
-Once the project metadata and source compile against UE 5.8.1 and both archives exist, the Linux editor target will be built with:
+After generating both static archives, build the verified Linux editor target with:
 
 ```bash
 "${UE_ROOT}/Engine/Build/BatchFiles/Linux/Build.sh" \

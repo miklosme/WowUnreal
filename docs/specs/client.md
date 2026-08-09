@@ -2,7 +2,7 @@
 
 ## Overview
 
-The intended product is a playable World of Warcraft 3.3.5a (Wrath of the Lich King) client that reads original MPQ data, connects to AzerothCore, and supports Lua/FrameXML addons. The fork is migrating the original UE 5.7 project to Unreal Engine 5.8.1.
+The intended product is a playable World of Warcraft 3.3.5a (Wrath of the Lich King) client that reads original MPQ data, connects to AzerothCore, and supports Lua/FrameXML addons. The fork targets Unreal Engine 5.8.1; the Linux editor target builds successfully, while runtime editor validation remains in progress.
 
 **Design Priorities:**
 1. **Visual Quality** — Leverage UE5's rendering (Lumen, Nanite where applicable, modern materials) to make the original WoW world look stunning

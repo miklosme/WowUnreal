@@ -1,6 +1,6 @@
 #include "WowFontManager.h"
 #include "Mpq/MpqManager.h"
-#include "HAL/PlatformFilemanager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Fonts/CompositeFont.h"
@@ -148,9 +148,10 @@ FSlateFontInfo FWowFontManager::GetDefaultFont(int32 Size) const
 	}
 
 	// Fallback to any available font
-	for (const auto& FontPair : AvailableFonts)
+	const auto FontIt = AvailableFonts.CreateConstIterator();
+	if (FontIt)
 	{
-		return CreateFontFromFile(FontPair.Value, Size);
+		return CreateFontFromFile(FontIt.Value(), Size);
 	}
 
 	// Last resort: engine default font

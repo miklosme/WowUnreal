@@ -61,3 +61,5 @@ crashlytics-build.properties
 .idea/
 .vscode/
 *.code-workspace
+
+process.log
