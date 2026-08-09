@@ -15,14 +15,18 @@ public class WowUI : ModuleRules
         }
 
         string LuaPath = Path.Combine(ModuleDirectory, "..", "ThirdParty", "lua");
-        if (Directory.Exists(LuaPath))
+        if (!Directory.Exists(LuaPath))
         {
-            PublicIncludePaths.Add(LuaPath);
-            string LuaLib = Path.Combine(LuaPath, "liblua.a");
-            if (File.Exists(LuaLib))
-            {
-                PublicAdditionalLibraries.Add(LuaLib);
-            }
+            throw new BuildException($"Vendored Lua source is missing: {LuaPath}");
         }
+
+        PublicIncludePaths.Add(LuaPath);
+        string LuaLib = Path.Combine(LuaPath, "liblua.a");
+        if (!File.Exists(LuaLib))
+        {
+            throw new BuildException("Lua is not built. Run Scripts/bootstrap_linux_dependencies.sh from the project root.");
+        }
+
+        PublicAdditionalLibraries.Add(LuaLib);
     }
 }

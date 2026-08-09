@@ -8,7 +8,7 @@ This fork is being made reproducible on Linux before feature development continu
 
 - The checked-in project still declares Unreal Engine 5.7; the fork is preparing a migration to the installed UE 5.8.1 baseline.
 - The existing shell scripts are legacy macOS scripts and still contain paths from the original author's machine.
-- StormLib, Lua 5.1.5, and pugixml sources are vendored. The required `libstorm.a` and `liblua.a` build outputs are not yet bootstrapped by the repository.
+- StormLib, Lua 5.1.5, and pugixml sources are vendored. Generate the ignored `libstorm.a` and `liblua.a` outputs with the checked-in Linux dependency bootstrap before the first project build.
 - Windows is not currently a supported build target because the third-party build rules only select Unix static archives.
 
 Until those items are resolved, treat this as source under migration rather than a clean-clone runnable release.

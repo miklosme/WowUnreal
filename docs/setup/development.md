@@ -6,7 +6,7 @@ The initial supported development path is Linux. Install the host tools used by 
 
 ```bash
 sudo apt update
-sudo apt install build-essential cmake ninja-build zlib1g-dev libbz2-dev vulkan-tools
+sudo apt install build-essential cmake ninja-build vulkan-tools
 ```
 
 Unreal Engine's installed build supplies its own clang and .NET toolchains. An IDE is optional; Git and GitHub CLI are required for this repository's issue workflow.
@@ -26,7 +26,19 @@ Source/ThirdParty/StormLib/build/libstorm.a
 Source/ThirdParty/lua/liblua.a
 ```
 
-They are intentionally ignored as build artifacts and are not present in a clean clone. The repository does not yet provide the bootstrap command that produces them with the Unreal toolchain. Until that is implemented and verified, the absence of either archive is a known setup blocker rather than an instruction to download an unrelated binary.
+They are intentionally ignored as build artifacts and are not present in a clean clone. Their absence means the local bootstrap must be run; do not download unrelated prebuilt archives.
+
+Build both archives with the compiler and libc++ shipped in the selected Unreal installation:
+
+```bash
+Scripts/bootstrap_linux_dependencies.sh
+```
+
+The script requires `UE_ROOT`, discovers the matching x86_64 Linux toolchain, uses position-independent code, and compiles StormLib's vendored zlib and bzip2 implementations into `libstorm.a`. It builds only the static Lua library, not the readline-dependent interpreter. It is safe to rerun after dependency or engine-toolchain changes. To validate existing outputs without rebuilding them:
+
+```bash
+Scripts/bootstrap_linux_dependencies.sh --check
+```
 
 ## Build command after the engine migration
 
