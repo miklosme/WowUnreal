@@ -1,5 +1,7 @@
 # WoW Event System Wiring Summary
 
+> Point-in-time implementation note from the original repository. Verify all paths and behavior against the current source.
+
 This document summarizes the WoW event system wiring that has been implemented to fire Lua events that FrameXML scripts depend on.
 
 ## Helper Method Added

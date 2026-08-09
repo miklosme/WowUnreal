@@ -65,8 +65,8 @@ Play zone-appropriate music, ambient sounds, and sound effects from MPQ data fil
 - [ ] Screenshot + log verify: "Playing music: Sound/Music/ZoneMusic/Forest/..." in log
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — fly around Elwynn Forest
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — fly around Elwynn Forest
 3. Listen for music and ambient sounds
 4. Fly to Westfall — music should change
 5. Check log for audio file load messages

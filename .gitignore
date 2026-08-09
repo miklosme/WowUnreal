@@ -61,4 +61,3 @@ crashlytics-build.properties
 .idea/
 .vscode/
 *.code-workspace
-.ralph.json

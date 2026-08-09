@@ -77,7 +77,7 @@ Implement packet handlers for world state synchronization and the entity system 
 - [ ] Screenshot shows game running after login (even if no entities rendered yet)
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — auto-login to test server
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — auto-login to test server
 3. Check log for packet handler messages
 4. Verify entity count in log matches expected NPCs/objects near spawn

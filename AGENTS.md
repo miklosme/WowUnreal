@@ -1,19 +1,22 @@
 # AGENTS.md
 
-This project is a work-in-progress reimplementation of the World of Warcraft (WotLK) client.
+WowUnreal is a work-in-progress reimplementation of the World of Warcraft 3.3.5a client. Read [docs/index.md](docs/index.md) before changing setup, architecture, protocol, or documentation behavior.
 
-THis is a fork of the original repo.
+## Work routing
 
-## Agent skills
+- Setup, build, game-data, or server work: read [docs/setup/README.md](docs/setup/README.md).
+- Client behavior or subsystem requirements: read [docs/specs/README.md](docs/specs/README.md) and the relevant specification.
+- External dependency or WoW-tool decisions: read [docs/research/external-dependencies-and-tools.md](docs/research/external-dependencies-and-tools.md).
+- Historical status claims: confirm current behavior in source and GitHub Issues.
 
-### Issue tracker
+## Project workflow
 
-Issues and specs are tracked in GitHub Issues using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues and live specifications are tracked in GitHub Issues with `gh`. See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 
-### Triage labels
+The repository uses the five canonical triage labels defined in [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
 
-The repo uses the five default canonical triage labels. See `docs/agents/triage-labels.md`.
+Domain documentation uses the single-context layout described in [docs/agents/domain.md](docs/agents/domain.md).
 
-### Domain docs
+## Data boundary
 
-This repo uses the single-context domain-doc layout. See `docs/agents/domain.md`.
+Blizzard assets and private credentials stay outside Git. Tests and launch commands receive the WoW data directory and server configuration from local runtime configuration.

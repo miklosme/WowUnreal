@@ -92,8 +92,8 @@ Transitions triggered by: input, terrain contact, water detection, mount
 - [ ] Screenshot shows character on terrain with chase camera perspective
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — login, enter world
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — login, enter world
 3. Use WASD to move, verify terrain following
 4. Jump with spacebar
 5. Right-drag to orbit camera

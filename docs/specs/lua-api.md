@@ -102,8 +102,8 @@ WowUI/Private/LuaApi/
 - [ ] Screenshot shows game running (Lua errors in log are OK at this stage, crashes are not)
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh`
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md)
 3. Check log for Lua initialization messages
 4. Add test: execute `print(strsplit(",", "a,b,c"))` from C++ on VM startup
 5. Attempt to load first few FrameXML files — log shows progress before errors

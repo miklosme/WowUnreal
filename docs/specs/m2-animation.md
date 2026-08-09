@@ -83,7 +83,7 @@ USkeletalMeshComponent + UAnimInstance → animated model in world
 - [ ] Static doodads (trees, rocks) still render as static mesh (no regression)
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — fly to area with NPCs/creatures (Northshire Abbey)
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — fly to area with NPCs/creatures (Northshire Abbey)
 3. Screenshot — creatures should be in idle pose, not T-pose or static
 4. Log should show "Created skeletal mesh for X with Y bones, Z animations"

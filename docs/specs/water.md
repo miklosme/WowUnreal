@@ -70,7 +70,7 @@ Render water, lava, and slime surfaces from MH2O ADT chunks with proper material
 - [ ] Screenshot shows water with reflections/transparency at a lake
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — fly to Crystal Lake (Elwynn Forest, ~tile 32,48)
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — fly to Crystal Lake (Elwynn Forest, ~tile 32,48)
 3. Screenshot — water surface visible with transparency and animation
 4. Fly to coast — ocean plane visible

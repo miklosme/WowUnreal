@@ -48,7 +48,7 @@ M2Parser → FM2Model → WowStaticMeshBuilder → UStaticMesh (cached)
 - [ ] No ProceduralMeshComponent usage remains for world rendering
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — fly to Elwynn Forest
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — fly to Elwynn Forest
 3. Screenshot — terrain + trees + buildings visible
 4. Check log for draw call count or use UE5 `stat SceneRendering`

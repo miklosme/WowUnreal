@@ -102,7 +102,7 @@ class FDbcStore {
 - [ ] Log output shows "Loaded X.dbc: N records" for each table
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — check log for DBC load messages
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — check log for DBC load messages
 3. Add debug logging that prints first 3 records from each DBC
 4. Verify map names, race names, light positions are sensible

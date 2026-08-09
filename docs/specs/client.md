@@ -2,7 +2,7 @@
 
 ## Overview
 
-A fully playable World of Warcraft 3.3.5a (Wrath of the Lich King) client built on Unreal Engine 5.7. Reads original MPQ data files, connects to AzerothCore servers, and provides a complete gameplay experience with addon support via Lua scripting.
+The intended product is a playable World of Warcraft 3.3.5a (Wrath of the Lich King) client that reads original MPQ data, connects to AzerothCore, and supports Lua/FrameXML addons. The fork is migrating the original UE 5.7 project to Unreal Engine 5.8.1.
 
 **Design Priorities:**
 1. **Visual Quality** — Leverage UE5's rendering (Lumen, Nanite where applicable, modern materials) to make the original WoW world look stunning
@@ -16,7 +16,7 @@ A fully playable World of Warcraft 3.3.5a (Wrath of the Lich King) client built 
 
 This client does **not** ship any Blizzard assets. It reads directly from an existing World of Warcraft 3.3.5a installation's MPQ data files at runtime. All textures, models, terrain, audio, UI XML/Lua, and database files (DBC) are loaded from the original game data.
 
-**Data Path:** `~/World of Warcraft 3.3.5a/Data`
+Supply the data path at runtime with `-wowdata="/absolute/path/to/Data"`. See [game-data setup](../setup/game-data.md).
 
 The MPQ archive chain loaded (in priority order):
 ```
@@ -25,7 +25,7 @@ expansion.MPQ → common-2.MPQ → common.MPQ → base MPQs
 + locale-specific: enUS/patch-enUS-3.MPQ → ... → enUS/locale-enUS.MPQ
 ```
 
-Users must supply their own copy of the WoW 3.3.5a client data. The path is configurable via launch argument (`-wowdata="<path>"`) or project settings.
+Users must supply their own copy of the WoW 3.3.5a client data. The current reliable configuration surface is the `-wowdata="<path>"` launch argument.
 
 ---
 
@@ -721,14 +721,14 @@ Based on the design priorities (looks good, high performance, fully playable):
 
 ## Reference Projects
 
-| Project | Best For | Location |
-|---------|----------|----------|
-| **noggit3** | ADT/terrain structs, Lua scripting, outdoor lighting | ~/projects/noggit3 |
-| **pywowlib** | Complete format definitions (most readable) | ~/projects/pywowlib |
-| **wowmodelviewer** | M2 animation pipeline, character rendering | ~/projects/wowmodelviewer |
-| **WMVx** | Modern model viewer reference | ~/projects/WMVx |
-| **azerothcore-wotlk** | Network protocol, opcodes, packet structures | ~/projects/azerothcore-wotlk |
-| **WowGodot** | Visual validation only (last resort) | ~/projects/WowGodot |
+| Project | Best For |
+|---------|----------|
+| [Noggit3](https://github.com/wowdev/noggit3) | ADT terrain, placement, and outdoor lighting |
+| [pywowlib](https://github.com/wowdev/pywowlib) | Readable independent format definitions |
+| [WMVx](https://github.com/Frostshake/WMVx) | WotLK M2 animation and character rendering |
+| [AzerothCore](https://github.com/azerothcore/azerothcore-wotlk) | Target-server protocol, opcodes, and packet behavior |
+
+See [external dependencies and tools](../research/external-dependencies-and-tools.md) for status and caveats.
 
 ---
 
@@ -738,7 +738,7 @@ Based on the design priorities (looks good, high performance, fully playable):
 - **Lua Version:** 5.1.5 (not 5.2+ — WoW 3.3.5 uses 5.1)
 - **Target FPS:** 60+ on mid-range GPU (RTX 3060 / RX 6700 XT class)
 - **Target Memory:** < 4GB RAM total, < 2GB for world data
-- **UE5 Version:** 5.7
-- **Platforms:** Windows (primary), macOS (secondary)
-- **Data Source:** Original WoW 3.3.5a MPQ files at `~/World of Warcraft 3.3.5a/Data` (not distributed with client — user must supply)
+- **UE5 Version:** 5.8.1 target after the fork migration
+- **Initial Platform:** Linux
+- **Data Source:** User-supplied original WoW 3.3.5a MPQ files; currently `enUS`
 - **Server:** AzerothCore 3.3.5a compatible

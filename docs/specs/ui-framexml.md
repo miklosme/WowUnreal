@@ -110,8 +110,8 @@ Each WoW frame type maps to a UMG widget tree:
 - [ ] Screenshot shows some UI elements rendered on screen
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh`
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md)
 3. Check log for XML parsing progress ("Loaded FrameXML/UIParent.xml", etc.)
 4. Check log for Lua errors (expected, but should not crash)
 5. Screenshot — any visible UI elements indicate success

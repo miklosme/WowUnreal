@@ -59,7 +59,7 @@ MAHO — 32 bytes hole bitmask per tile (optional)
 - [ ] Memory usage for LOD 2 terrain < 50MB per continent
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — fly high above Elwynn Forest
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — fly high above Elwynn Forest
 3. Screenshot — distant terrain visible, no holes/gaps at LOD boundaries
 4. Check log for tile load counts at each LOD level

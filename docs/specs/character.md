@@ -64,7 +64,7 @@ Render player characters and NPCs with race/gender models, customization (skin, 
 - [ ] NPC models render with their correct display info
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — connect to test server, enter world with a character
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — connect to test server, enter world with a character
 3. Screenshot — player character visible with gear, NPCs visible with models
 4. Or in viewer mode: manually load a character M2 with customization

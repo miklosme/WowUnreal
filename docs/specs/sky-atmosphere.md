@@ -73,7 +73,7 @@ Implement zone-based outdoor lighting with sky colors, fog, sun/moon, and day/ni
 - [ ] Zone transitions blend lighting smoothly
 
 ## Verification Steps
-1. `./run_test.sh build`
-2. `./run_test.sh` — fly in Elwynn Forest
+1. Build the editor target using [development setup](../setup/development.md)
+2. Launch the relevant map using [development setup](../setup/development.md) — fly in Elwynn Forest
 3. Add debug command to set time of day (e.g., 6:00 dawn, 12:00 noon, 21:00 dusk, 0:00 midnight)
 4. Screenshot at each time — verify sky gradient, sun position, fog color

@@ -1,5 +1,7 @@
 # WoW Body Armor Rendering System Implementation
 
+> Point-in-time implementation note from the original repository. Verify all paths and behavior against the current source.
+
 This document describes the implementation of the WoW 3.3.5 body armor rendering system in this UE5 project.
 
 ## Overview
