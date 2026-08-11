@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 PROJECT_FILE="${REPO_ROOT}/WowUnreal.uproject"
 
+# shellcheck source=Scripts/load_env.sh
+source "${SCRIPT_DIR}/load_env.sh"
+
 usage() {
     cat <<'EOF'
 Build the WowUnreal editor target on Linux.
@@ -15,6 +18,9 @@ Usage:
 
 Environment:
   UE_ROOT   Path to the Unreal Engine 5.8.1 Linux installed build.
+
+Variables are read from the repository-root .env file when not already set in
+the environment.
 
 The optional clean mode asks UnrealBuildTool to clean the editor target before
 building it. It does not delete repository directories directly.
@@ -42,7 +48,7 @@ esac
 
 [[ $# -le 1 ]] || fail "too many arguments"
 [[ "$(uname -s)" == Linux ]] || fail "the supported build path is Linux"
-[[ -n "${UE_ROOT:-}" ]] || fail "UE_ROOT is not set; see docs/setup/unreal-engine.md"
+[[ -n "${UE_ROOT:-}" ]] || fail "UE_ROOT is not set (define it in .env); see docs/setup/unreal-engine.md"
 
 UE_ROOT="$(realpath -e -- "${UE_ROOT}")" || fail "UE_ROOT does not exist: ${UE_ROOT}"
 BUILD_TOOL="${UE_ROOT}/Engine/Build/BatchFiles/Linux/Build.sh"

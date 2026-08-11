@@ -4,6 +4,10 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
+
+# shellcheck source=Scripts/load_env.sh
+source "${SCRIPT_DIR}/load_env.sh"
+
 STORM_SOURCE="${REPO_ROOT}/Source/ThirdParty/StormLib"
 STORM_BUILD="${STORM_SOURCE}/build"
 STORM_ARCHIVE="${STORM_BUILD}/libstorm.a"
@@ -21,6 +25,9 @@ Environment:
   UE_ROOT             Required path to an Unreal Engine Linux installed build.
   UE_TOOLCHAIN_ROOT   Optional explicit target toolchain directory.
   JOBS                Optional parallel build count.
+
+Variables are read from the repository-root .env file when not already set in
+the environment.
 
 The script discovers the x86_64 target toolchain inside UE_ROOT, builds StormLib
 and Lua from the vendored sources, and verifies the resulting archives. Generated
@@ -61,7 +68,7 @@ esac
 
 [[ "$(uname -s)" == Linux ]] || fail "this bootstrap currently supports Linux only"
 [[ "$(uname -m)" == x86_64 ]] || fail "this bootstrap currently supports x86_64 only"
-[[ -n "${UE_ROOT:-}" ]] || fail "UE_ROOT is not set; see docs/setup/unreal-engine.md"
+[[ -n "${UE_ROOT:-}" ]] || fail "UE_ROOT is not set (define it in .env); see docs/setup/unreal-engine.md"
 
 UE_ROOT="$(realpath -e -- "${UE_ROOT}")" || fail "UE_ROOT does not exist: ${UE_ROOT}"
 [[ -x "${UE_ROOT}/Engine/Build/BatchFiles/Linux/Build.sh" ]] || fail "UE_ROOT is not an Unreal Engine Linux installed build: ${UE_ROOT}"

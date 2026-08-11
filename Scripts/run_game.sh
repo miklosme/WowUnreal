@@ -5,6 +5,9 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd -P)"
 PROJECT_FILE="${REPO_ROOT}/WowUnreal.uproject"
+
+# shellcheck source=Scripts/load_env.sh
+source "${SCRIPT_DIR}/load_env.sh"
 MAP_NAME=WowWorld
 TEST_SCENE=
 WINDOW_WIDTH=1280
@@ -12,6 +15,7 @@ WINDOW_HEIGHT=720
 LOG_PATH="${REPO_ROOT}/Saved/Logs/WowUnreal.log"
 BUILD_FIRST=false
 DRY_RUN=false
+RUN_DOCTOR=true
 EXTRA_ARGS=()
 
 usage() {
@@ -33,12 +37,20 @@ Options:
                           Set window dimensions (default: 1280x720).
   --log PATH              Set the Unreal log path (default: Saved/Logs/WowUnreal.log).
   --list-maps             List checked-in map assets and exit.
+  --no-doctor             Skip the server health check (Scripts/doctor.sh).
+                          Useful for offline scenes that need no server.
   --dry-run               Validate configuration and print the command only.
   -h, --help              Show this help.
 
 Environment:
   UE_ROOT                 Path to the UE 5.8.1 Linux installed build.
   WOW_DATA                Path to a WoW 3.3.5a build-12340 Data directory.
+  WOW_SERVER_HOST         Server host checked by Scripts/doctor.sh.
+  WOW_AUTH_PORT           Auth port checked by Scripts/doctor.sh.
+  WOW_WORLD_PORT          World port checked by Scripts/doctor.sh.
+
+Variables are read from the repository-root .env file when not already set in
+the environment.
 
 Unknown arguments are passed through to Unreal. Use `--` when an argument could
 be mistaken for a launcher option.
@@ -137,6 +149,10 @@ while [[ $# -gt 0 ]]; do
                 -printf '%f\n' | sed 's/\.umap$//' | sort
             exit 0
             ;;
+        --no-doctor)
+            RUN_DOCTOR=false
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -158,8 +174,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$(uname -s)" == Linux ]] || fail "the supported launcher path is Linux"
-[[ -n "${UE_ROOT:-}" ]] || fail "UE_ROOT is not set; see docs/setup/unreal-engine.md"
-[[ -n "${WOW_DATA:-}" ]] || fail "WOW_DATA is not set; see docs/setup/game-data.md"
+[[ -n "${UE_ROOT:-}" ]] || fail "UE_ROOT is not set (define it in .env); see docs/setup/unreal-engine.md"
+[[ -n "${WOW_DATA:-}" ]] || fail "WOW_DATA is not set (define it in .env); see docs/setup/game-data.md"
 
 UE_ROOT="$(realpath -e -- "${UE_ROOT}")" || fail "UE_ROOT does not exist: ${UE_ROOT}"
 WOW_DATA="$(realpath -e -- "${WOW_DATA}")" || fail "WOW_DATA does not exist: ${WOW_DATA}"
@@ -187,6 +203,11 @@ if [[ -n "${TEST_SCENE}" ]]; then
         *) fail "unknown scene '${TEST_SCENE}'; expected login, character, terrain, wmo, ui, or network" ;;
     esac
     EXTRA_ARGS+=("-testscene=${TEST_SCENE}")
+fi
+
+if [[ "${RUN_DOCTOR}" == true && "${DRY_RUN}" == false ]]; then
+    "${SCRIPT_DIR}/doctor.sh" \
+        || fail "the server is not functioning; fix the issues above or pass --no-doctor to launch without a server"
 fi
 
 if [[ "${BUILD_FIRST}" == true ]]; then

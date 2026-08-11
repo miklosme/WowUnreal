@@ -63,3 +63,4 @@ crashlytics-build.properties
 *.code-workspace
 
 process.log
+.env
